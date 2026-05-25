@@ -1,0 +1,29 @@
+name: "tool-agent"
+description: "工具调用示例"
+
+runtime:
+  max_rounds: 30
+  parallel_tool_calls: true
+  workspace: "/tmp/axc-tool-agent"
+  allowed_capabilities:
+    - "python_exec"
+    - "http_request"
+    - "file_read"
+    - "file_write"
+    - "shell"
+
+system_prompt: |
+  你是一个能使用工具的助手。可以执行代码、读写文件、搜索网页。
+
+plugins:
+  builtin_tools:
+    enabled: true
+    load: ["python_exec", "get_time", "http_request", "file_read", "file_write", "shell", "result_read", "result_search", "result_page"]
+    defer: ["file_read", "file_write", "shell"]
+
+  safety:
+    enabled: true
+    prompt_injection: true
+
+  risk_guard:
+    enabled: true

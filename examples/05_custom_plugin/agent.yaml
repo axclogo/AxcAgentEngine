@@ -1,0 +1,21 @@
+name: "custom-plugin-demo"
+description: "自定义插件示例"
+
+runtime:
+  max_rounds: 20
+  workspace: "/tmp/axc-custom-plugin"
+  allowed_capabilities:
+    - "python_exec"
+
+system_prompt: |
+  你是一个助手。你可以使用 get_stats 工具查看执行统计。
+
+plugins:
+  builtin_tools:
+    enabled: true
+    load: ["python_exec", "get_time"]
+
+  # 外部自定义插件
+  stats:
+    enabled: true
+    greeting: "📊"

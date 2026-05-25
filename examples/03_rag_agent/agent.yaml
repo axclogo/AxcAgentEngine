@@ -1,0 +1,21 @@
+name: "rag-agent"
+description: "知识库问答示例"
+
+runtime:
+  max_rounds: 20
+  workspace: "."
+
+system_prompt: |
+  你是一个知识库问答助手。根据知识库中的内容回答用户问题。
+  如果知识库中没有相关信息，请如实告知。
+
+plugins:
+  knowledge:
+    enabled: true
+    sources: ["./docs/"]
+    chunk_size: 512
+    chunk_overlap: 50
+
+  builtin_tools:
+    enabled: true
+    load: ["get_time"]

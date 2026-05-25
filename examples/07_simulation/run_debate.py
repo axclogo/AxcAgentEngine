@@ -1,0 +1,38 @@
+"""示例：辩论模式 — 正反方交替辩论"""
+import asyncio
+import os
+
+from axc_agent_engine import Engine, LLMConfig
+from axc_agent_engine.sidecar.multi_agent import MultiAgentSession, SessionMode
+from axc_agent_engine.storage.memory import InMemoryMessageBus
+
+
+async def main():
+	engine = Engine(
+		default_llm=LLMConfig(
+			base_url=os.environ["AXC_LLM_BASE_URL"],
+			api_key=os.environ["AXC_LLM_API_KEY"],
+			model=os.environ.get("AXC_LLM_MODEL", "gpt-4o"),
+		),
+		message_bus=InMemoryMessageBus(),
+	)
+	base = os.path.dirname(__file__)
+	pro = engine.load_agent(os.path.join(base, "agent_pro.yaml"))
+	con = engine.load_agent(os.path.join(base, "agent_con.yaml"))
+	session = MultiAgentSession(
+		agents=[pro, con],
+		dispatcher=engine._dispatcher,
+		mode=SessionMode.DEBATE,
+		topic="AI 是否会在 10 年内取代大部分白领工作",
+		max_rounds=6,
+	)
+	async for event in session.stream():
+		if event.type == "message":
+			print(f"\n[{event.agent_name}] {event.content}")
+		elif event.type == "done":
+			print(f"\n--- 辩论结束：{event.content} ---")
+	await engine.close()
+
+
+if __name__ == "__main__":
+	asyncio.run(main())

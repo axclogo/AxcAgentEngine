@@ -1,0 +1,88 @@
+# AxcAgentEngine
+
+## What is this?
+
+AxcAgentEngine is a Python agent execution engine with Plan-Observe-Replan
+(POR), ReAct execution, tool calling, and a plugin architecture. It runs on top
+of OpenAI-compatible Chat Completions providers through a provider protocol.
+
+## Key Features
+
+- POR execution engine: plan, schedule by dependency, observe, and replan.
+- ReAct executor for direct iterative tool use.
+- Plugin architecture with YAML-driven loading and phase/priority ordering.
+- OpenAI-compatible HTTP client plus provider protocol.
+- OpenAI Chat Completions compatible HTTP API subset.
+- Parallel read-only tools and serial write/risky tools.
+- Tool outputs must return `ToolOutput`.
+- Provider-owned tool-name mapping for model-safe function names.
+- Context compression, memory, knowledge, MCP, hooks, tracing, safety, and HITL plugins.
+- Sidecar multi-agent orchestration, simulation, evaluation, and AgentOps helpers.
+
+## Open Source Files
+
+- License: `LICENSE` (Apache-2.0)
+- Security policy: `SECURITY.md`
+- Contributing guide: `CONTRIBUTING.md`
+- API docs: `docs/API.md`
+- Plugin docs: `docs/PLUGIN_DEVELOPMENT.md`
+- Security model: `docs/SECURITY_MODEL.md`
+- Release checklist: `docs/RELEASE_CHECKLIST.md`
+- Examples: `examples/README.md`
+
+## Install
+
+```bash
+pip install axc-agent-engine
+pip install "axc-agent-engine[api]"
+pip install "axc-agent-engine[knowledge]"
+pip install "axc-agent-engine[all]"
+```
+
+## Quick Start
+
+```python
+from axc_agent_engine import Engine, LLMConfig
+
+engine = Engine(
+    default_llm=LLMConfig(
+        base_url="https://api.openai.com/v1",
+        api_key="sk-xxx",
+        model="gpt-4o",
+    ),
+)
+
+agent = engine.load_agent("./agents/my_agent.yaml")
+result = await agent.chat("hello")
+```
+
+## API Compatibility
+
+The HTTP API is an OpenAI Chat Completions compatible subset:
+
+- `POST /v1/chat/completions`
+- `GET /v1/agents`
+- `GET /v1/capabilities`
+
+Request-level OpenAI `tools`, `tool_choice`, and `n > 1` are intentionally
+unsupported. Tools are loaded from Agent YAML and plugins so the engine can
+enforce capability policy, risk metadata, plugin hooks, workspace rules, and
+audit events. Clients should call `/v1/capabilities` before assuming API parity.
+
+## Architecture Notes
+
+- Engine core: `Executor`, `LLMCaller`, planning/POR, context, events, and recovery.
+- Extension boundary: plugins implement hooks and return `ToolDefinition` objects.
+- Tool boundary: every tool returns `ToolOutput`; large results can be externalized.
+- Provider boundary: model I/O and model-safe function-name mapping live in providers.
+- Runtime policy: workspace, command execution, capability checks, and audit sinks are injectable.
+
+## Validation Before Release
+
+```bash
+python -m pytest
+python -m compileall -q axc_agent_engine
+git diff --check
+python -m build
+twine check dist/*
+```

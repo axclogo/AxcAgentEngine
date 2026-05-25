@@ -1,0 +1,13 @@
+name: "basic-assistant"
+description: "最简对话示例"
+
+runtime:
+  max_rounds: 20
+
+system_prompt: |
+  你是一个有帮助的AI助手。回答简洁明了。
+
+plugins:
+  builtin_tools:
+    enabled: true
+    load: ["get_time"]

@@ -1,0 +1,43 @@
+"""TransactionRouter — 按运行时策略在 ReAct 与 POR 之间路由。
+
+路由模式：
+- react_only：禁止进入 POR，只走 ReAct 循环。
+- por_first：首轮 ReAct 前强制进入 PlanningService。
+- auto：final_answer → DONE，tool_calls → ReAct，结构化计划 JSON → POR。
+"""
+from dataclasses import dataclass
+from typing import Any
+
+from axc_agent_engine.planning.planner import Plan
+from axc_agent_engine.planning.planning_service import PlanningService
+
+
+@dataclass(frozen=True)
+class RoutingDecision:
+	"""单轮 LLM 输出后的运行时路由决策。"""
+	action: str  # 可选值：final_answer | tool_calls | por_plan
+	plan: Plan | None = None
+
+
+class TransactionRouter:
+	"""根据路由策略决定进入 ReAct 还是 POR。"""
+
+	def __init__(self, mode: str = "auto") -> None:
+		self._mode = mode
+
+	@property
+	def mode(self) -> str:
+		return self._mode
+
+	def route(self, message: dict[str, Any]) -> RoutingDecision:
+		"""把标准化 assistant message 分类成运行时 action。"""
+		tool_calls = message.get("tool_calls", []) or []
+		if not tool_calls:
+			plan = None if self._mode == "react_only" else PlanningService.detect_plan(message)
+			return RoutingDecision(action="por_plan", plan=plan) if plan else RoutingDecision(action="final_answer")
+		if self._mode == "react_only":
+			return RoutingDecision(action="tool_calls")
+		plan = PlanningService.detect_plan(message)
+		if plan:
+			return RoutingDecision(action="por_plan", plan=plan)
+		return RoutingDecision(action="tool_calls")

@@ -1,0 +1,9 @@
+name: "blue-team"
+description: "蓝队防守方"
+
+runtime:
+  max_rounds: 5
+
+system_prompt: |
+  你是网络安全蓝队成员，负责防御。
+  分析红队的攻击方案，提出防御措施。
