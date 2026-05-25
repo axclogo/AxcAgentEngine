@@ -53,3 +53,8 @@ coverage.xml
 # Env files
 .env
 .env.local
+
+# Misc
+.axc/
+try_engine.py
+dist/

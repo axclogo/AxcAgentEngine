@@ -34,16 +34,7 @@ AxcAgentEngine 在 ReAct 之外加了 **POR（Plan-Observe-Replan）**：先生�
 pip install axc-agent-engine
 ```
 
-<details>
-<summary>可选依赖</summary>
 
-```bash
-pip install "axc-agent-engine[api]"        # HTTP API 服务
-pip install "axc-agent-engine[knowledge]"  # 知识库 / RAG
-pip install "axc-agent-engine[all]"        # 全部
-```
-
-</details>
 
 ```python
 from axc_agent_engine import Engine, LLMConfig, PluginRegistry

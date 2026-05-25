@@ -34,9 +34,6 @@ of OpenAI-compatible Chat Completions providers through a provider protocol.
 
 ```bash
 pip install axc-agent-engine
-pip install "axc-agent-engine[api]"
-pip install "axc-agent-engine[knowledge]"
-pip install "axc-agent-engine[all]"
 ```
 
 ## Quick Start

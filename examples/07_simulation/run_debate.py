@@ -4,7 +4,7 @@ import os
 
 from axc_agent_engine import Engine, LLMConfig
 from axc_agent_engine.sidecar.multi_agent import MultiAgentSession, SessionMode
-from axc_agent_engine.storage.memory import InMemoryMessageBus
+from axc_agent_engine.storage.in_memory import InMemoryMessageBus
 
 
 async def main():

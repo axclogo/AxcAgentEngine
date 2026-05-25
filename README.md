@@ -34,16 +34,7 @@ AxcAgentEngine adds **POR (Plan-Observe-Replan)** on top of ReAct: the agent pro
 pip install axc-agent-engine
 ```
 
-<details>
-<summary>Optional extras</summary>
 
-```bash
-pip install "axc-agent-engine[api]"        # HTTP API server
-pip install "axc-agent-engine[knowledge]"  # Knowledge / RAG
-pip install "axc-agent-engine[all]"        # Everything
-```
-
-</details>
 
 ```python
 from axc_agent_engine import Engine, LLMConfig, PluginRegistry
