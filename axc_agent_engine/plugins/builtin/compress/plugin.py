@@ -1,4 +1,4 @@
-"""Compress plugin — context management facade."""
+"""Compress plugin context management."""
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any

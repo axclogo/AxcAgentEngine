@@ -1,4 +1,4 @@
-"""Connection facade for a single MCP server."""
+"""Connection owner for a single MCP server."""
 from __future__ import annotations
 
 import asyncio
@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 
 class MCPConnection:
-	"""Connection facade for a single MCP server."""
+	"""Connection owner for a single MCP server."""
 
 	def __init__(self, config: dict[str, Any]) -> None:
 		self.config = dict(config)
@@ -35,7 +35,7 @@ class MCPConnection:
 			await asyncio.wait_for(self._transport.request("initialize", {
 				"protocolVersion": self.config.get("protocol_version", DEFAULT_PROTOCOL_VERSION),
 				"capabilities": {},
-				"clientInfo": {"name": "axc_agent_engine", "version": "0.2.0"},
+				"clientInfo": {"name": "axc_agent_engine", "version": "2.0"},
 			}), timeout=self._connect_timeout)
 			try:
 				await asyncio.wait_for(self._transport.request("notifications/initialized", {}), timeout=self._connect_timeout)

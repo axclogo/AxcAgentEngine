@@ -1,4 +1,4 @@
-"""MCP transport factory and compatibility exports."""
+"""MCP transport factory."""
 from typing import Any
 
 from axc_agent_engine.plugins.builtin.mcp.support.models import MCPTransport

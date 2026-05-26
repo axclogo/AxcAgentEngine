@@ -1,1 +1,3 @@
-from .plugin import *
+from .plugin import SkillPlugin
+
+__all__ = ["SkillPlugin"]

@@ -24,6 +24,7 @@ class AggregatedMessage:
 	usage_input: int = 0
 	usage_output: int = 0
 	cached_tokens: int = 0
+	usage_metadata: dict[str, Any] = field(default_factory=dict)
 	has_content: bool = False
 	partial: bool = False
 
@@ -36,6 +37,7 @@ class StreamAggregateState:
 	usage_input: int = 0
 	usage_output: int = 0
 	cached_tokens: int = 0
+	usage_metadata: dict[str, Any] = field(default_factory=dict)
 	chunk_count: int = 0
 	content_length: int = 0
 	partial: bool = False
@@ -68,6 +70,8 @@ class StreamAggregateState:
 			self.usage_input += chunk.usage.input_tokens
 			self.usage_output += chunk.usage.output_tokens
 			self.cached_tokens += chunk.usage.cached_tokens
+			if chunk.metadata:
+				self.usage_metadata.update(chunk.metadata)
 
 	async def merge_tool_delta(self, tool_call_delta: dict, on_delta: StreamCallback | None = None) -> None:
 		if "tool_calls" in tool_call_delta:
@@ -91,6 +95,7 @@ class StreamAggregateState:
 			usage_input=self.usage_input,
 			usage_output=self.usage_output,
 			cached_tokens=self.cached_tokens,
+			usage_metadata=dict(self.usage_metadata),
 			has_content=bool(self.content_parts),
 			partial=self.partial,
 		)

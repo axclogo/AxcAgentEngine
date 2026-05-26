@@ -12,7 +12,6 @@ from axc_agent_engine.tools.decorator import tool
 from axc_agent_engine.tools.tool_output import ToolOutput, ArtifactRef, ResultStore
 from axc_agent_engine.observability.audit import AuditEvent, AuditEventType, InMemoryAuditSink
 from axc_agent_engine.runtime.checkpoint import Checkpoint, CheckpointStatus, CheckpointStore, InMemoryCheckpointStore
-from axc_agent_engine.runtime.recovery import ExecutionRecoveryService, RecoverableRun
 from axc_agent_engine.runtime.policy import CapabilityPolicyEvaluator, PolicyDecision, PolicyEvaluator, PolicyRequest
 from axc_agent_engine.runtime.input import InputProviderResult, InputProvider, PassthroughInputProvider
 from axc_agent_engine.runtime.resources import (
@@ -31,7 +30,6 @@ __all__ = [
 	"AuditEvent", "AuditEventType", "InMemoryAuditSink", "ErrorEnvelope", "ErrorCategory",
 	# durable execution
 	"Checkpoint", "CheckpointStatus", "CheckpointStore", "InMemoryCheckpointStore",
-	"ExecutionRecoveryService", "RecoverableRun",
 	# policy
 	"CapabilityPolicyEvaluator", "PolicyDecision", "PolicyEvaluator", "PolicyRequest",
 	# LLM 响应模型
@@ -52,4 +50,4 @@ try:
 	from importlib.metadata import version as _get_version
 	__version__ = _get_version("axc-agent-engine")
 except Exception:
-	__version__ = "0.2.0"
+	__version__ = "2.0"

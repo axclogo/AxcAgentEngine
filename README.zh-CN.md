@@ -74,8 +74,8 @@ async for event in agent.stream("Build a REST API for user management"):
 - **ReAct 执行器** —— 思考、工具调用、观察的标准循环
 - **插件体系** —— 内置 spec 注册表，YAML 按需加载；可选能力都在插件里
 - **工具协议** —— 所有工具返回 `ToolOutput`；只读并发，写串行；模型函数名安全映射
-- **中断恢复** —— `CheckpointStore` + `ExecutionRecoveryService` + Agent resume API
-- **OpenAI 兼容** —— Provider 协议 + OpenAI-compatible HTTP 客户端 / API 子集
+- **中断恢复** —— `WorkflowRuntime` + `CheckpointStore` + Agent resume API
+- **OpenAI API 子集** —— Provider 协议 + OpenAI-compatible HTTP 客户端 / API 子集
 - **记忆与知识** —— 四层记忆（KV、去重、衰减、图 hook）+ 语义分块 + 向量/BM25 混合检索
 - **MCP** —— stdio、JSON-RPC HTTP、官方 SDK transport
 - **人工介入** —— 审批队列、`ask_human` 工具
@@ -88,19 +88,19 @@ async for event in agent.stream("Build a REST API for user management"):
 | --- | --- |
 | ReAct 循环 | `Executor` |
 | POR 规划 | `auto` / `react_only` / `por_first` |
-| 中断恢复 | `CheckpointStore` + `ExecutionRecoveryService` + Agent resume |
+| 中断恢复 | `WorkflowRuntime` + `CheckpointStore` + Agent resume |
 | 插件系统 | spec 注册表 + YAML 按需加载 |
 | LLM Provider | Provider 协议 + OpenAI-compatible HTTP |
 | 并行工具 | 只读并发，写串行 |
 | 工具输出 | 强制 `ToolOutput` |
-| 工具名兼容 | Provider 负责模型安全映射 |
+| 工具名映射 | Provider 负责模型安全映射 |
 | 上下文压缩 | 内置 `compress` 插件 |
 | 记忆 | 四层 + KV fallback + 去重 + 衰减 + 图 hook |
 | 知识库 | 语义分块 + embedding + BM25/向量 + 可选 rerank |
 | MCP | stdio / JSON-RPC HTTP / 官方 SDK |
 | 人工审批 | 审批队列 + `ask_human` |
 | Sidecar | 多 Agent / 仿真 / 评测 / 成本 / 失败挖掘 / 蒸馏 |
-| API 服务 | OpenAI Chat Completions 兼容子集 |
+| API 服务 | OpenAI Chat Completions 明确子集 |
 
 </details>
 
@@ -109,7 +109,7 @@ async for event in agent.stream("Build a REST API for user management"):
 | | |
 | --- | --- |
 | [架构](docs/ARCHITECTURE.md) | 引擎与插件边界 |
-| [API 兼容性](docs/API.md) | HTTP API 子集说明 |
+| [API](docs/API.md) | HTTP API 子集说明 |
 | [插件开发](docs/PLUGIN_DEVELOPMENT.md) | 写自己的插件 |
 | [安全模型](docs/SECURITY_MODEL.md) | 能力、风险、workspace |
 | [示例](examples/README.md) | 7 个端到端 demo |
@@ -205,11 +205,11 @@ engine.provider_registry.register("fast", fast_provider)
 agent = engine.load_agent("./agents/my_agent.yaml", default_llm="fast")
 ```
 
-工具名兼容属于 provider 职责。内部工具名在 LLM 调用前编码为模型安全 function name，在 hooks/工具执行前解码回来。
+工具名映射属于 provider 职责。内部工具名在 LLM 调用前编码为模型安全 function name，在 hooks/工具执行前解码回来。
 
 ## API
 
-HTTP API 是 OpenAI Chat Completions 兼容子集。
+HTTP API 是 OpenAI Chat Completions 明确子集。
 
 - `POST /v1/chat/completions`
 - `GET /v1/agents`
@@ -369,7 +369,7 @@ CLI 日志参数是全局参数，需要放在子命令前。
 - **工具定义必须是 `ToolDefinition`。** 不接受 dict。
 - **业务协议不进入开源引擎。** 内部 API、私有数据库、公司鉴权、服务发现属于私有插件。
 - **LLM 配置在代码中。** Agent YAML 只描述运行时限制、能力和插件。
-- **API 是兼容子集。** 请求级 `tools`、`tool_choice`、`n > 1` 会被拒绝。
+- **API 是明确子集。** 请求级 `tools`、`tool_choice`、`n > 1` 会被拒绝。
 
 ## 测试
 

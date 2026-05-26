@@ -116,6 +116,7 @@ class LLMStreamChunk:
 	tool_call_delta: dict[str, Any] | None = None
 	usage: LLMUsage | None = None
 	finish_reason: str | None = None
+	metadata: dict[str, Any] = field(default_factory=dict)
 	raw: Any = None
 
 
@@ -140,6 +141,7 @@ class RuntimeConfig(BaseModel):
 	thinking: str = Field(default="auto", pattern=r"^(auto|always|never)$")
 	parallel_tool_calls: bool = True
 	human_in_the_loop: bool = False
+	stream_idle_timeout: int = Field(default=60, ge=1)
 	workspace: str = ""
 	step_timeout: int = Field(default=300, ge=0)
 	total_timeout: int = Field(default=600, ge=0)

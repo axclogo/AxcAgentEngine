@@ -59,15 +59,6 @@ class SessionManager:
 			# 在正确位置插入会话历史
 			new_messages = existing[:insert_idx] + session.messages + existing[insert_idx:]
 			message_store.set_all(new_messages)
-		# 中断恢复：检查是否存在被中断的 snapshot
-		snapshot = session.metadata.get("snapshot")
-		if snapshot and isinstance(snapshot, dict) and snapshot.get("status") == "interrupted":
-			resume_prompt = (
-				f"[系统] 上一次执行被中断（原因：{snapshot.get('interrupt_reason', 'unknown')}），"
-				f"已从第 {snapshot.get('current_round', 0)} 轮恢复。请继续。"
-			)
-			message_store.append({"role": "system", "content": resume_prompt})
-
 	async def get(self, session_id: str) -> Session | None:
 		"""获取 Session，不存在返回 None"""
 		async with self._lock:

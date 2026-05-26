@@ -1,1 +1,3 @@
-from .plugin import *
+from .plugin import CompressPlugin
+
+__all__ = ["CompressPlugin"]

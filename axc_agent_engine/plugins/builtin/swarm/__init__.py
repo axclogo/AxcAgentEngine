@@ -1,1 +1,3 @@
-from .plugin import *
+from .plugin import SwarmPlugin
+
+__all__ = ["SwarmPlugin"]

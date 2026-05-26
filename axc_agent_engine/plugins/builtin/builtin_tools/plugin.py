@@ -1,46 +1,15 @@
-"""BuiltinTools plugin shell and public compatibility exports."""
+"""BuiltinTools plugin shell."""
 from typing import Any, TYPE_CHECKING
 
 from axc_agent_engine.core.schema import ToolDefinition
 from axc_agent_engine.plugins.base import BasePlugin
 from axc_agent_engine.tools.tool_output import ToolOutput
 
-from . import tool_definitions as _tool_definitions
 from .registry import ALL_TOOLS as _ALL_TOOLS
 from .registry import DEFAULT_TOOLS as _DEFAULT_TOOLS
 
 if TYPE_CHECKING:
 	from axc_agent_engine.core.context import ExecutionContext
-
-httpx = _tool_definitions.httpx
-_bounded_int = _tool_definitions._bounded_int
-_ensure_venv = _tool_definitions._ensure_venv
-_file_append = _tool_definitions._file_append
-_file_edit = _tool_definitions._file_edit
-_file_entry = _tool_definitions._file_entry
-_file_glob = _tool_definitions._file_glob
-_file_info = _tool_definitions._file_info
-_file_list = _tool_definitions._file_list
-_file_read = _tool_definitions._file_read
-_file_write = _tool_definitions._file_write
-_get_command_executor = _tool_definitions._get_command_executor
-_get_result_store = _tool_definitions._get_result_store
-_get_time = _tool_definitions._get_time
-_get_workspace = _tool_definitions._get_workspace
-_http_request = _tool_definitions._http_request
-_is_blocked_ip = _tool_definitions._is_blocked_ip
-_pip_install = _tool_definitions._pip_install
-_python_exec = _tool_definitions._python_exec
-_register_tool = _tool_definitions._register_tool
-_resolve_host_ips = _tool_definitions._resolve_host_ips
-_resolve_workspace_path = _tool_definitions._resolve_workspace_path
-_result_page = _tool_definitions._result_page
-_result_read = _tool_definitions._result_read
-_result_search = _tool_definitions._result_search
-_shell = _tool_definitions._shell
-_store_command_artifacts = _tool_definitions._store_command_artifacts
-_truncate_by_bytes = _tool_definitions._truncate_by_bytes
-_validate_http_url = _tool_definitions._validate_http_url
 
 
 class BuiltinToolsPlugin(BasePlugin):

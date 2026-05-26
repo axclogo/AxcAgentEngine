@@ -1,1 +1,3 @@
-from .plugin import *
+from .plugin import PostProcessPlugin
+
+__all__ = ["PostProcessPlugin"]

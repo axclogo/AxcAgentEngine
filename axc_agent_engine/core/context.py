@@ -66,7 +66,6 @@ class ExecutionState:
 class ExecutionRuntimeState:
 	"""不可 checkpoint 的运行时内部状态。"""
 	plugin_states: dict[str, Any] = field(default_factory=dict)
-	event_queue: Any = None
 	stream_delta_emitted: bool = False
 	approval_queue: Any = None
 	response_queue: Any = None

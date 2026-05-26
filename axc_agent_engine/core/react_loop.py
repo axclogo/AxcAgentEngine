@@ -34,6 +34,7 @@ class ReActTurnResult:
 	content: str
 	parsed_calls: list[dict] = field(default_factory=list)
 	has_tool_calls: bool = False
+	failed: bool = False
 
 
 class ToolCallFlow:
@@ -63,12 +64,14 @@ class ToolCallFlow:
 		if emit_events:
 			for result in results:
 				artifact_refs = [a.to_dict() for a in result.output.artifacts] if result.output else []
-				events.append(Event.tool_result(
+				event = Event.tool_result(
 					result.tool_name,
 					result.tool_call_id,
 					result.compact_view() if result.success else result.error,
 					artifact_refs,
-				))
+				)
+				event.metadata["duration_ms"] = result.duration_ms
+				events.append(event)
 		return ToolFlowResult(parsed_calls=parsed_calls, events=events)
 
 	def resolve_names(self, calls: list[dict]) -> list[dict]:

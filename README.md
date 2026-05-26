@@ -73,7 +73,7 @@ async for event in agent.stream("Build a REST API for user management"):
 - **ReAct executor** - standard think / call / observe loop
 - **Plugin system** - built-in spec registry, YAML-driven loading; optional capabilities live in plugins
 - **Tool protocol** - every tool returns `ToolOutput`; read-only runs concurrent, write serial; safe function-name mapping
-- **Durable recovery** - `CheckpointStore` + `ExecutionRecoveryService` + Agent resume API
+- **Durable workflow** - `WorkflowRuntime` + `CheckpointStore` + Agent resume API
 - **OpenAI compatible** - provider protocol + OpenAI-compatible HTTP client and API subset
 - **Memory & knowledge** - four-layer memory (KV, dedup, decay, graph hooks) + semantic chunking + vector/BM25 hybrid retrieval
 - **MCP** - stdio, JSON-RPC HTTP, official SDK transports
@@ -87,12 +87,12 @@ async for event in agent.stream("Build a REST API for user management"):
 | --- | --- |
 | ReAct loop | `Executor` |
 | POR planning | `auto` / `react_only` / `por_first` |
-| Durable recovery | `CheckpointStore` + `ExecutionRecoveryService` + Agent resume |
+| Durable workflow | `WorkflowRuntime` + `CheckpointStore` + Agent resume |
 | Plugin system | spec registry + YAML-driven loading |
 | LLM provider | provider protocol + OpenAI-compatible HTTP |
 | Parallel tools | read concurrent, write serial |
 | Tool output | enforced `ToolOutput` |
-| Tool name compat | provider-side model-safe mapping |
+| Tool name mapping | provider-side model-safe mapping |
 | Context compression | built-in `compress` plugin |
 | Memory | four layers + KV fallback + dedup + decay + graph hooks |
 | Knowledge | semantic chunking + embeddings + BM25/vector + optional rerank |
@@ -108,7 +108,7 @@ async for event in agent.stream("Build a REST API for user management"):
 | | |
 | --- | --- |
 | [Architecture](docs/ARCHITECTURE.md) | Engine and plugin boundaries |
-| [API compatibility](docs/API.md) | HTTP API subset notes |
+| [API](docs/API.md) | HTTP API subset notes |
 | [Plugin development](docs/PLUGIN_DEVELOPMENT.md) | Build your own plugin |
 | [Security model](docs/SECURITY_MODEL.md) | Capabilities, risk, workspace |
 | [Examples](examples/README.md) | 7 end-to-end demos |
@@ -204,7 +204,7 @@ engine.provider_registry.register("fast", fast_provider)
 agent = engine.load_agent("./agents/my_agent.yaml", default_llm="fast")
 ```
 
-Tool-name compatibility is the provider's job. Internal tool names are encoded to model-safe function names before the LLM call and decoded before hooks and tool execution.
+Tool-name mapping is the provider's job. Internal tool names are encoded to model-safe function names before the LLM call and decoded before hooks and tool execution.
 
 ## API
 

@@ -217,7 +217,7 @@ async def _execute_once(
 			duration_ms=int((time.time() - start) * 1000),
 		)
 	# 工具执行后强制校验 ToolOutput 返回类型。这是插件作者必须遵守的硬边界；
-	# 上层编排器可以把异常转成 LLM 循环里的工具失败，但公开执行器不接受旧返回。
+	# 上层编排器可以把异常转成 LLM 循环里的工具失败。
 	if not isinstance(raw_result, ToolOutput):
 		raise TypeError(f"工具必须返回 ToolOutput，实际得到 {type(raw_result).__name__}")
 	if raw_result.is_error:

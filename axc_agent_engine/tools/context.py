@@ -17,6 +17,8 @@ class ToolContext:
 	exec_ctx: "ExecutionContext | None" = None
 	session_id: str = ""
 	agent_name: str = ""
+	tool_name: str = ""
+	tool_call_id: str = ""
 	request_queue: asyncio.Queue | None = None
 	response_queue: asyncio.Queue | None = None
 
@@ -34,6 +36,8 @@ class ToolContext:
 			"exec_ctx": self.exec_ctx,
 			"session_id": self.session_id,
 			"agent_name": self.agent_name,
+			"tool_name": self.tool_name,
+			"tool_call_id": self.tool_call_id,
 			"request_queue": self.request_queue,
 			"response_queue": self.response_queue,
 			"result_store": self.result_store,

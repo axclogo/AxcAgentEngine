@@ -1,1 +1,3 @@
-from .plugin import *
+from .plugin import HooksPlugin
+
+__all__ = ["HooksPlugin"]

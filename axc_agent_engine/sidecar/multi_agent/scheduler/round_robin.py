@@ -13,6 +13,10 @@ class RoundRobinScheduler:
 	"""按顺序轮流，每次选一个。
 	Selects one speaker at a time in stable order.
 	"""
+	def steps_per_round(self, agents: list) -> int:
+		"""Every agent gets one turn per round in round-robin modes."""
+		return len(agents)
+
 	def select_speakers(self, ctx: SharedContext, agents: list,
 						step: int) -> list:
 		if not agents:

@@ -1,1 +1,3 @@
-from .plugin import *
+from .plugin import SafetyPlugin
+
+__all__ = ["SafetyPlugin"]

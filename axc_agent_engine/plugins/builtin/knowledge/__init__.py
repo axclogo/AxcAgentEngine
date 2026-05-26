@@ -1,1 +1,3 @@
-from .plugin import *
+from .plugin import KnowledgePlugin
+
+__all__ = ["KnowledgePlugin"]
