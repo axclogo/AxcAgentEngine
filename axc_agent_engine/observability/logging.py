@@ -1,4 +1,5 @@
-"""结构化日志配置，自动脱敏敏感数据。"""
+"""English: This documentation describes the related engine component behavior.
+中文：结构化日志配置，自动脱敏敏感数据。"""
 import json
 import logging
 import re
@@ -11,7 +12,8 @@ _SENSITIVE_PATTERN = re.compile(
 
 
 class SanitizeFilter(logging.Filter):
-	"""从所有日志消息中脱敏敏感值的过滤器。"""
+	"""English: This documentation describes the related engine component behavior.
+中文：从所有日志消息中脱敏敏感值的过滤器。"""
 
 	def filter(self, record: logging.LogRecord) -> bool:
 		if record.args:
@@ -39,7 +41,9 @@ class JsonFormatter(logging.Formatter):
 
 
 def setup_logging(level: str = "INFO", json_format: bool = False) -> None:
-	"""配置日志格式；json_format=True 时输出适合日志聚合的 JSON。"""
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+配置日志格式；json_format=True 时输出适合日志聚合的 JSON。"""
 	root = logging.getLogger()
 	root.setLevel(getattr(logging, level.upper(), logging.INFO))
 	if root.handlers:

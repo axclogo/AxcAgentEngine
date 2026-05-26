@@ -2,7 +2,7 @@
 
 This keeps the default engine lightweight while the public pause/resume path is
 already routed through the workflow boundary.
-"""
+中文：此文档说明相关引擎组件的行为。"""
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
@@ -24,7 +24,8 @@ class _WorkflowRecord:
 
 
 class MemoryWorkflowRuntime:
-	"""Minimal workflow runtime used when no durable adapter is configured."""
+	"""Minimal workflow runtime used when no durable adapter is configured.
+中文：此文档说明相关引擎组件的行为。"""
 
 	def __init__(self) -> None:
 		self._runs: dict[str, _WorkflowRecord] = {}

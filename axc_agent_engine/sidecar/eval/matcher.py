@@ -1,6 +1,7 @@
-"""宿主调用的标注匹配器，用于评测或参考答案短路。
-Host-invoked annotation matcher for eval/reference-answer short-circuiting.
-"""
+"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+宿主调用的标注匹配器，用于评测或参考答案短路。
+Host-invoked annotation matcher for eval/reference-answer short-circuiting."""
 from __future__ import annotations
 
 import math
@@ -18,7 +19,9 @@ if TYPE_CHECKING:
 
 @dataclass
 class AnnotationMatch:
-	"""一条匹配到的标注回复。
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+一条匹配到的标注回复。
 	One matched annotation reply.
 	"""
 
@@ -29,7 +32,9 @@ class AnnotationMatch:
 
 
 class AnnotationMatcher:
-	"""在不触碰 Agent runtime 的前提下，把用户输入匹配到 AnnotationStore。
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+在不触碰 Agent runtime 的前提下，把用户输入匹配到 AnnotationStore。
 	Matches user input against AnnotationStore without touching Agent runtime.
 	"""
 
@@ -44,14 +49,18 @@ class AnnotationMatcher:
 		self._threshold = threshold
 
 	async def match(self, query: str, threshold: float | None = None) -> AnnotationMatch | None:
-		"""返回超过阈值的最佳标注匹配。
+		"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+返回超过阈值的最佳标注匹配。
 		Return the best matching annotation above threshold.
 		"""
 		matches = await self.match_all(query, top_k=1, threshold=threshold)
 		return matches[0] if matches else None
 
 	async def match_all(self, query: str, top_k: int = 5, threshold: float | None = None) -> list[AnnotationMatch]:
-		"""使用精确、向量、词法降级评分返回排序后的匹配。
+		"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+使用精确、向量、词法降级评分返回排序后的匹配。
 		Return ranked matches using exact, vector, then lexical fallback scoring.
 		"""
 		if not query.strip():

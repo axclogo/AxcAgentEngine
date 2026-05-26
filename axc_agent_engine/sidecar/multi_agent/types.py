@@ -1,13 +1,16 @@
-"""多 Agent 支撑层拥有的类型。
-Types owned by the multi-agent plugin support layer.
-"""
+"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+多 Agent 支撑层拥有的类型。
+Types owned by the multi-agent plugin support layer."""
 from __future__ import annotations
 
 from enum import StrEnum
 
 
 class SessionMode(StrEnum):
-	"""多 Agent 会话模式。
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+多 Agent 会话模式。
 	Multi-agent session mode.
 	"""
 	DISCUSSION = "discussion"
@@ -25,7 +28,9 @@ class SessionMode(StrEnum):
 
 
 class MultiAgentEventType(StrEnum):
-	"""多 Agent 事件类型。
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+多 Agent 事件类型。
 	Multi-agent event type.
 	"""
 	MESSAGE = "message"

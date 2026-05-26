@@ -189,7 +189,9 @@ class Agent:
 		run_options: dict | None = None,
 		metadata: dict | None = None,
 	) -> str:
-		"""非流式对话。
+		"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+非流式对话。
 
 		English: Run a non-streaming chat turn and return the final assistant text.
 		"""
@@ -209,7 +211,9 @@ class Agent:
 		llm_options: dict | None = None,
 		run_options: dict | None = None,
 	) -> str:
-		"""接受结构化消息列表的非流式对话。
+		"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+接受结构化消息列表的非流式对话。
 
 		English: Run a non-streaming chat turn from a structured message list.
 		"""
@@ -230,7 +234,9 @@ class Agent:
 		llm_options: dict | None = None,
 		run_options: dict | None = None,
 	) -> AsyncIterator[Event]:
-		"""流式对话。
+		"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+流式对话。
 
 		English: Stream execution events for one chat turn.
 		"""
@@ -249,7 +255,9 @@ class Agent:
 		llm_options: dict | None = None,
 		run_options: dict | None = None,
 	) -> AsyncIterator[Event]:
-		"""接受结构化消息列表的流式对话。
+		"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+接受结构化消息列表的流式对话。
 
 		English: Stream execution events from a structured message list.
 		"""
@@ -270,7 +278,9 @@ class Agent:
 		llm_options: dict | None = None,
 		run_options: dict | None = None,
 	) -> str:
-		"""非流式恢复执行级 checkpoint。"""
+		"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+非流式恢复执行级 checkpoint。"""
 		from axc_agent_engine.core.errors import ProviderError
 		result = ""
 		async for event in self.resume_stream(run_id, message=message, llm_options=llm_options, run_options=run_options):
@@ -287,7 +297,9 @@ class Agent:
 		llm_options: dict | None = None,
 		run_options: dict | None = None,
 	) -> AsyncIterator[Event]:
-		"""通过 WorkflowRuntime 恢复 execution/round 或 POR checkpoint。"""
+		"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+通过 WorkflowRuntime 恢复 execution/round 或 POR checkpoint。"""
 		request = WorkflowResumeRequest(
 			run_id=run_id,
 			message=message,
@@ -304,7 +316,8 @@ class Agent:
 		llm_options: dict | None = None,
 		run_options: dict | None = None,
 	) -> AsyncIterator[Event]:
-		"""Resume from a WorkflowRuntime-owned plan."""
+		"""Resume from a WorkflowRuntime-owned plan.
+中文：此文档说明相关引擎组件的行为。"""
 		if plan.kind == "missing":
 			yield Event.error("CheckpointStore is required for resume")
 			return
@@ -332,14 +345,16 @@ class Agent:
 		return await self._session_manager.get(session_id)
 
 	async def reset_session(self, session_id: str = "") -> None:
-		"""重置指定会话，空字符串清除所有"""
+		"""English: This documentation describes the related engine component behavior.
+中文：重置指定会话，空字符串清除所有"""
 		if session_id:
 			await self._session_manager.remove(session_id)
 		else:
 			await self._session_manager.clear()
 
 	async def close(self) -> None:
-		"""并行释放所有插件资源，带超时。"""
+		"""English: This documentation describes the related engine component behavior.
+中文：并行释放所有插件资源，带超时。"""
 		async def _close_plugin(plugin: BasePlugin) -> None:
 			try:
 				await asyncio.wait_for(plugin.close(), timeout=5.0)
@@ -356,7 +371,8 @@ class Agent:
 		run_options: dict | None = None,
 		metadata: dict | None = None,
 	) -> str:
-		"""统一非流式执行"""
+		"""English: This documentation describes the related engine component behavior.
+中文：统一非流式执行"""
 		from axc_agent_engine.core.errors import ProviderError
 		result = ""
 		async for event in self._execute_stream(
@@ -382,7 +398,8 @@ class Agent:
 		run_options: dict | None = None,
 		metadata: dict | None = None,
 	) -> AsyncIterator[Event]:
-		"""统一流式执行。"""
+		"""English: This documentation describes the related engine component behavior.
+中文：统一流式执行。"""
 		request = RunRequest.create(
 			user_message=user_message,
 			session_id=session_id,
@@ -401,18 +418,18 @@ class Agent:
 				executor._ctx.state.metadata["input_artifacts"] = processed.artifacts
 			if processed.metadata:
 				executor._ctx.state.metadata["input_metadata"] = processed.metadata
-			# 恢复会话上下文
+			#English: Source note. 中文：恢复会话上下文
 			if request.session_id:
 				session = await self._session_manager.get_or_create(request.session_id)
 				self._session_manager.restore_context(session, executor.message_store)
-			# 所有入口都走 InputProvider，因此统一注入标准 messages。
+			#English: Bilingual note. 中文：所有入口都走 InputProvider，因此统一注入标准 messages。
 			if processed.messages:
 				executor.message_store.extend(processed.messages)
 				executor.skip_user_init = True
 				executor._ctx.add_image_tokens(processed.messages)
 			async for event in executor.run_stream(effective_user_message):
 				yield event
-			# 写回会话并持久化
+			#English: Source note. 中文：写回会话并持久化
 			if request.session_id:
 				session = await self._session_manager.get_or_create(request.session_id)
 				session.messages = executor.message_store.get_all()
@@ -454,7 +471,8 @@ class Agent:
 
 
 def _content_to_text(content: Any) -> str:
-	"""Extract a textual goal from string or OpenAI-compatible multimodal content."""
+	"""Extract a textual goal from string or OpenAI-compatible multimodal content.
+中文：此文档说明相关引擎组件的行为。"""
 	if isinstance(content, str):
 		return content
 	if isinstance(content, list):

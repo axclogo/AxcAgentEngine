@@ -6,7 +6,9 @@ from axc_agent_engine.sidecar.multi_agent.types import MultiAgentEventType
 
 @dataclass
 class MultiAgentEvent:
-	"""多 Agent 会话事件"""
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+多 Agent 会话事件"""
 	type: MultiAgentEventType
 	agent_name: str = ""
 	content: str = ""

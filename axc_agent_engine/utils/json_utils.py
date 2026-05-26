@@ -5,7 +5,9 @@ from typing import Any
 
 
 def extract_json_object(text: str) -> dict[str, Any]:
-	"""从文本中提取第一个 JSON 对象，失败返回空 dict"""
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+从文本中提取第一个 JSON 对象，失败返回空 dict"""
 	text = text.strip()
 	for candidate in _json_candidates(text, "{", "}"):
 		try:
@@ -18,7 +20,9 @@ def extract_json_object(text: str) -> dict[str, Any]:
 
 
 def extract_json_array(text: str) -> list[dict] | None:
-	"""从文本中提取 JSON 数组，失败返回 None"""
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+从文本中提取 JSON 数组，失败返回 None"""
 	text = text.strip()
 	for candidate in _json_candidates(text, "[", "]"):
 		try:
@@ -31,7 +35,9 @@ def extract_json_array(text: str) -> list[dict] | None:
 
 
 def _json_candidates(text: str, open_char: str, close_char: str) -> list[str]:
-	"""按可信度返回可能的 JSON 片段。"""
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+按可信度返回可能的 JSON 片段。"""
 	if not text:
 		return []
 	candidates = [text]

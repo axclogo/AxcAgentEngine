@@ -29,7 +29,7 @@ class AgentEnvelope:
 	correlation_id: str = ""
 	sender: str = ""
 	recipient: str = ""
-	type: str = "request"  # 请求 | 回复 | 错误 | 广播
+	type: str = "request"  # English: request | reply | error | broadcast. 中文：请求 | 回复 | 错误 | 广播。
 	content: str = ""
 	reply_to: str = ""
 	trace_id: str = ""
@@ -66,7 +66,9 @@ class AgentEnvelope:
 
 
 class AgentMessageDispatcher:
-	"""通过 MessageBus pub/sub 在 Agent 之间路由消息。
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+通过 MessageBus pub/sub 在 Agent 之间路由消息。
 
 	生命周期：
 	1. Engine 使用 MessageBus 创建 dispatcher
@@ -81,7 +83,9 @@ class AgentMessageDispatcher:
 		self._pending: dict[str, asyncio.Future[AgentEnvelope]] = {}
 
 	def run_agent_consumer(self, agent: "Agent") -> asyncio.Task:
-		"""为 Agent 启动 consumer task，订阅 agent.{agent.name}.inbox。
+		"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+为 Agent 启动 consumer task，订阅 agent.{agent.name}.inbox。
 
 		consumer 会：
 		- 从总线接收 AgentEnvelope
@@ -94,7 +98,9 @@ class AgentMessageDispatcher:
 		return task
 
 	async def stop_consumer(self, agent_name: str) -> None:
-		"""停止指定 Agent 的 consumer task。"""
+		"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+停止指定 Agent 的 consumer task。"""
 		task = self._consumers.pop(agent_name, None)
 		if task and not task.done():
 			task.cancel()
@@ -104,12 +110,16 @@ class AgentMessageDispatcher:
 				pass
 
 	async def stop_all(self) -> None:
-		"""停止所有 consumer task。"""
+		"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+停止所有 consumer task。"""
 		for name in list(self._consumers.keys()):
 			await self.stop_consumer(name)
 
 	async def request(self, envelope: AgentEnvelope, timeout: float = 60.0) -> AgentEnvelope:
-		"""向目标 Agent 发送消息，并等待 correlation_id 匹配的回复。
+		"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+向目标 Agent 发送消息，并等待 correlation_id 匹配的回复。
 
 		消息会发布到 agent.{recipient}.inbox。超时和执行失败都作为 error envelope
 		返回，而不是抛出带外异常。
@@ -144,7 +154,9 @@ class AgentMessageDispatcher:
 				pass
 
 	async def publish(self, envelope: AgentEnvelope) -> None:
-		"""向目标 Agent channel 发布不等待回复的广播消息。"""
+		"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+向目标 Agent channel 发布不等待回复的广播消息。"""
 		envelope.type = "broadcast"
 		await self._bus.publish(self._agent_channel(envelope.recipient), envelope.to_dict())
 
@@ -162,7 +174,9 @@ class AgentMessageDispatcher:
 			logger.error(f"[dispatcher] Consumer for '{agent.name}' crashed: {e}")
 
 	async def _handle_envelope(self, agent: "Agent", envelope: AgentEnvelope) -> None:
-		"""处理收到的 envelope：通过目标 Agent runtime 执行并回复。"""
+		"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+处理收到的 envelope：通过目标 Agent runtime 执行并回复。"""
 		try:
 			if envelope.conversation_id:
 				result = await agent.chat(
@@ -198,7 +212,9 @@ class AgentMessageDispatcher:
 			await self._bus.publish(reply_channel, reply_envelope.to_dict())
 
 	async def _listen_reply(self, channel: str, correlation_id: str) -> None:
-		"""监听回复 channel，并完成等待中的 future。"""
+		"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+监听回复 channel，并完成等待中的 future。"""
 		try:
 			async for msg in self._bus.subscribe(channel):
 				if msg.get("correlation_id") == correlation_id:

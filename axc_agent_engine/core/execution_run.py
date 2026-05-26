@@ -1,4 +1,5 @@
-"""Executor run helpers kept outside the public Executor facade."""
+"""Executor run helpers kept outside the public Executor facade.
+中文：此文档说明相关引擎组件的行为。"""
 from __future__ import annotations
 
 import asyncio
@@ -18,7 +19,8 @@ logger = logging.getLogger(__name__)
 
 
 class CheckpointRecorder:
-	"""Best-effort execution checkpoint persistence."""
+	"""Best-effort execution checkpoint persistence.
+中文：此文档说明相关引擎组件的行为。"""
 
 	def __init__(self, ctx: ExecutionContext, messages: MessageStore) -> None:
 		self._ctx = ctx
@@ -71,7 +73,7 @@ def execution_checkpoint_state(
 		},
 		"payload": {},
 		"metadata": metadata,
-		# Backward-compatible fields for existing stores/tests.
+		#English: Backward-compatible fields for existing stores/tests. 中文：源码说明。
 		"current_round": ctx.state.current_round,
 		"input_tokens": ctx.state.total_input_tokens,
 		"output_tokens": ctx.state.total_output_tokens,
@@ -86,7 +88,8 @@ def execution_checkpoint_state(
 
 
 class ExecutionRunLifecycle:
-	"""Plugin-facing lifecycle hooks for an executor run."""
+	"""Plugin-facing lifecycle hooks for an executor run.
+中文：此文档说明相关引擎组件的行为。"""
 
 	def __init__(self, plugin_manager: PluginManager, ctx: ExecutionContext) -> None:
 		self._pm = plugin_manager
@@ -111,7 +114,8 @@ class ExecutionRunLifecycle:
 
 
 class StreamLLMBridge:
-	"""Runs an LLM call in a task and yields realtime stream events explicitly."""
+	"""Runs an LLM call in a task and yields realtime stream events explicitly.
+中文：此文档说明相关引擎组件的行为。"""
 
 	def __init__(self, llm_caller: LLMCaller, ctx: ExecutionContext) -> None:
 		self._llm = llm_caller

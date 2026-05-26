@@ -1,6 +1,7 @@
-"""仿真内核扩展点协议。
-Protocols for simulation kernel extension points.
-"""
+"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+仿真内核扩展点协议。
+Protocols for simulation kernel extension points."""
 from __future__ import annotations
 
 from typing import Protocol, runtime_checkable
@@ -18,7 +19,9 @@ from axc_agent_engine.sidecar.simulation.models import (
 
 @runtime_checkable
 class AgentPolicy(Protocol):
-	"""根据 observation 生成一个结构化动作。
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+根据 observation 生成一个结构化动作。
 	Produces one structured action from an observation.
 	"""
 	async def act(self, observation: Observation, scenario: Scenario) -> AgentAction: ...
@@ -26,7 +29,9 @@ class AgentPolicy(Protocol):
 
 @runtime_checkable
 class Environment(Protocol):
-	"""把动作应用到世界状态，并返回 delta。
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+把动作应用到世界状态，并返回 delta。
 	Applies an action to a world state and returns a delta.
 	"""
 	async def apply(self, state: WorldState, action: AgentAction, scenario: Scenario) -> StateDelta: ...
@@ -34,7 +39,9 @@ class Environment(Protocol):
 
 @runtime_checkable
 class ObservationBuilder(Protocol):
-	"""根据世界状态构建面向 actor 的 observation。
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+根据世界状态构建面向 actor 的 observation。
 	Builds an actor-specific observation from world state.
 	"""
 	def build(self, state: WorldState, actor: str, scenario: Scenario) -> Observation: ...
@@ -42,7 +49,9 @@ class ObservationBuilder(Protocol):
 
 @runtime_checkable
 class Evaluator(Protocol):
-	"""为一个动作及其状态 delta 评分。
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+为一个动作及其状态 delta 评分。
 	Scores one action and its state delta.
 	"""
 	async def evaluate(
@@ -56,7 +65,9 @@ class Evaluator(Protocol):
 
 @runtime_checkable
 class StopCondition(Protocol):
-	"""判断一次仿真运行是否应该停止。
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+判断一次仿真运行是否应该停止。
 	Decides whether a simulation run should stop.
 	"""
 	def should_stop(self, state: WorldState, timeline: list[SimulationStep], scenario: Scenario) -> tuple[bool, str]: ...
@@ -64,7 +75,9 @@ class StopCondition(Protocol):
 
 @runtime_checkable
 class ActorSelector(Protocol):
-	"""选择下一个仿真 tick 中行动的 actor。
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+选择下一个仿真 tick 中行动的 actor。
 	Chooses which actors act at the next simulation tick.
 	"""
 	def select(self, state: WorldState, timeline: list[SimulationStep], scenario: Scenario, actors: list[str]) -> list[str]: ...

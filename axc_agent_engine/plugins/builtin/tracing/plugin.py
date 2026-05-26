@@ -153,7 +153,9 @@ class TraceToolHandlers:
 
 
 class TracingPlugin(BasePlugin):
-	"""标准化 trace/span 采集，支持 SpanStore、callback、log 和查询工具。"""
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+标准化 trace/span 采集，支持 SpanStore、callback、log 和查询工具。"""
 	name = "tracing"
 	display_name = "链路追踪"
 	priority = 1
@@ -210,7 +212,7 @@ class TracingPlugin(BasePlugin):
 				parameters={
 					"type": "object",
 					"properties": {
-						"trace_id": {"type": "string", "description": "trace ID"},
+						"trace_id": {"type": "string", "description": "追踪 ID"},
 					},
 					"required": ["trace_id"],
 				},
@@ -629,7 +631,7 @@ def _truncate(value: Any, max_length: int) -> str:
 	if len(text) <= max_length:
 		return text
 	omitted = len(text) - max_length
-	return f"{text[:max_length]}...[omitted {omitted} chars]"
+	return f"{text[:max_length]}...[省略 {omitted} 个字符]"
 
 
 def _error_payload(error: Any, max_length: int, code: str = "trace.error") -> dict[str, Any]:

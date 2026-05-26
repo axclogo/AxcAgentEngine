@@ -1,4 +1,5 @@
-"""BuiltinTools plugin shell."""
+"""BuiltinTools plugin shell.
+中文：此文档说明相关引擎组件的行为。"""
 from typing import Any, TYPE_CHECKING
 
 from axc_agent_engine.core.schema import ToolDefinition
@@ -24,7 +25,8 @@ class BuiltinToolsPlugin(BasePlugin):
 		self._plugin_ctx: Any = plugin_ctx
 
 	def _active_deferred_for(self, exec_ctx: "ExecutionContext") -> set[str]:
-		"""Return the currently active deferred tool names for this execution."""
+		"""Return the currently active deferred tool names for this execution.
+中文：此文档说明相关引擎组件的行为。"""
 		state = exec_ctx.get_plugin_state(self.name, lambda: {"active_deferred": set()})
 		active = state.setdefault("active_deferred", set())
 		if not isinstance(active, set):
@@ -33,7 +35,8 @@ class BuiltinToolsPlugin(BasePlugin):
 		return active
 
 	async def on_execution_start(self, exec_ctx: "ExecutionContext") -> None:
-		"""Initialize deferred tool state for the execution."""
+		"""Initialize deferred tool state for the execution.
+中文：此文档说明相关引擎组件的行为。"""
 		exec_ctx.get_plugin_state(self.name, lambda: {})["active_deferred"] = set()
 
 	def get_tools(self) -> list[ToolDefinition]:
@@ -74,7 +77,8 @@ class BuiltinToolsPlugin(BasePlugin):
 		messages: list[dict],
 		tools: list[dict] | None,
 	) -> tuple[list[dict], list[dict] | None]:
-		"""Dynamically inject activated deferred tool schemas."""
+		"""Dynamically inject activated deferred tool schemas.
+中文：此文档说明相关引擎组件的行为。"""
 		active = self._active_deferred_for(exec_ctx)
 		if not active or not tools:
 			return messages, tools
@@ -94,13 +98,15 @@ class BuiltinToolsPlugin(BasePlugin):
 		result: "ToolOutput",
 		duration_ms: int,
 	) -> "ToolOutput":
-		"""Deactivate a deferred tool after it was used."""
+		"""Deactivate a deferred tool after it was used.
+中文：此文档说明相关引擎组件的行为。"""
 		active = self._active_deferred_for(exec_ctx)
 		active.discard(tool_name)
 		return result
 
 	async def _tool_search(self, args: dict, context: dict) -> ToolOutput:
-		"""Search and activate deferred tools."""
+		"""Search and activate deferred tools.
+中文：此文档说明相关引擎组件的行为。"""
 		query = args.get("query", "").lower()
 		exec_ctx = context.get("exec_ctx")
 		active = self._active_deferred_for(exec_ctx) if exec_ctx else set()

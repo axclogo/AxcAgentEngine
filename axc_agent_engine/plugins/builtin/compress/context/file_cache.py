@@ -1,4 +1,5 @@
-"""Recently read file cache used after context compression."""
+"""Recently read file cache used after context compression.
+中文：此文档说明相关引擎组件的行为。"""
 from __future__ import annotations
 
 import time
@@ -10,7 +11,8 @@ from axc_agent_engine.tools.tool_output import ToolOutput
 
 @dataclass
 class FileCacheEntry:
-	"""One bounded file-read snapshot preserved across compression."""
+	"""One bounded file-read snapshot preserved across compression.
+中文：此文档说明相关引擎组件的行为。"""
 
 	path: str
 	text: str
@@ -51,7 +53,8 @@ class FileCacheEntry:
 
 
 class FileReadCache:
-	"""Bounded in-memory file snapshots persisted by CompressionBoundary."""
+	"""Bounded in-memory file snapshots persisted by CompressionBoundary.
+中文：此文档说明相关引擎组件的行为。"""
 
 	def __init__(self, max_files: int = 5, max_chars_per_file: int = 4000, max_total_chars: int = 12000) -> None:
 		self.max_files = max(0, int(max_files))
@@ -81,8 +84,8 @@ class FileReadCache:
 		if not self._entries:
 			return None
 		lines = [
-			"[restored file cache]",
-			"Recently read file snapshots preserved across compression. Treat them as cached context; reread only if freshness matters.",
+			"[恢复的文件缓存]",
+			"以下是压缩前保留的已读文件快照。请把它们当作缓存上下文；只有需要确认新鲜度时才重新读取。",
 		]
 		used = 0
 		for entry in sorted(self._entries, key=lambda item: item.updated_at, reverse=True):

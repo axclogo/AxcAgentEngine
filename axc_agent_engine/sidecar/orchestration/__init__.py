@@ -1,6 +1,7 @@
-"""旁路编排任务服务。
-Sidecar orchestration task service.
-"""
+"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+旁路编排任务服务。
+Sidecar orchestration task service."""
 from __future__ import annotations
 
 import asyncio
@@ -23,7 +24,9 @@ class OrchestrationTaskStatus(StrEnum):
 
 @dataclass
 class OrchestrationTask:
-	"""宿主可见的一次旁路编排运行记录。
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+宿主可见的一次旁路编排运行记录。
 	Host-visible record for one sidecar orchestration run.
 	"""
 	task_id: str
@@ -38,7 +41,9 @@ class OrchestrationTask:
 
 
 class OrchestrationTaskRepository:
-	"""带异步变更边界的内存任务仓储。
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+带异步变更边界的内存任务仓储。
 	In-memory task repository with async mutation boundary.
 	"""
 
@@ -58,7 +63,9 @@ class OrchestrationTaskRepository:
 
 
 class OrchestrationEventPresenter:
-	"""把会话事件和最终任务结果转换为宿主可见 payload。
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+把会话事件和最终任务结果转换为宿主可见 payload。
 	Converts session events and final task result into host-visible payloads.
 	"""
 
@@ -81,7 +88,9 @@ class OrchestrationEventPresenter:
 
 
 class OrchestrationWorker:
-	"""通过 MultiAgentSession 运行一个编排任务。
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+通过 MultiAgentSession 运行一个编排任务。
 	Runs one orchestration task through MultiAgentSession.
 	"""
 
@@ -133,7 +142,9 @@ class OrchestrationWorker:
 
 
 class OrchestrationTaskService:
-	"""在 Agent 执行链路外创建并跟踪多 Agent 编排任务。
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+在 Agent 执行链路外创建并跟踪多 Agent 编排任务。
 	Create and track multi-agent orchestration tasks outside Agent execution.
 	"""
 

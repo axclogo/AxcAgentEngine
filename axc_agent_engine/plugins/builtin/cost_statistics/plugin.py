@@ -1,4 +1,5 @@
-"""CostStatistics plugin: token usage accounting only."""
+"""CostStatistics plugin: token usage accounting only.
+中文：此文档说明相关引擎组件的行为。"""
 from __future__ import annotations
 
 import logging
@@ -46,13 +47,15 @@ class CostStatisticsPlugin(BasePlugin):
 		)]
 
 	def should_stop(self, exec_ctx: "ExecutionContext") -> tuple[bool, str]:
-		"""Token accounting never controls execution flow."""
+		"""Token accounting never controls execution flow.
+中文：此文档说明相关引擎组件的行为。"""
 		self._sync_summary(exec_ctx)
 		return False, ""
 
 	async def post_llm_call(self, exec_ctx: "ExecutionContext", messages: list[dict],
 							response: dict, duration_ms: int) -> None:
-		"""Record one LLM call token sample."""
+		"""Record one LLM call token sample.
+中文：此文档说明相关引擎组件的行为。"""
 		usage = response.get("usage", {})
 		input_tokens = _to_int(usage.get("input_tokens", 0))
 		output_tokens = _to_int(usage.get("output_tokens", 0))
@@ -78,7 +81,8 @@ class CostStatisticsPlugin(BasePlugin):
 
 	async def post_tool_call(self, exec_ctx: "ExecutionContext", tool_name: str,
 							 arguments: dict, result: "ToolOutput", duration_ms: int) -> "ToolOutput":
-		"""Record tool call count for usage observability."""
+		"""Record tool call count for usage observability.
+中文：此文档说明相关引擎组件的行为。"""
 		state = self._state(exec_ctx)
 		state["tool_calls"] = _to_int(state.get("tool_calls", 0)) + 1
 		by_tool = state.setdefault("by_tool", {})

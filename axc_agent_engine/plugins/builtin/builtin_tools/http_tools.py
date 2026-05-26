@@ -1,4 +1,5 @@
-"""HTTP builtin tool and SSRF policy."""
+"""HTTP builtin tool and SSRF policy.
+中文：此文档说明相关引擎组件的行为。"""
 import asyncio
 import ipaddress
 import socket
@@ -17,7 +18,8 @@ MAX_HTTP_BYTES = 5 * 1024 * 1024
 
 
 def is_blocked_ip(ip: str) -> bool:
-	"""Return True for local, private, metadata, or otherwise unsafe IP ranges."""
+	"""Return True for local, private, metadata, or otherwise unsafe IP ranges.
+中文：此文档说明相关引擎组件的行为。"""
 	try:
 		addr = ipaddress.ip_address(ip)
 	except ValueError:
@@ -26,7 +28,8 @@ def is_blocked_ip(ip: str) -> bool:
 
 
 def resolve_host_ips(hostname: str) -> list[str]:
-	"""Resolve host to IP strings for SSRF checks."""
+	"""Resolve host to IP strings for SSRF checks.
+中文：此文档说明相关引擎组件的行为。"""
 	infos = socket.getaddrinfo(hostname, None, type=socket.SOCK_STREAM)
 	return sorted({info[4][0] for info in infos})
 

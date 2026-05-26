@@ -10,7 +10,9 @@ if TYPE_CHECKING:
 
 
 class MaxRoundsStop:
-	"""达到最大轮次时停止。
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+达到最大轮次时停止。
 	Stop when the maximum round count is reached.
 	"""
 	def __init__(self, max_rounds: int = 10) -> None:

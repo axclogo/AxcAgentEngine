@@ -22,7 +22,9 @@ DEFAULT_RULES = [
 
 
 class RepetitionGuardPlugin(BasePlugin):
-	"""多维重复检测：工具调用、LLM 响应和工具结果。"""
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+多维重复检测：工具调用、LLM 响应和工具结果。"""
 	name = "repetition_guard"
 	display_name = "重复防护"
 	priority = 6
@@ -137,7 +139,8 @@ def _hash_args(arguments: dict) -> str:
 
 
 def _count_consecutive_tail(history: list, predicate) -> int:
-	"""从尾部开始计数连续匹配的数量"""
+	"""English: This documentation describes the related engine component behavior.
+中文：从尾部开始计数连续匹配的数量"""
 	count = 0
 	for item in reversed(history):
 		if predicate(item):

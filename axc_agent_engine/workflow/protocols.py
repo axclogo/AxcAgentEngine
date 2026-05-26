@@ -3,7 +3,7 @@
 The engine keeps ReAct and POR independent from workflow persistence. Pause and
 resume entry points pass through this small protocol so Apache Burr can be used
 as an adapter without becoming a core execution dependency.
-"""
+中文：此文档说明相关引擎组件的行为。"""
 from __future__ import annotations
 
 from collections.abc import AsyncIterator, Callable

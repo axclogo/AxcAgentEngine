@@ -1,4 +1,5 @@
-"""Graph tool argument handling and ToolOutput conversion."""
+"""Graph tool argument handling and ToolOutput conversion.
+中文：此文档说明相关引擎组件的行为。"""
 import time
 from typing import Any
 

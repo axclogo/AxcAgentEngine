@@ -12,7 +12,8 @@ logger = logging.getLogger(__name__)
 
 
 class PostProcessPlugin(BasePlugin):
-	"""执行后处理 — 可选追加执行统计"""
+	"""English: This documentation describes the related engine component behavior.
+中文：执行后处理 — 可选追加执行统计"""
 	name = "post_process"
 	display_name = "执行后处理"
 	priority = 99
@@ -22,7 +23,8 @@ class PostProcessPlugin(BasePlugin):
 		self._append_stats = config.get("append_stats", False)
 
 	async def on_execution_complete(self, exec_ctx: "ExecutionContext", result: str, trace: dict) -> str:
-		"""追加执行统计到结果末尾（可选）"""
+		"""English: This documentation describes the related engine component behavior.
+中文：追加执行统计到结果末尾（可选）"""
 		if not self._append_stats:
 			return result
 		rounds = trace.get("rounds", 0)

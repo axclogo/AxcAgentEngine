@@ -1,4 +1,5 @@
-"""Compress plugin context management."""
+"""Compress plugin context management.
+中文：此文档说明相关引擎组件的行为。"""
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
@@ -108,7 +109,7 @@ class RecallContextService:
 			items = fallback_recall(messages, current_message, plugin._recall_top_k, plugin._recall_token_limit)
 		lines = [_format_recall_item(item, plugin._recall_full_threshold, plugin._recall_compressed_threshold) for item in items]
 		lines = [line for line in lines if line]
-		return {"role": "system", "content": "[recalled context]\n" + "\n".join(lines)} if lines else None
+		return {"role": "system", "content": "[召回上下文]\n" + "\n".join(lines)} if lines else None
 
 	async def write(self, user_message: str, assistant_message: str, exec_ctx: "ExecutionContext") -> None:
 		plugin = self.plugin
@@ -139,7 +140,8 @@ class ToolSummaryCoordinator:
 
 
 class CompressPlugin(BasePlugin):
-	"""Context management plugin exposed under the historical name compress."""
+	"""Context management plugin exposed under the historical name compress.
+中文：此文档说明相关引擎组件的行为。"""
 
 	name = "compress"
 	display_name = "上下文治理"
@@ -320,5 +322,5 @@ def _format_recall_item(item, full_threshold: float, compressed_threshold: float
 	if item.score >= full_threshold:
 		return f"- {item.text}"
 	if item.score >= compressed_threshold:
-		return f"- {item.text[:300]} [compressed recall]"
+		return f"- {item.text[:300]} [压缩召回]"
 	return ""

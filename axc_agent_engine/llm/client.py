@@ -25,7 +25,8 @@ logger = logging.getLogger(__name__)
 
 
 class OpenAIErrorMapper:
-	"""Maps httpx failures into provider-neutral exceptions."""
+	"""Maps httpx failures into provider-neutral exceptions.
+中文：此文档说明相关引擎组件的行为。"""
 
 	def provider_error_from_status(self, error: httpx.HTTPStatusError, prefix: str) -> ProviderError:
 		status = error.response.status_code
@@ -40,7 +41,8 @@ class OpenAIErrorMapper:
 
 
 class OpenAIResponseParser:
-	"""Converts OpenAI-compatible payloads into engine schema objects."""
+	"""Converts OpenAI-compatible payloads into engine schema objects.
+中文：此文档说明相关引擎组件的行为。"""
 
 	def parse_response(self, raw: dict[str, Any]) -> LLMResponse:
 		choices = raw.get("choices", [])
@@ -146,7 +148,9 @@ class OpenAIClient:
 
 	async def chat(self, messages: list[dict], tools: list[dict] | None = None,
 				   **kwargs: Any) -> LLMResponse:
-		"""非流式调用，返回标准化 LLMResponse。"""
+		"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+非流式调用，返回标准化 LLMResponse。"""
 		client = await self._get_client()
 		payload = self._build_payload(messages, tools, **kwargs)
 		try:
@@ -162,7 +166,9 @@ class OpenAIClient:
 
 	async def stream(self, messages: list[dict], tools: list[dict] | None = None,
 					 **kwargs: Any) -> AsyncIterator[LLMStreamChunk]:
-		"""流式调用，产出标准化 LLMStreamChunk。"""
+		"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+流式调用，产出标准化 LLMStreamChunk。"""
 		client = await self._get_client()
 		payload = self._build_payload(messages, tools, **kwargs)
 		payload["stream"] = True
@@ -188,7 +194,9 @@ class OpenAIClient:
 			raise RetryableProviderError(f"LLM request failed: {e}") from e
 
 	async def ask(self, prompt: str, **kwargs: Any) -> str:
-		"""便捷方法：发送单条 prompt，返回文本回复。"""
+		"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+便捷方法：发送单条 prompt，返回文本回复。"""
 		response = await self.chat([{"role": "user", "content": prompt}], **kwargs)
 		return response.message.content
 

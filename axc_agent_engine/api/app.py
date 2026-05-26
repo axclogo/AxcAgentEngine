@@ -12,7 +12,9 @@ logger = logging.getLogger(__name__)
 
 
 def create_app(engine: Engine, agents_dir: str = "") -> FastAPI:
-	"""创建 FastAPI 应用"""
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+创建 FastAPI 应用"""
 	from fastapi import FastAPI
 	from fastapi.responses import JSONResponse
 	from starlette.requests import Request

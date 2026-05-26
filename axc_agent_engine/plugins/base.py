@@ -1,7 +1,8 @@
-"""插件基类 — 所有内置和外部插件都继承它。
+"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+插件基类 — 所有内置和外部插件都继承它。
 
-English: Base class for all builtin and external plugins.
-"""
+English: Base class for all builtin and external plugins."""
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
@@ -14,7 +15,9 @@ if TYPE_CHECKING:
 
 
 class BasePlugin:
-	"""插件基类。
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+插件基类。
 
 	生命周期：
 	  initialize → on_execution_start → [inject_context → transform_messages
@@ -29,10 +32,10 @@ class BasePlugin:
 	name: str = ""
 	display_name: str = ""
 	priority: int = 50
-	phase: str = "core"  # "pre" | "core" | "post" — 用于排序的执行阶段 / English: execution ordering phase.
+	phase: str = "core"  # English: execution ordering phase, "pre" | "core" | "post". 中文：用于排序的执行阶段。
 	version: str = "0.1.0"
-	depends_on: list[str] = []  # 显式依赖声明 / English: explicit plugin dependency names.
-	fail_closed: bool = False  # True 表示 hook 失败时中止执行，而不是吞掉错误 / English: fail hook errors closed.
+	depends_on: list[str] = []  # English: explicit plugin dependency names. 中文：显式依赖声明。
+	fail_closed: bool = False  # English: fail hook errors closed. 中文：hook 失败时中止执行，而不是吞掉错误。
 
 	def initialize(self, config: dict, plugin_ctx: "PluginContext") -> None:
 		"""Engine 级初始化，传入配置和上下文。
@@ -44,14 +47,16 @@ class BasePlugin:
 		self._plugin_ctx = plugin_ctx
 
 	async def close(self) -> None:
-		"""释放插件资源（异步）。
+		"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+释放插件资源（异步）。
 
 		English: Release plugin resources asynchronously.
 		"""
 		pass
 
-	# ── 异步 hooks ──
-	# English: Asynchronous lifecycle hooks.
+	#English: Bilingual note. 中文：── 异步 hooks ──
+	#English: English: Asynchronous lifecycle hooks. 中文：源码说明。
 
 	async def on_execution_start(self, exec_ctx: "ExecutionContext") -> None:
 		pass
@@ -60,7 +65,9 @@ class BasePlugin:
 		pass
 
 	async def on_execution_complete(self, exec_ctx: "ExecutionContext", result: str, trace: dict) -> str:
-		"""执行完成后的处理，可修改最终结果。
+		"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+执行完成后的处理，可修改最终结果。
 
 		English: Post-process the final result after execution completes.
 		"""
@@ -74,11 +81,13 @@ class BasePlugin:
 		pass
 
 	async def on_plan_created(self, exec_ctx: "ExecutionContext", plan_info: dict) -> None:
-		"""计划创建后触发。"""
+		"""English: This documentation describes the related engine component behavior.
+中文：计划创建后触发。"""
 		pass
 
 	async def on_step_completed(self, exec_ctx: "ExecutionContext", step_info: dict) -> None:
-		"""步骤完成后触发。"""
+		"""English: This documentation describes the related engine component behavior.
+中文：步骤完成后触发。"""
 		pass
 
 	async def post_llm_call(self, exec_ctx: "ExecutionContext", messages: list[dict],
@@ -87,7 +96,9 @@ class BasePlugin:
 
 	async def pre_tool_call(self, exec_ctx: "ExecutionContext", tool_name: str,
 							arguments: dict) -> tuple[bool, dict]:
-		"""工具调用前 hook，返回 (是否允许, 可能修改后的参数)。
+		"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+工具调用前 hook，返回 (是否允许, 可能修改后的参数)。
 
 		English: Pre-tool hook returning (allowed, possibly modified arguments).
 		"""
@@ -95,7 +106,9 @@ class BasePlugin:
 
 	async def post_tool_call(self, exec_ctx: "ExecutionContext", tool_name: str,
 							 arguments: dict, result: "ToolOutput", duration_ms: int) -> "ToolOutput":
-		"""工具调用后 hook，接收并返回 ToolOutput。
+		"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+工具调用后 hook，接收并返回 ToolOutput。
 
 		English: Post-tool hook that receives and returns a ToolOutput.
 		"""
@@ -103,18 +116,22 @@ class BasePlugin:
 
 	async def on_tool_call_failed(self, exec_ctx: "ExecutionContext", tool_name: str,
 								  arguments: dict, error: dict, duration_ms: int) -> None:
-		"""工具调用失败 hook；不修改工具结果，用于 tracing/audit 类插件补齐失败观测。
+		"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+工具调用失败 hook；不修改工具结果，用于 tracing/audit 类插件补齐失败观测。
 
 		English: Failure-observation hook for tracing/audit plugins; it does not
 		change the tool result.
 		"""
 		pass
 
-	# ── 同步 hooks（轻量，不做 I/O） ──
-	# English: Lightweight synchronous hooks; do not perform I/O here.
+	#English: Bilingual note. 中文：── 同步 hooks（轻量，不做 I/O） ──
+	#English: English: Lightweight synchronous hooks; do not perform I/O here. 中文：源码说明。
 
 	def inject_context(self, exec_ctx: "ExecutionContext", topic: str = "") -> str:
-		"""返回要注入 system prompt 的额外上下文。
+		"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+返回要注入 system prompt 的额外上下文。
 
 		English: Return extra context to inject into the system prompt.
 		"""
@@ -126,7 +143,9 @@ class BasePlugin:
 		return messages
 
 	def get_tools(self) -> "list[ToolDefinition]":
-		"""返回工具定义；可使用 initialize() 阶段设置的 self._plugin_ctx。
+		"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+返回工具定义；可使用 initialize() 阶段设置的 self._plugin_ctx。
 
 		English: Return tool definitions; plugins may use self._plugin_ctx set by initialize().
 		"""
@@ -138,7 +157,9 @@ class BasePlugin:
 		return messages, tools
 
 	def should_stop(self, exec_ctx: "ExecutionContext") -> tuple[bool, str]:
-		"""检查是否应停止执行，返回 (should_stop, reason)。
+		"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+检查是否应停止执行，返回 (should_stop, reason)。
 
 		English: Return whether execution should stop and the reason.
 		"""

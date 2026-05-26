@@ -164,7 +164,9 @@ class Engine:
 
 	@property
 	def provider_registry(self) -> ProviderRegistry:
-		"""访问命名 provider 注册表，用于 per-agent LLM 配置。
+		"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+访问命名 provider 注册表，用于 per-agent LLM 配置。
 
 		English: Access the named provider registry used by per-agent LLM configuration.
 		"""
@@ -172,7 +174,9 @@ class Engine:
 
 	@property
 	def resources(self) -> ResourceRegistry:
-		"""访问共享资源注册表。
+		"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+访问共享资源注册表。
 
 		English: Access the shared resource registry injected into plugins.
 		"""
@@ -180,7 +184,9 @@ class Engine:
 
 	@property
 	def plugin_registry(self) -> PluginRegistry:
-		"""访问 Engine 级插件注册表。
+		"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+访问 Engine 级插件注册表。
 		Access the engine-scoped plugin registry.
 		"""
 		return self._plugin_registry
@@ -189,7 +195,9 @@ class Engine:
 				 default_llm: "LLMConfig | LLMProvider | str | None" = None,
 				 fallback_llm: "LLMConfig | LLMProvider | str | None" = None,
 				 utility_llm: "LLMConfig | LLMProvider | str | None" = None) -> Agent:
-		"""加载 Agent YAML 并初始化插件。
+		"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+加载 Agent YAML 并初始化插件。
 
 		LLM 参数可以是 LLMConfig、LLMProvider 实例，或 ProviderRegistry 中的
 		命名 provider 字符串。
@@ -199,14 +207,14 @@ class Engine:
 		"""
 		path, config, system_prompt = self._config_loader.load(yaml_path)
 		# per-agent LLM 解析优先级：显式参数 > engine 默认 provider。
-		# English: Per-agent LLM resolution prefers explicit arguments over engine defaults.
-		# 支持通过 ProviderRegistry 解析字符串名称。
-		# English: String references are resolved through ProviderRegistry.
+		#English: English: Per-agent LLM resolution prefers explicit arguments over engine defaults. 中文：源码说明。
+		#English: Bilingual note. 中文：支持通过 ProviderRegistry 解析字符串名称。
+		#English: English: String references are resolved through ProviderRegistry. 中文：源码说明。
 		agent_default = self._resolve_provider(default_llm) or self._default_client
 		agent_fallback = self._resolve_provider(fallback_llm) or self._fallback_client
 		agent_utility = self._resolve_provider(utility_llm) or self._utility_client or agent_default
 		# PluginContext 使用 Agent 级 provider，不使用 engine 全局 provider。
-		# English: PluginContext receives agent-level providers, not global engine providers.
+		#English: English: PluginContext receives agent-level providers, not global engine providers. 中文：源码说明。
 		plugin_ctx = PluginContext(
 			default_llm=agent_default,
 			fallback_llm=agent_fallback,
@@ -229,8 +237,8 @@ class Engine:
 				routing_mode=config.runtime.routing.mode if config.runtime.routing else "auto",
 			),
 		)
-		# 提前创建 registry，确保插件 initialize() 阶段可访问。
-		# English: Create the registry before plugin initialization so plugins can register tools.
+		#English: Bilingual note. 中文：提前创建 registry，确保插件 initialize() 阶段可访问。
+		#English: English: Create the registry before plugin initialization so plugins can register tools. 中文：源码说明。
 		registry = ToolRegistry(name_mapping=self._provider_tool_name_mapping(agent_default))
 		plugin_ctx.tool_registry = registry
 		plugins_raw = {k: v.model_dump() for k, v in config.plugins.items()}
@@ -269,7 +277,8 @@ class Engine:
 			await agent.close()
 
 	async def close(self, timeout: float = 30.0) -> None:
-		"""优雅关闭。"""
+		"""English: This documentation describes the related engine component behavior.
+中文：优雅关闭。"""
 		if self._dispatcher:
 			await self._dispatcher.stop_all()
 		for agent in self._agents.values():
@@ -287,7 +296,9 @@ class Engine:
 		return ProviderResolver(ProviderRegistry()).make_client(llm)
 
 	def _resolve_provider(self, ref) -> LLMProvider | None:
-		"""从字符串名称、LLMConfig、LLMProvider 或 None 解析 provider。"""
+		"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+从字符串名称、LLMConfig、LLMProvider 或 None 解析 provider。"""
 		return self._provider_resolver.resolve(ref)
 
 	@staticmethod

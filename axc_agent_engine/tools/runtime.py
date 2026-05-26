@@ -1,4 +1,5 @@
-"""Runtime objects for tool orchestration."""
+"""Runtime objects for tool orchestration.
+中文：此文档说明相关引擎组件的行为。"""
 from __future__ import annotations
 
 import asyncio
@@ -12,7 +13,8 @@ from axc_agent_engine.tools.registry import ToolRegistry
 
 @dataclass
 class ToolCallRuntime:
-	"""单次工具调用的运行时上下文。"""
+	"""English: This documentation describes the related engine component behavior.
+中文：单次工具调用的运行时上下文。"""
 	name: str
 	arguments: dict
 	tool_call_id: str
@@ -39,7 +41,8 @@ def tool_runtime(tc: dict, ctx: ExecutionContext, registry: ToolRegistry) -> Too
 
 
 def push_current_tool_runtime(ctx: ExecutionContext, runtime: ToolCallRuntime) -> int:
-	"""Store per-task tool metadata so observability plugins can correlate hooks safely."""
+	"""Store per-task tool metadata so observability plugins can correlate hooks safely.
+中文：此文档说明相关引擎组件的行为。"""
 	task = asyncio.current_task()
 	key = id(task) if task else id(runtime)
 	contexts = ctx.runtime.plugin_states.setdefault("_tool_runtime_contexts", {})

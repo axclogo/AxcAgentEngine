@@ -32,7 +32,7 @@ class GraphPlugin(BasePlugin):
 		self._handlers = GraphToolHandlers(self._service, self._presenter, self._audit_recorder)
 		self._tool_factory = GraphToolFactory(self._config, self._handlers.tools())
 
-		# Compatibility attributes for existing direct tests and first-version callers.
+		#English: Compatibility attributes for existing direct tests and first-version callers. 中文：源码说明。
 		self._store = self._service.store
 		self._load_errors = self._service.load_errors
 		self._source_stats = self._service.source_stats

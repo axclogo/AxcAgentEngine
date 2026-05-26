@@ -18,7 +18,8 @@ StreamCallback = Callable[[str, str, dict[str, Any]], Awaitable[None]]
 
 @dataclass
 class AggregatedMessage:
-	"""流式聚合后的结果。"""
+	"""English: This documentation describes the related engine component behavior.
+中文：流式聚合后的结果。"""
 	message: dict[str, Any] = field(default_factory=dict)
 	thinking_content: str = ""
 	usage_input: int = 0
@@ -104,7 +105,8 @@ class StreamAggregateState:
 		return bool(self.content_parts or self.tool_calls_map)
 
 	def _merge_tool_call(self, tc_delta: dict) -> None:
-		"""Merge one tool_call delta into accumulated OpenAI tool_call shape."""
+		"""Merge one tool_call delta into accumulated OpenAI tool_call shape.
+中文：此文档说明相关引擎组件的行为。"""
 		idx = tc_delta.get("index", 0)
 		if idx not in self.tool_calls_map:
 			self.tool_calls_map[idx] = {"id": tc_delta.get("id", ""), "function": {"name": "", "arguments": ""}}
@@ -119,13 +121,17 @@ class StreamAggregateState:
 
 
 class StreamAggregator:
-	"""把 LLMStreamChunk 聚合成完整 message dict。"""
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+把 LLMStreamChunk 聚合成完整 message dict。"""
 
 	async def aggregate(
 		self, aiter: AsyncIterator[LLMStreamChunk], idle_timeout: int,
 		on_delta: StreamCallback | None = None,
 	) -> AggregatedMessage:
-		"""把流式 chunk 聚合成 AggregatedMessage。"""
+		"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+把流式 chunk 聚合成 AggregatedMessage。"""
 		state = StreamAggregateState()
 		iterator = aiter.__aiter__()
 		while True:

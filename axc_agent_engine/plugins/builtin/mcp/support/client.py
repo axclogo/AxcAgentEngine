@@ -1,4 +1,5 @@
-"""Compatibility exports for MCP client adapters."""
+"""Compatibility exports for MCP client adapters.
+中文：此文档说明相关引擎组件的行为。"""
 from .connection import MCPConnection
 from .models import MCPApplicationError, MCPTool, MCPTransport, MCPTransportError
 from .normalization import normalize_call_result

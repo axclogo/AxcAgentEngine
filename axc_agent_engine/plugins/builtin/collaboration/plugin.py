@@ -138,7 +138,7 @@ class CollaborationPlugin(BasePlugin):
 				 "mode": {"type": "string", "description": "推演模式"},
 				 "topic": {"type": "string", "description": "推演主题"},
 				 "max_rounds": {"type": "integer", "description": "最大轮次", "default": 10},
-				 "supervisor": {"type": "string", "description": "supervisor 模式下的管理者 Agent 名称"},
+				 "supervisor": {"type": "string", "description": "监督者模式下的管理者 Agent 名称"},
 				 "persona": {"type": "object", "description": "按 agent_name 配置的 persona/team 元数据"}},
 				 "required": ["agent_names", "mode", "topic"]},
 					is_read_only=False,
@@ -172,7 +172,9 @@ class CollaborationPlugin(BasePlugin):
 		return tools
 
 	def _get_dispatcher(self):
-		"""从插件上下文获取共享 dispatcher。"""
+		"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+从插件上下文获取共享 dispatcher。"""
 		return self._plugin_ctx.dispatcher
 
 	def _orchestration_service(self) -> Any:

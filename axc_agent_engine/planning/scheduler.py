@@ -8,7 +8,8 @@ logger = logging.getLogger(__name__)
 
 
 def get_next_steps(plan: Plan) -> list[PlanStep]:
-	"""获取所有可执行的待执行步骤（依赖已满足）"""
+	"""English: This documentation describes the related engine component behavior.
+中文：获取所有可执行的待执行步骤（依赖已满足）"""
 	ready = []
 	for step in plan.steps:
 		if step.status == StepStatus.PENDING:
@@ -22,12 +23,14 @@ def get_next_steps(plan: Plan) -> list[PlanStep]:
 
 
 def get_remaining_count(plan: Plan) -> int:
-	"""获取剩余待执行步骤数"""
+	"""English: This documentation describes the related engine component behavior.
+中文：获取剩余待执行步骤数"""
 	return sum(1 for s in plan.steps if s.status == StepStatus.PENDING)
 
 
 def mark_step_done(plan: Plan, step_id: int, result: str) -> None:
-	"""标记步骤完成"""
+	"""English: This documentation describes the related engine component behavior.
+中文：标记步骤完成"""
 	step = _get_step(plan, step_id)
 	if step:
 		step.status = StepStatus.DONE
@@ -35,7 +38,8 @@ def mark_step_done(plan: Plan, step_id: int, result: str) -> None:
 
 
 def mark_step_failed(plan: Plan, step_id: int, error: str) -> None:
-	"""标记步骤失败"""
+	"""English: This documentation describes the related engine component behavior.
+中文：标记步骤失败"""
 	step = _get_step(plan, step_id)
 	if step:
 		step.status = StepStatus.FAILED

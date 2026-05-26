@@ -14,13 +14,17 @@ from axc_agent_engine.planning.planning_service import PlanningService
 
 @dataclass(frozen=True)
 class RoutingDecision:
-	"""单轮 LLM 输出后的运行时路由决策。"""
-	action: str  # 可选值：final_answer | tool_calls | por_plan
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+单轮 LLM 输出后的运行时路由决策。"""
+	action: str  # English: allowed values are final_answer | tool_calls | por_plan. 中文：可选值为 final_answer | tool_calls | por_plan。
 	plan: Plan | None = None
 
 
 class TransactionRouter:
-	"""根据路由策略决定进入 ReAct 还是 POR。"""
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+根据路由策略决定进入 ReAct 还是 POR。"""
 
 	def __init__(self, mode: str = "auto") -> None:
 		self._mode = mode
@@ -30,7 +34,9 @@ class TransactionRouter:
 		return self._mode
 
 	def route(self, message: dict[str, Any]) -> RoutingDecision:
-		"""把标准化 assistant message 分类成运行时 action。"""
+		"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+把标准化 assistant message 分类成运行时 action。"""
 		tool_calls = message.get("tool_calls", []) or []
 		if not tool_calls:
 			plan = None if self._mode == "react_only" else PlanningService.detect_plan(message)

@@ -3,7 +3,7 @@
 Burr remains optional and isolated in this module. Importing the main engine
 does not import Burr; deployers choose this runtime when they want durable
 workflow state around pause/resume.
-"""
+中文：此文档说明相关引擎组件的行为。"""
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
@@ -26,7 +26,8 @@ class _BurrRecord:
 
 
 class BurrWorkflowRuntime:
-	"""WorkflowRuntime implementation backed by Apache Burr state objects."""
+	"""WorkflowRuntime implementation backed by Apache Burr state objects.
+中文：此文档说明相关引擎组件的行为。"""
 
 	def __init__(self) -> None:
 		self._records: dict[str, _BurrRecord] = {}

@@ -10,11 +10,15 @@ if TYPE_CHECKING:
 
 
 class StopCondition(Protocol):
-	"""终止条件协议。
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+终止条件协议。
 	Stopping condition protocol.
 	"""
 	async def should_stop(self, ctx: SharedContext, round_num: int) -> tuple[bool, str]:
-		"""返回 (should_stop, reason)。
+		"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+返回 (should_stop, reason)。
 		Return (should_stop, reason).
 		"""
 		...

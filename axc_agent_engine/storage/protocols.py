@@ -1,8 +1,9 @@
-"""存储 Protocol 定义 — 引擎零外部存储依赖。
+"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+存储 Protocol 定义 — 引擎零外部存储依赖。
 
 English: Storage protocols used by the engine without requiring external
-storage dependencies.
-"""
+storage dependencies."""
 from __future__ import annotations
 
 from typing import Any, AsyncIterator, Protocol, runtime_checkable
@@ -10,7 +11,9 @@ from typing import Any, AsyncIterator, Protocol, runtime_checkable
 
 @runtime_checkable
 class KVStore(Protocol):
-	"""通用键值存储。
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+通用键值存储。
 
 	English: Generic key-value storage protocol.
 	"""
@@ -22,7 +25,9 @@ class KVStore(Protocol):
 
 @runtime_checkable
 class MessagePersistence(Protocol):
-	"""会话消息持久化。
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+会话消息持久化。
 
 	English: Session message persistence protocol.
 	"""
@@ -33,7 +38,9 @@ class MessagePersistence(Protocol):
 
 @runtime_checkable
 class SpanStore(Protocol):
-	"""链路追踪 span 存储。
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+链路追踪 span 存储。
 
 	English: Trace span storage protocol.
 	"""
@@ -44,7 +51,9 @@ class SpanStore(Protocol):
 
 @runtime_checkable
 class VectorStore(Protocol):
-	"""向量存储接口。
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+向量存储接口。
 
 	English: Vector storage protocol.
 	"""
@@ -66,7 +75,9 @@ class MessageBus(Protocol):
 
 @runtime_checkable
 class ResultStore(Protocol):
-	"""大型工具结果存储 — 支持分页读取和搜索。
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+大型工具结果存储 — 支持分页读取和搜索。
 
 	English: Large tool-result storage with paged reads and search.
 	"""
@@ -77,7 +88,9 @@ class ResultStore(Protocol):
 
 @runtime_checkable
 class AuditSink(Protocol):
-	"""结构化审计事件存储。
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+结构化审计事件存储。
 
 	English: Structured audit event sink protocol.
 	"""
@@ -86,7 +99,9 @@ class AuditSink(Protocol):
 
 @runtime_checkable
 class CheckpointStore(Protocol):
-	"""执行 checkpoint 存储。
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+执行 checkpoint 存储。
 
 	English: Execution checkpoint storage protocol.
 	"""

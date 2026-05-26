@@ -16,7 +16,7 @@ from axc_agent_engine.plugins.registry import PluginRegistry
 
 
 def main() -> None:
-	parser = argparse.ArgumentParser(prog="axc", description="AxcAgentEngine CLI")
+	parser = argparse.ArgumentParser(prog="axc", description="AxcAgentEngine 命令行工具")
 	parser.add_argument("--log-level", default="INFO", help="日志等级")
 	parser.add_argument("--json-logs", action="store_true", help="输出 JSON 格式日志")
 	sub = parser.add_subparsers(dest="command")
@@ -40,7 +40,9 @@ def main() -> None:
 
 
 async def _chat(agent_path: str) -> None:
-	"""交互式对话循环。
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+交互式对话循环。
 
 	English: Run an interactive terminal chat loop.
 	"""
@@ -86,7 +88,9 @@ async def _chat(agent_path: str) -> None:
 
 
 def _serve(agent_path: str, port: int, agents_dir: str = "") -> None:
-	"""启动 REST API 服务。
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+启动 REST API 服务。
 
 	English: Start the REST API server.
 	"""
@@ -105,7 +109,7 @@ def _serve(agent_path: str, port: int, agents_dir: str = "") -> None:
 		print("错误: 请设置 AXC_LLM_BASE_URL 和 AXC_LLM_API_KEY 环境变量")
 		sys.exit(1)
 	engine = Engine(default_llm=llm_config, plugin_registry=_cli_plugin_registry())
-	# 预加载指定的 Agent
+	#English: Bilingual note. 中文：预加载指定的 Agent
 	engine.load_agent(agent_path)
 	app = create_app(engine, agents_dir=agents_dir or os.path.dirname(agent_path))
 	print(f"API 服务启动: http://0.0.0.0:{port}")

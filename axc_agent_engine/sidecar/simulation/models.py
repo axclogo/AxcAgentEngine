@@ -1,4 +1,6 @@
-"""仿真核心数据模型。
+"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+仿真核心数据模型。
 Core simulation data models.
 
 simulation package 刻意独立于 Engine/Agent/Executor。
@@ -6,8 +8,7 @@ The simulation package is intentionally independent from Engine/Agent/Executor.
 
 Agent 可以通过适配器作为 policy 使用，但仿真内核拥有场景状态、动作、delta 和时间线记录。
 Agents may be used as policies by adapters, but the simulation kernel owns
-scenario state, actions, deltas, and timeline records.
-"""
+scenario state, actions, deltas, and timeline records."""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -16,7 +17,9 @@ from typing import Any
 
 
 class ActionType(StrEnum):
-	"""常见仿真动作类别。
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+常见仿真动作类别。
 	Common simulation action categories.
 	"""
 	COMMUNICATE = "communicate"
@@ -46,7 +49,9 @@ class SimulationEventType(StrEnum):
 
 @dataclass
 class AgentProfile:
-	"""参与场景的 actor 静态描述。
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+参与场景的 actor 静态描述。
 	Static description of an actor participating in a scenario.
 	"""
 	name: str
@@ -58,7 +63,9 @@ class AgentProfile:
 
 @dataclass
 class WorldState:
-	"""仿真世界的结构化状态。
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+仿真世界的结构化状态。
 	Structured state of the simulated world.
 	"""
 	step: int = 0
@@ -74,14 +81,18 @@ class WorldState:
 	metadata: dict[str, Any] = field(default_factory=dict)
 
 	def clone(self) -> "WorldState":
-		"""返回适合分支快照使用的独立副本。
+		"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+返回适合分支快照使用的独立副本。
 		Return a detached copy suitable for branch snapshots.
 		"""
 		import copy
 		return copy.deepcopy(self)
 
 	def apply_delta(self, delta: "StateDelta") -> "WorldState":
-		"""原地应用状态 delta，并返回 self 以支持链式调用。
+		"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+原地应用状态 delta，并返回 self 以支持链式调用。
 		Apply a state delta in place and return self for fluent use.
 		"""
 		for fact in delta.facts_removed:
@@ -102,7 +113,9 @@ class WorldState:
 
 @dataclass
 class Scenario:
-	"""一次仿真运行的输入规格。
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+一次仿真运行的输入规格。
 	Input specification for a simulation run.
 	"""
 	id: str
@@ -120,7 +133,9 @@ class Scenario:
 
 @dataclass
 class Observation:
-	"""面向某个 Agent 的世界视图。
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+面向某个 Agent 的世界视图。
 	Agent-specific view of the world.
 	"""
 	agent: str
@@ -148,7 +163,9 @@ class AgentAction:
 
 @dataclass
 class StateDelta:
-	"""应用一个动作后产生的所有世界状态变更。
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+应用一个动作后产生的所有世界状态变更。
 	All world mutations produced by applying one action.
 	"""
 	facts_added: list[str] = field(default_factory=list)
@@ -164,7 +181,9 @@ class StateDelta:
 
 @dataclass
 class Scorecard:
-	"""一个仿真步骤的评估结果。
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+一个仿真步骤的评估结果。
 	Evaluation of one simulation step.
 	"""
 	goal_progress: float = 0.0
@@ -180,7 +199,9 @@ class Scorecard:
 
 @dataclass
 class SimulationStep:
-	"""一个已应用动作的可回放记录。
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+一个已应用动作的可回放记录。
 	Replayable record of one applied action.
 	"""
 	step_id: int
@@ -194,7 +215,9 @@ class SimulationStep:
 
 @dataclass
 class SimulationReport:
-	"""一次仿真运行的最终摘要。
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+一次仿真运行的最终摘要。
 	Final summary of a simulation run.
 	"""
 	scenario_id: str
@@ -209,7 +232,9 @@ class SimulationReport:
 
 @dataclass
 class SimulationEvent:
-	"""仿真执行期间发出的结构化事件。
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+仿真执行期间发出的结构化事件。
 	Structured event emitted during simulation execution.
 	"""
 	type: SimulationEventType

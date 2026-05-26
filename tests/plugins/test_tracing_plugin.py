@@ -333,7 +333,7 @@ async def test_tracing_drops_when_queue_full_and_without_running_loop():
 
 
 def test_tracing_helpers_and_logging(caplog):
-	assert _truncate("abcdef", 3) == "abc...[omitted 3 chars]"
+	assert _truncate("abcdef", 3) == "abc...[省略 3 个字符]"
 	assert _sampled("trace", 1.0)
 	assert not _sampled("trace", 0.0)
 	assert TraceSampler(0.0, sample_errors=False, slow_span_ms=10).should_emit({"duration_ms": 11, "sampled": False}, False)

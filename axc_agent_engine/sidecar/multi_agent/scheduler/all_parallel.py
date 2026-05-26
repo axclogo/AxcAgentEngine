@@ -10,7 +10,9 @@ if TYPE_CHECKING:
 
 
 class AllParallelScheduler:
-	"""所有人并行行动（Social 模式用）。
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+所有人并行行动（Social 模式用）。
 	All agents act in parallel, mainly for Social mode.
 	"""
 	def select_speakers(self, ctx: SharedContext, agents: list,
@@ -18,7 +20,9 @@ class AllParallelScheduler:
 		return list(agents)
 
 	def steps_per_round(self, agents: list) -> int:
-		"""并行 = 1 步 = 1 轮。
+		"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+并行 = 1 步 = 1 轮。
 		Parallel mode treats one step as one round.
 		"""
 		return 1

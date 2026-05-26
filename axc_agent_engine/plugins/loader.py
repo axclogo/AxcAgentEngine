@@ -1,6 +1,7 @@
-"""插件加载器。
-Plugin loader.
-"""
+"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+插件加载器。
+Plugin loader."""
 import logging
 
 from axc_agent_engine.core.errors import PluginInitError
@@ -16,7 +17,9 @@ def load_plugins(
 	ctx: PluginContext,
 	registry: PluginRegistry,
 ) -> list[BasePlugin]:
-	"""加载并初始化所有启用插件，按 phase+priority 排序并校验依赖。
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+加载并初始化所有启用插件，按 phase+priority 排序并校验依赖。
 	Load and initialize enabled plugins, then sort and validate dependencies.
 	"""
 	active: list[BasePlugin] = []
@@ -45,14 +48,18 @@ def load_plugins(
 
 
 def _phase_order(phase: str) -> int:
-	"""把 phase 映射为排序顺序：pre < core < post。
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+把 phase 映射为排序顺序：pre < core < post。
 	Map phase to ordering: pre < core < post.
 	"""
 	return {"pre": 0, "core": 1, "post": 2}.get(phase, 1)
 
 
 def _validate_plugin_name(config_name: str, plugin: BasePlugin) -> None:
-	"""插件声明名必须非空，并与 YAML key 一致。
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+插件声明名必须非空，并与 YAML key 一致。
 	Plugin declared name must be non-empty and match the YAML key.
 	"""
 	if not plugin.name:
@@ -62,7 +69,9 @@ def _validate_plugin_name(config_name: str, plugin: BasePlugin) -> None:
 
 
 def _validate_unique_plugin_names(plugins: list[BasePlugin]) -> None:
-	"""同一次加载中不允许出现同名插件。
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+同一次加载中不允许出现同名插件。
 	Duplicate plugin names are not allowed in one load.
 	"""
 	seen: set[str] = set()
@@ -73,7 +82,9 @@ def _validate_unique_plugin_names(plugins: list[BasePlugin]) -> None:
 
 
 def _validate_dependencies(plugins: list[BasePlugin]) -> None:
-	"""使用 Kahn 算法做拓扑排序并检测环。
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+使用 Kahn 算法做拓扑排序并检测环。
 	Use Kahn's algorithm for topological sort and cycle detection.
 	"""
 	name_set = {p.name for p in plugins}

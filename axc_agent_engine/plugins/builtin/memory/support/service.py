@@ -1,4 +1,5 @@
-"""Layered memory service."""
+"""Layered memory service.
+中文：此文档说明相关引擎组件的行为。"""
 from __future__ import annotations
 
 import hashlib
@@ -79,7 +80,8 @@ class MemoryItem:
 
 @runtime_checkable
 class MemoryStore(Protocol):
-	"""Storage-neutral four-layer memory persistence."""
+	"""Storage-neutral four-layer memory persistence.
+中文：此文档说明相关引擎组件的行为。"""
 	def add_item(self, item: MemoryItem) -> MemoryItem: ...
 	def get_item(self, item_id: str) -> MemoryItem | None: ...
 	def list_items(self, layer: str | None = None) -> list[MemoryItem]: ...
@@ -89,30 +91,35 @@ class MemoryStore(Protocol):
 
 @runtime_checkable
 class MemoryRetriever(Protocol):
-	"""Retrieves relevant memories from a store."""
+	"""Retrieves relevant memories from a store.
+中文：此文档说明相关引擎组件的行为。"""
 	def retrieve(self, topic: str = "", layer: str | None = None, top_k: int = 5) -> list[MemoryItem]: ...
 
 
 @runtime_checkable
 class FactExtractor(Protocol):
-	"""Extracts structured facts from model output or conversation text."""
+	"""Extracts structured facts from model output or conversation text.
+中文：此文档说明相关引擎组件的行为。"""
 	def extract(self, text: str) -> list[dict[str, Any]]: ...
 
 
 @runtime_checkable
 class Deduplicator(Protocol):
-	"""Finds duplicate memory records."""
+	"""Finds duplicate memory records.
+中文：此文档说明相关引擎组件的行为。"""
 	def find_duplicate(self, content: str, candidates: list[MemoryItem], layer: str | None = None) -> MemoryItem | None: ...
 
 
 @runtime_checkable
 class GraphMemoryStore(Protocol):
-	"""Graph memory operations used by layered memory."""
+	"""Graph memory operations used by layered memory.
+中文：此文档说明相关引擎组件的行为。"""
 	def search(self, query: str, limit: int = 10) -> list[dict[str, Any]]: ...
 
 
 class InMemoryMemoryStore:
-	"""No-database MemoryStore fallback."""
+	"""No-database MemoryStore fallback.
+中文：此文档说明相关引擎组件的行为。"""
 
 	def __init__(self, items: list[MemoryItem] | None = None) -> None:
 		self._items: dict[str, MemoryItem] = {item.id: item for item in items or []}
@@ -141,14 +148,16 @@ class InMemoryMemoryStore:
 
 
 class JsonFactExtractor:
-	"""FactExtractor backed by the engine's JSON fact response parser."""
+	"""FactExtractor backed by the engine's JSON fact response parser.
+中文：此文档说明相关引擎组件的行为。"""
 
 	def extract(self, text: str) -> list[dict[str, Any]]:
 		return parse_facts_response(text)
 
 
 class SimilarityDeduplicator:
-	"""Character-shingle deduplicator used by the fallback memory service."""
+	"""Character-shingle deduplicator used by the fallback memory service.
+中文：此文档说明相关引擎组件的行为。"""
 
 	def __init__(self, threshold: float = 0.85) -> None:
 		self.threshold = threshold
@@ -163,7 +172,8 @@ class SimilarityDeduplicator:
 
 
 class MemoryService:
-	"""Four-layer memory with deduplication, decay, BM25 retrieval, and graph hooks."""
+	"""Four-layer memory with deduplication, decay, BM25 retrieval, and graph hooks.
+中文：此文档说明相关引擎组件的行为。"""
 
 	def __init__(self, dedup_threshold: float = 0.85, decay_half_life_days: int = 7,
 				 graph: GraphMemory | None = None,
@@ -354,7 +364,8 @@ class MemoryService:
 
 
 def parse_facts_response(text: str) -> list[dict[str, Any]]:
-	"""Parse JSON fact extraction responses."""
+	"""Parse JSON fact extraction responses.
+中文：此文档说明相关引擎组件的行为。"""
 	if not text:
 		return []
 	text = text.strip()

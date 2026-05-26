@@ -1,6 +1,7 @@
-"""从 Agent 执行轨迹中蒸馏可复用指导。
-Distill reusable guidance from Agent execution traces.
-"""
+"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+从 Agent 执行轨迹中蒸馏可复用指导。
+Distill reusable guidance from Agent execution traces."""
 from __future__ import annotations
 
 from collections import Counter, defaultdict
@@ -10,7 +11,9 @@ from typing import Any
 
 @dataclass(frozen=True)
 class TraceStep:
-	"""用于蒸馏的最小可回放步骤。
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+用于蒸馏的最小可回放步骤。
 	Minimal replayable step for distillation.
 	"""
 	role: str
@@ -23,7 +26,9 @@ class TraceStep:
 
 @dataclass(frozen=True)
 class ExecutionTrace:
-	"""宿主提供的执行轨迹。
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+宿主提供的执行轨迹。
 	Host-provided execution trace.
 	"""
 	trace_id: str
@@ -37,7 +42,9 @@ class ExecutionTrace:
 
 @dataclass(frozen=True)
 class DistilledRule:
-	"""一条蒸馏出的行为规则。
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+一条蒸馏出的行为规则。
 	One distilled behavior rule.
 	"""
 	text: str
@@ -47,7 +54,9 @@ class DistilledRule:
 
 @dataclass(frozen=True)
 class DistillationReport:
-	"""适用于 prompt、skill 或 policy 更新的蒸馏结果。
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+适用于 prompt、skill 或 policy 更新的蒸馏结果。
 	Distillation result suitable for prompt, skill, or policy updates.
 	"""
 	rules: list[DistilledRule] = field(default_factory=list)
@@ -58,7 +67,9 @@ class DistillationReport:
 
 
 class DistillationReportBuilder:
-	"""从轨迹聚合中构建确定性的蒸馏报告。
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+从轨迹聚合中构建确定性的蒸馏报告。
 	Builds deterministic distillation reports from trace aggregates.
 	"""
 

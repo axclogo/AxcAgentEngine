@@ -255,8 +255,8 @@ class TestPORRunner:
 		async for event in runner.run(plan, "parallel plan"):
 			events.append(event)
 		contents = "\n".join(str(m.get("content", "")) for m in ms.get_all())
-		assert "[POR step 1 result]" in contents
-		assert "[POR step 2 result]" in contents
+		assert "[POR 步骤 1 结果]" in contents
+		assert "[POR 步骤 2 结果]" in contents
 		assert "step-one-result" in contents
 		assert "step-two-result" in contents
 		assert plan.steps[2].result == "step-three-result"
@@ -308,8 +308,8 @@ class TestPORRunner:
 			events.append(event)
 
 		assert plan.steps[0].status == StepStatus.FAILED
-		assert plan.steps[0].error == "Step exceeded sub-loop round limit"
-		assert any(event.type == EventType.STEP_COMPLETED and "Step exceeded" in event.content for event in events)
+		assert plan.steps[0].error == "步骤超过子循环轮次限制"
+		assert any(event.type == EventType.STEP_COMPLETED and "步骤超过" in event.content for event in events)
 
 	@pytest.mark.asyncio
 	async def test_step_tool_call_can_continue_to_final_answer(self):

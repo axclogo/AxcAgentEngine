@@ -1,4 +1,5 @@
-"""L0 message normalization."""
+"""L0 message normalization.
+中文：此文档说明相关引擎组件的行为。"""
 from __future__ import annotations
 
 import json
@@ -17,7 +18,8 @@ PUBLIC_MESSAGE_KEYS = {
 
 
 def normalize_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
-	"""Clean invalid messages and add lightweight context metadata."""
+	"""Clean invalid messages and add lightweight context metadata.
+中文：此文档说明相关引擎组件的行为。"""
 	normalized: list[dict[str, Any]] = []
 	round_no = 0
 	for index, raw in enumerate(messages):
@@ -34,7 +36,8 @@ def normalize_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def public_message(message: dict[str, Any]) -> dict[str, Any]:
-	"""Strip internal context metadata before sending messages to providers."""
+	"""Strip internal context metadata before sending messages to providers.
+中文：此文档说明相关引擎组件的行为。"""
 	return {k: deepcopy(v) for k, v in message.items() if k in PUBLIC_MESSAGE_KEYS}
 
 

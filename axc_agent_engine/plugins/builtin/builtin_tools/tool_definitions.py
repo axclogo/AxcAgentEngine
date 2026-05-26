@@ -1,4 +1,5 @@
-"""Builtin tool definitions."""
+"""Builtin tool definitions.
+中文：此文档说明相关引擎组件的行为。"""
 from datetime import datetime, timezone
 from typing import Any
 
@@ -237,7 +238,7 @@ async def _python_exec(args: dict, context: dict) -> ToolOutput:
 	"执行 shell 命令",
 	{"type": "object", "properties": {
 		"command": {"type": "string", "description": "Shell 命令"},
-		"shell_type": {"type": "string", "description": "auto/bash/powershell", "default": "auto"},
+		"shell_type": {"type": "string", "description": "Shell 类型，可选 auto、bash、powershell", "default": "auto"},
 		"timeout": {"type": "integer", "description": "执行超时时间（秒）", "default": 60},
 	}, "required": ["command"]},
 	capability="shell",
@@ -268,7 +269,7 @@ async def _pip_install(args: dict, context: dict) -> ToolOutput:
 	"result_read",
 	"按 artifact ID 分页读取已存储的工具结果",
 	{"type": "object", "properties": {
-		"artifact_id": {"type": "string", "description": "上一次工具结果中的 Artifact ID"},
+		"artifact_id": {"type": "string", "description": "上一次工具结果中的附件 ID"},
 		"offset": {"type": "integer", "description": "字符偏移量", "default": 0},
 		"limit": {"type": "integer", "description": "最多返回字符数", "default": 4000},
 	}, "required": ["artifact_id"]},
@@ -282,7 +283,7 @@ async def _result_read(args: dict, context: dict) -> ToolOutput:
 	"result_search",
 	"在已存储的工具结果中搜索",
 	{"type": "object", "properties": {
-		"artifact_id": {"type": "string", "description": "Artifact ID 标识"},
+		"artifact_id": {"type": "string", "description": "附件 ID 标识"},
 		"query": {"type": "string", "description": "搜索关键词"},
 	}, "required": ["artifact_id", "query"]},
 	is_read_only=True,
@@ -295,7 +296,7 @@ async def _result_search(args: dict, context: dict) -> ToolOutput:
 	"result_page",
 	"读取已存储工具结果的一页",
 	{"type": "object", "properties": {
-		"artifact_id": {"type": "string", "description": "Artifact ID 标识"},
+		"artifact_id": {"type": "string", "description": "附件 ID 标识"},
 		"page": {"type": "integer", "description": "页码（从 1 开始）", "default": 1},
 		"page_size": {"type": "integer", "description": "每页字符数", "default": 4000},
 	}, "required": ["artifact_id"]},

@@ -1,10 +1,11 @@
-"""工具执行编排器。
+"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+工具执行编排器。
 
 把工具调用划分为批次：连续只读工具并发执行，写工具串行执行。
 每次调用流程：pre_hooks → execute → post_hooks。
 
-ToolOutput.compact_view() 负责上下文安全序列化。
-"""
+ToolOutput.compact_view() 负责上下文安全序列化。"""
 import asyncio
 from typing import Any
 
@@ -53,7 +54,8 @@ async def execute_tool_calls(
 	tool_calls: list[dict], registry: ToolRegistry,
 	plugins: list[Any] | PluginManager, ctx: ExecutionContext,
 ) -> list[ToolResult]:
-	"""按编排策略执行工具调用。"""
+	"""English: This documentation describes the related engine component behavior.
+中文：按编排策略执行工具调用。"""
 	plugin_manager = plugins if isinstance(plugins, PluginManager) else PluginManager(plugins)
 	return await ToolExecutionPipeline(registry, plugin_manager, ctx).execute(tool_calls)
 
@@ -61,7 +63,9 @@ async def execute_tool_calls(
 async def _execute_single_with_timeout(
 	tc: dict, registry: ToolRegistry, plugin_manager: PluginManager, ctx: ExecutionContext,
 ) -> ToolResult:
-	"""执行单个工具调用，并用 step_timeout 约束完整编排耗时。"""
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+执行单个工具调用，并用 step_timeout 约束完整编排耗时。"""
 	timeout = step_timeout(ctx)
 	if timeout <= 0:
 		return await _execute_single(tc, registry, plugin_manager, ctx)
@@ -82,7 +86,9 @@ async def _execute_single_with_timeout(
 async def _execute_single(
 	tc: dict, registry: ToolRegistry, plugin_manager: PluginManager, ctx: ExecutionContext,
 ) -> ToolResult:
-	"""执行单个工具调用：pre_hooks → resolve → execute → post_hooks。"""
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+执行单个工具调用：pre_hooks → resolve → execute → post_hooks。"""
 	runtime = tool_runtime(tc, ctx, registry)
 	tool_context_key = 0
 	try:

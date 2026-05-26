@@ -1,4 +1,5 @@
-"""Language-specific sandbox executors."""
+"""Language-specific sandbox executors.
+中文：此文档说明相关引擎组件的行为。"""
 from __future__ import annotations
 
 import os
@@ -11,7 +12,8 @@ from axc_agent_engine.runtime.sandbox_workspace import WorkspaceCommandExecutor
 
 
 class PythonSandboxExecutor:
-	"""Run Python snippets as workspace-scoped temporary scripts."""
+	"""Run Python snippets as workspace-scoped temporary scripts.
+中文：此文档说明相关引擎组件的行为。"""
 
 	def __init__(
 		self,
@@ -49,7 +51,8 @@ class PythonSandboxExecutor:
 
 
 class PowerShellSandboxExecutor:
-	"""Run PowerShell snippets as workspace-scoped temporary scripts."""
+	"""Run PowerShell snippets as workspace-scoped temporary scripts.
+中文：此文档说明相关引擎组件的行为。"""
 
 	def __init__(
 		self,

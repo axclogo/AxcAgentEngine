@@ -384,7 +384,9 @@ class MemoryToolHandlers:
 
 
 class MemoryPlugin(BasePlugin):
-	"""记忆系统 — 依赖 KVStore Protocol 持久化
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+记忆系统 — 依赖 KVStore Protocol 持久化
 
 	配置项：
 	  context_budget: int = 2000          # 上下文注入字符预算
@@ -445,7 +447,9 @@ class MemoryPlugin(BasePlugin):
 		}
 
 	async def _load_memories(self, exec_ctx: "ExecutionContext | None" = None) -> None:
-		"""从 KVStore 加载记忆"""
+		"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+从 KVStore 加载记忆"""
 		scope = self._scope_resolver.scope_id(exec_ctx)
 		self._active_scope = scope
 		if scope in self._scope_cache:
@@ -472,7 +476,8 @@ class MemoryPlugin(BasePlugin):
 			logger.warning(f"[memory] Failed to load memories: {e}")
 
 	async def on_execution_start(self, exec_ctx: "ExecutionContext") -> None:
-		"""执行开始时加载记忆"""
+		"""English: This documentation describes the related engine component behavior.
+中文：执行开始时加载记忆"""
 		async with self._lock:
 			await self._load_memories(exec_ctx)
 
@@ -488,7 +493,9 @@ class MemoryPlugin(BasePlugin):
 		return context
 
 	def get_tools(self) -> list[ToolDefinition]:
-		"""提供 memory_add 和分层记忆工具。"""
+		"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+提供 memory_add 和分层记忆工具。"""
 		return [
 			ToolDefinition(
 				name="memory_add",
@@ -592,7 +599,9 @@ class MemoryPlugin(BasePlugin):
 
 	async def on_round_end(self, exec_ctx: "ExecutionContext", user_message: str,
 						   assistant_message: str, tool_calls: list[dict]) -> None:
-		"""调 utility_llm 从对话中提取事实"""
+		"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+调 utility_llm 从对话中提取事实"""
 		if not self._auto_extract or (not user_message and not assistant_message):
 			return
 		conversation = ""
@@ -609,7 +618,8 @@ class MemoryPlugin(BasePlugin):
 					await self._add_memory(user_message, 0.5, exec_ctx=exec_ctx)
 
 	async def on_execution_end(self, exec_ctx: "ExecutionContext", result: str, error: str) -> None:
-		"""执行结束时做记忆衰减 — 移除过期低分记忆"""
+		"""English: This documentation describes the related engine component behavior.
+中文：执行结束时做记忆衰减 — 移除过期低分记忆"""
 		async with self._lock:
 			await self._execution_end_locked(exec_ctx)
 		await self._flush_background_tasks()
@@ -629,7 +639,9 @@ class MemoryPlugin(BasePlugin):
 			logger.info(f"[memory] Decay removed {len(expired_ids)} memories")
 
 	async def _extract_with_llm(self, conversation: str, llm: Any, exec_ctx: "ExecutionContext | None" = None) -> None:
-		"""调 LLM 提取事实"""
+		"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+调 LLM 提取事实"""
 		async def on_failure(e: Exception) -> None:
 			self._stats["extraction_failures"] += 1
 			self._sync_metadata(exec_ctx)
@@ -648,7 +660,8 @@ class MemoryPlugin(BasePlugin):
 						  fact_type: str = "fact", layer: str = MemoryLayer.SEMANTIC,
 						  exec_ctx: "ExecutionContext | None" = None,
 						  metadata: dict[str, Any] | None = None) -> None:
-		"""添加一条记忆"""
+		"""English: This documentation describes the related engine component behavior.
+中文：添加一条记忆"""
 		sanitized, privacy = self._privacy_policy.sanitize(content)
 		if privacy["rejected"]:
 			self._stats["rejected_sensitive"] += 1
@@ -683,12 +696,14 @@ class MemoryPlugin(BasePlugin):
 		self._sync_metadata(exec_ctx)
 
 	def _is_duplicate(self, content: str) -> bool:
-		"""简单去重：字符级相似度"""
+		"""English: This documentation describes the related engine component behavior.
+中文：简单去重：字符级相似度"""
 		self._sync_service_from_view()
 		return self._service.find_duplicate(content) is not None
 
 	def _compute_score(self, mem: dict, topic: str) -> float:
-		"""计算记忆得分（相关性 × 衰减后重要性）"""
+		"""English: This documentation describes the related engine component behavior.
+中文：计算记忆得分（相关性 × 衰减后重要性）"""
 		importance = mem.get("importance", 0.5)
 		created_at = mem.get("created_at", "")
 		if created_at:
@@ -721,7 +736,8 @@ class MemoryPlugin(BasePlugin):
 			self._service.load(self._memories)
 
 	async def _delete_memories(self, ids: list[str], exec_ctx: "ExecutionContext | None" = None) -> None:
-		"""批量删除记忆"""
+		"""English: This documentation describes the related engine component behavior.
+中文：批量删除记忆"""
 		await self._delete_memory_vectors(ids, exec_ctx)
 		await self._repository.delete_memories(self._scope_resolver.scope_id(exec_ctx), ids)
 

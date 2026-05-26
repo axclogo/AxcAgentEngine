@@ -1,4 +1,5 @@
-"""pydantic-graph runtime for Plan-Observe-Replan execution."""
+"""pydantic-graph runtime for Plan-Observe-Replan execution.
+中文：此文档说明相关引擎组件的行为。"""
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
@@ -20,7 +21,8 @@ from axc_agent_engine.planning.planner import Plan
 
 
 class PORGraphRuntime:
-	"""Runs POR through pydantic-graph while delegating work to a service object."""
+	"""Runs POR through pydantic-graph while delegating work to a service object.
+中文：此文档说明相关引擎组件的行为。"""
 
 	def __init__(self, service: Any) -> None:
 		self._service = service

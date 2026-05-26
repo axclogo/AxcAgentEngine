@@ -1,4 +1,5 @@
-"""Compression boundary persistence."""
+"""Compression boundary persistence.
+中文：此文档说明相关引擎组件的行为。"""
 from __future__ import annotations
 
 import time
@@ -8,7 +9,8 @@ from typing import Any, Protocol, runtime_checkable
 
 @dataclass
 class CompressionBoundary:
-	"""Persistent summary boundary for one agent/session."""
+	"""Persistent summary boundary for one agent/session.
+中文：此文档说明相关引擎组件的行为。"""
 
 	agent_name: str
 	session_id: str
@@ -59,7 +61,8 @@ class CompressionBoundaryStore(Protocol):
 
 
 class InMemoryCompressionBoundaryStore:
-	"""No-database compression boundary fallback."""
+	"""No-database compression boundary fallback.
+中文：此文档说明相关引擎组件的行为。"""
 
 	def __init__(self) -> None:
 		self._items: dict[tuple[str, str], CompressionBoundary] = {}
@@ -77,7 +80,8 @@ class InMemoryCompressionBoundaryStore:
 
 
 class KVCompressionBoundaryStore:
-	"""CompressionBoundaryStore backed by the generic KVStore protocol."""
+	"""CompressionBoundaryStore backed by the generic KVStore protocol.
+中文：此文档说明相关引擎组件的行为。"""
 
 	def __init__(self, kv_store: Any, prefix: str = "compress:boundary:") -> None:
 		self.kv_store = kv_store

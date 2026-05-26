@@ -1,4 +1,5 @@
-"""MCP HTTP JSON-RPC transport."""
+"""MCP HTTP JSON-RPC transport.
+中文：此文档说明相关引擎组件的行为。"""
 from typing import Any
 
 from axc_agent_engine.plugins.builtin.mcp.support.models import MCPApplicationError

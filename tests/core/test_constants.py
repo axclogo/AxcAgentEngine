@@ -8,11 +8,11 @@ from axc_agent_engine.core.constants import (
 
 class TestConstants:
 	def test_plugin_context_tag(self):
-		assert PLUGIN_CONTEXT_TAG == "[plugin_context]"
+		assert PLUGIN_CONTEXT_TAG == "[插件上下文]"
 
 	def test_compress_markers(self):
-		assert "COMPRESSED" in COMPRESS_MARKER_SNIP
-		assert "COMPRESSED" in COMPRESS_MARKER_MICRO
+		assert "已压缩" in COMPRESS_MARKER_SNIP
+		assert "已压缩" in COMPRESS_MARKER_MICRO
 
 	def test_stream_max_chunks(self):
 		assert STREAM_MAX_CHUNKS == 20_000

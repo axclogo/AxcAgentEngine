@@ -14,11 +14,15 @@ from axc_agent_engine.utils.json_utils import extract_json_object
 logger = logging.getLogger(__name__)
 
 class PlanningService:
-	"""为 POR 路由创建并提取执行计划。"""
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+为 POR 路由创建并提取执行计划。"""
 
 	@staticmethod
 	async def generate_plan(llm_caller: Any, ctx: Any, goal: str) -> Plan:
-		"""调用当前配置的 LLM 生成 Plan 对象。
+		"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+调用当前配置的 LLM 生成 Plan 对象。
 
 		服务通过 LLMCaller 消费标准化 LLMResponse；OpenAI 响应结构不能离开
 		provider 实现层。
@@ -42,7 +46,9 @@ class PlanningService:
 
 	@staticmethod
 	def detect_plan(message: dict[str, Any]) -> Plan | None:
-		"""从 LLM 响应内容中识别结构化计划。
+		"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+从 LLM 响应内容中识别结构化计划。
 
 		只识别包含 goal + steps 的 JSON 块；找到返回 Plan，否则返回 None。
 		"""

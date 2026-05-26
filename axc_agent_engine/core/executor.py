@@ -1,8 +1,9 @@
-"""核心执行器 — 带 TransactionRouter 的 ReAct 主循环，支持 POR。
+"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+核心执行器 — 带 TransactionRouter 的 ReAct 主循环，支持 POR。
 
 每轮流程：transform_messages → check_stop → LLM 调用 → 路由 → 工具执行 → post hooks。
-对调用方输出实时 Event 流。
-"""
+对调用方输出实时 Event 流。"""
 from __future__ import annotations
 
 import time
@@ -64,7 +65,8 @@ class Executor:
 		run_id: str,
 		snapshot: dict,
 	) -> None:
-		"""Load a WorkflowRuntime-provided execution snapshot."""
+		"""Load a WorkflowRuntime-provided execution snapshot.
+中文：此文档说明相关引擎组件的行为。"""
 		self._run_id = run_id
 		self._ctx.state.metadata["run_id"] = run_id
 		por_checkpoint = snapshot.get("por_checkpoint")
@@ -86,7 +88,8 @@ class Executor:
 		self._restored_from_checkpoint = True
 
 	async def run_stream(self, user_message: str) -> AsyncIterator[Event]:
-		"""流式执行入口。"""
+		"""English: This documentation describes the related engine component behavior.
+中文：流式执行入口。"""
 		self._run_id = self._ctx.state.metadata.get("run_id") or uuid.uuid4().hex[:16]
 		self._ctx.state.metadata["run_id"] = self._run_id
 		self._react_kernel.start_time = time.time()
@@ -155,11 +158,13 @@ class Executor:
 		return True, route_plan, ""
 
 	async def _save_checkpoint(self, kind: str, status: CheckpointStatus, extra_state: dict | None = None) -> None:
-		"""Persist a best-effort checkpoint when a CheckpointStore is configured."""
+		"""Persist a best-effort checkpoint when a CheckpointStore is configured.
+中文：此文档说明相关引擎组件的行为。"""
 		await self._checkpoint_recorder.save(self._run_id, kind, status, extra_state)
 
 	def _init_messages(self, user_message: str) -> None:
-		"""初始化消息列表。"""
+		"""English: This documentation describes the related engine component behavior.
+中文：初始化消息列表。"""
 		self._messages.init_system_prompt(self._ctx.config.system_prompt)
 		extra_context = self._pm.collect_context(self._ctx)
 		if extra_context:
@@ -170,7 +175,9 @@ class Executor:
 			self._ctx.add_image_tokens([user_msg])
 
 	async def _enter_por_mode(self, plan, user_message: str) -> AsyncIterator[Event]:
-		"""切换到 POR 执行模式。"""
+		"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+切换到 POR 执行模式。"""
 		async for event in self._new_por_runner().run(plan, user_message):
 			yield event
 
@@ -194,6 +201,7 @@ class Executor:
 	async def _stream_llm_call(
 		self, messages: list[dict], tools_schema: list[dict] | None,
 	) -> AsyncIterator[Event | tuple[dict, list[Event]]]:
-		"""Run LLM call through the explicit stream bridge."""
+		"""Run LLM call through the explicit stream bridge.
+中文：此文档说明相关引擎组件的行为。"""
 		async for item in self._stream_bridge.call(messages, tools_schema):
 			yield item

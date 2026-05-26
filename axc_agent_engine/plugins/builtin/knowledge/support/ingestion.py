@@ -1,4 +1,5 @@
-"""Storage-neutral knowledge ingestion primitives."""
+"""Storage-neutral knowledge ingestion primitives.
+中文：此文档说明相关引擎组件的行为。"""
 from __future__ import annotations
 
 import os
@@ -11,7 +12,8 @@ from axc_agent_engine.plugins.builtin.knowledge.support.retrieval import Knowled
 
 @dataclass(frozen=True)
 class SourceDocument:
-	"""Parsed source document before chunking."""
+	"""Parsed source document before chunking.
+中文：此文档说明相关引擎组件的行为。"""
 
 	id: str
 	text: str
@@ -21,7 +23,8 @@ class SourceDocument:
 
 @dataclass(frozen=True)
 class IngestionResult:
-	"""Result of one ingestion pass."""
+	"""Result of one ingestion pass.
+中文：此文档说明相关引擎组件的行为。"""
 
 	documents: list[KnowledgeDocument]
 	sources: list[str] = field(default_factory=list)
@@ -30,14 +33,16 @@ class IngestionResult:
 
 @runtime_checkable
 class DocumentParser(Protocol):
-	"""Parses one source into plain text plus metadata."""
+	"""Parses one source into plain text plus metadata.
+中文：此文档说明相关引擎组件的行为。"""
 
 	def supports(self, path: str) -> bool: ...
 	def parse(self, path: str) -> SourceDocument | None: ...
 
 
 class TextDocumentParser:
-	"""Built-in parser for text-like local files."""
+	"""Built-in parser for text-like local files.
+中文：此文档说明相关引擎组件的行为。"""
 
 	extensions = {".txt", ".md", ".markdown", ".rst", ".py", ".js", ".ts", ".json", ".yaml", ".yml", ".toml"}
 
@@ -51,7 +56,8 @@ class TextDocumentParser:
 
 
 class PdfDocumentParser:
-	"""Optional PyMuPDF-backed PDF parser."""
+	"""Optional PyMuPDF-backed PDF parser.
+中文：此文档说明相关引擎组件的行为。"""
 
 	def supports(self, path: str) -> bool:
 		return path.lower().endswith(".pdf")
@@ -70,7 +76,8 @@ class PdfDocumentParser:
 
 
 class LocalFileIngestionPipeline:
-	"""Ingests local files/directories into KnowledgeDocument chunks."""
+	"""Ingests local files/directories into KnowledgeDocument chunks.
+中文：此文档说明相关引擎组件的行为。"""
 
 	def __init__(
 		self,

@@ -1,4 +1,5 @@
-"""L5 context window packing."""
+"""L5 context window packing.
+中文：此文档说明相关引擎组件的行为。"""
 from __future__ import annotations
 
 from typing import Any
@@ -12,7 +13,8 @@ def pack_context(
 	max_input_tokens: int,
 	reserve_output_tokens: int,
 ) -> PackedContext:
-	"""Pack messages into the configured input window."""
+	"""Pack messages into the configured input window.
+中文：此文档说明相关引擎组件的行为。"""
 	budget = max(1, max_input_tokens - reserve_output_tokens)
 	required = _required_indexes(messages)
 	selected: set[int] = set()
@@ -30,7 +32,7 @@ def pack_context(
 	truncated = len(selected) < len(messages)
 	packed = [public_message(message) for index, message in enumerate(messages) if index in selected]
 	if truncated:
-		packed.insert(_placeholder_index(packed), {"role": "system", "content": "[context truncated]"})
+		packed.insert(_placeholder_index(packed), {"role": "system", "content": "[上下文已截断]"})
 	return PackedContext(messages=packed, estimated_tokens=used, truncated=truncated)
 
 

@@ -1,4 +1,5 @@
-"""Sandbox provider factories."""
+"""Sandbox provider factories.
+中文：此文档说明相关引擎组件的行为。"""
 from __future__ import annotations
 
 import os
@@ -11,7 +12,8 @@ from axc_agent_engine.runtime.sandbox_workspace import WorkspaceCommandExecutor
 
 
 class LocalSandboxProvider:
-	"""Default workspace sandbox provider with command policy enforcement."""
+	"""Default workspace sandbox provider with command policy enforcement.
+中文：此文档说明相关引擎组件的行为。"""
 
 	def __init__(self, workspace: str, *, policy: CommandPolicy | None = None) -> None:
 		self.workspace = os.path.realpath(workspace)

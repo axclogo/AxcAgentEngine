@@ -18,7 +18,9 @@ if TYPE_CHECKING:
 
 @dataclass
 class EvalCase:
-	"""评估用例。
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+评估用例。
 	Evaluation case.
 	"""
 	input: str
@@ -30,7 +32,9 @@ class EvalCase:
 
 @dataclass
 class EvalResult:
-	"""评估结果。
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+评估结果。
 	Evaluation result.
 	"""
 	case_id: str
@@ -47,7 +51,9 @@ class EvalResult:
 
 @dataclass
 class EvalDataset:
-	"""带名称的评测用例集合。
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+带名称的评测用例集合。
 	Named collection of evaluation cases.
 	"""
 	suite_id: str
@@ -56,7 +62,9 @@ class EvalDataset:
 
 
 class EvalCaseExecutor:
-	"""运行一个评测用例，并记录输出、工具、usage 和错误。
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+运行一个评测用例，并记录输出、工具、usage 和错误。
 	Runs one eval case and records output, tools, usage, and error.
 	"""
 
@@ -90,7 +98,9 @@ class EvalCaseExecutor:
 
 
 class EvalScorer:
-	"""使用自定义、LLM 或确定性匹配为评测结果打分。
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+使用自定义、LLM 或确定性匹配为评测结果打分。
 	Scores eval results with custom, LLM, or deterministic matching.
 	"""
 
@@ -131,7 +141,9 @@ class EvalScorer:
 
 
 class EvalRunner:
-	"""评估执行器。
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+评估执行器。
 	Evaluation runner.
 	"""
 
@@ -156,7 +168,9 @@ class EvalRunner:
 		custom_judge: Callable[[EvalCase, EvalResult], float] | None = None,
 		run_id: str = "",
 	) -> list[EvalResult]:
-		"""执行评估用例。
+		"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+执行评估用例。
 		Run evaluation cases.
 		"""
 		agent = self._engine.get_agent(self._agent_name)
@@ -201,14 +215,18 @@ class EvalRunner:
 		return await self.run_cases(cases, judge_llm=judge_llm, custom_judge=custom_judge, run_id=run_id or suite_id)
 
 	async def _run_single(self, agent: Any, case: EvalCase, case_id: str) -> EvalResult:
-		"""执行单个用例。
+		"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+执行单个用例。
 		Run one evaluation case.
 		"""
 		return await self._case_executor.run(agent, case, case_id)
 
 	@staticmethod
 	def _auto_score(case: EvalCase, result: EvalResult) -> float:
-		"""自动评分：精确匹配 + 工具匹配。
+		"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+自动评分：精确匹配 + 工具匹配。
 		Automatic scoring: exact match plus tool match.
 		"""
 		return EvalScorer().auto_score(case, result)

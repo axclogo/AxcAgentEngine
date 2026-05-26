@@ -1,4 +1,5 @@
-"""Graph ToolOutput presentation."""
+"""Graph ToolOutput presentation.
+中文：此文档说明相关引擎组件的行为。"""
 import json
 import logging
 

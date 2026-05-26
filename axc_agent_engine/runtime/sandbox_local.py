@@ -1,4 +1,5 @@
-"""Local command executor implementations."""
+"""Local command executor implementations.
+中文：此文档说明相关引擎组件的行为。"""
 from __future__ import annotations
 
 import asyncio
@@ -9,7 +10,8 @@ from axc_agent_engine.runtime.sandbox_utils import build_env, decode_limited, su
 
 
 class LocalSubprocessExecutor:
-	"""Local subprocess executor with cwd, env, timeout, and output limits."""
+	"""Local subprocess executor with cwd, env, timeout, and output limits.
+中文：此文档说明相关引擎组件的行为。"""
 
 	async def run(self, spec: CommandSpec) -> CommandResult:
 		if spec.use_shell:

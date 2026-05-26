@@ -1,6 +1,7 @@
-"""连接仿真内核和现有 Agent 对象的适配器。
-Adapters that connect the simulation kernel to existing agent objects.
-"""
+"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+连接仿真内核和现有 Agent 对象的适配器。
+Adapters that connect the simulation kernel to existing agent objects."""
 from __future__ import annotations
 
 import json
@@ -11,7 +12,9 @@ from axc_agent_engine.sidecar.simulation.models import AgentAction, Observation,
 
 
 class AgentPolicyAdapter:
-	"""把现有类 Agent 对象作为仿真 AgentPolicy 使用。
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+把现有类 Agent 对象作为仿真 AgentPolicy 使用。
 	Use an existing Agent-like object as a simulation AgentPolicy.
 
 	被包装对象只需要提供 async `chat(message, session_id="")` 方法。
@@ -38,7 +41,9 @@ class AgentPolicyAdapter:
 
 
 def build_action_prompt(observation: Observation, scenario: Scenario) -> str:
-	"""构建要求 Agent 返回一个结构化动作的紧凑 prompt。
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+构建要求 Agent 返回一个结构化动作的紧凑 prompt。
 	Build the compact prompt that asks an agent for one structured action.
 	"""
 	payload = {
@@ -63,12 +68,11 @@ def build_action_prompt(observation: Observation, scenario: Scenario) -> str:
 		},
 	}
 	return (
-		"You are acting inside a structured simulation. "
-		"Return exactly one JSON object for your next action. "
-		"Do not include prose outside JSON.\n\n"
-		"Allowed action fields: actor, type, intent, parameters, rationale, "
-		"confidence, expected_effect, metadata.\n"
-		"Allowed type values: communicate, investigate, attack, defend, negotiate, "
-		"allocate_resource, escalate, wait, tool_call, decide, custom.\n\n"
-		f"Context:\n{json.dumps(payload, ensure_ascii=False, default=str)}"
+		"你正在一个结构化仿真场景中行动。"
+		"请只返回一个 JSON 对象作为下一步动作，JSON 外不要输出任何说明文字。\n\n"
+		"允许的动作字段：actor、type、intent、parameters、rationale、"
+		"confidence、expected_effect、metadata。\n"
+		"允许的 type 取值：communicate、investigate、attack、defend、negotiate、"
+		"allocate_resource、escalate、wait、tool_call、decide、custom。\n\n"
+		f"上下文：\n{json.dumps(payload, ensure_ascii=False, default=str)}"
 	)

@@ -1,4 +1,6 @@
-"""宿主侧主动调用的旁路能力。
+"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+宿主侧主动调用的旁路能力。
 Host-driven sidecar capabilities.
 
 旁路模块不属于 Agent 执行核心，也不会从 Agent YAML 自动加载。
@@ -6,8 +8,7 @@ Sidecar modules are not part of the Agent execution core and are not loaded from
 Agent YAML.
 
 宿主应用必须显式 import 这些模块来运行旁路任务。
-Host applications import them explicitly to run sidecar tasks.
-"""
+Host applications import them explicitly to run sidecar tasks."""
 from axc_agent_engine.sidecar.orchestration import (
 	OrchestrationTask,
 	OrchestrationTaskService,

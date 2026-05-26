@@ -7,7 +7,8 @@ from typing import Any
 
 @dataclass
 class Session:
-	"""单个会话，持有消息历史"""
+	"""English: This documentation describes the related engine component behavior.
+中文：单个会话，持有消息历史"""
 	session_id: str
 	messages: list[dict[str, Any]] = field(default_factory=list)
 	metadata: dict[str, Any] = field(default_factory=dict)

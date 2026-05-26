@@ -282,4 +282,4 @@ class TestPluginHooksInFlow:
 		async for event in executor.run_stream("test"):
 			events.append(event)
 		assert events[-1].type == EventType.ERROR
-		assert "timeout" in events[-1].content.lower()
+		assert "超时" in events[-1].content

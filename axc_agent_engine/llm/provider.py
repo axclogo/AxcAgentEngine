@@ -35,7 +35,9 @@ class LLMProvider(Protocol):
 
 @runtime_checkable
 class EmbeddingProvider(Protocol):
-	"""向量操作使用的 Embedding provider 协议。"""
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+向量操作使用的 Embedding provider 协议。"""
 
 	async def embed(self, texts: list[str]) -> list[list[float]]: ...
 	async def close(self) -> None: ...

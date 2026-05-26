@@ -1,4 +1,5 @@
-"""Official MCP Python SDK transport adapter."""
+"""Official MCP Python SDK transport adapter.
+中文：此文档说明相关引擎组件的行为。"""
 import importlib
 from contextlib import AsyncExitStack
 from typing import Any
@@ -12,7 +13,8 @@ from axc_agent_engine.plugins.builtin.mcp.support.transports.base import (
 
 
 class OfficialSDKTransport:
-	"""Official MCP Python SDK transport adapter with JSON-RPC fallback kept outside."""
+	"""Official MCP Python SDK transport adapter with JSON-RPC fallback kept outside.
+中文：此文档说明相关引擎组件的行为。"""
 
 	def __init__(self, config: dict[str, Any]) -> None:
 		self.config = dict(config)

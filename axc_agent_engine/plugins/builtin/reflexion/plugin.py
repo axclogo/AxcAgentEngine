@@ -1,4 +1,5 @@
-"""自我反思插件 — 每轮结束后评估执行质量，发现问题注入纠正提示"""
+"""English: This documentation describes the related engine component behavior.
+中文：自我反思插件 — 每轮结束后评估执行质量，发现问题注入纠正提示"""
 import logging
 from typing import TYPE_CHECKING
 
@@ -14,7 +15,8 @@ logger = logging.getLogger(__name__)
 
 
 class ReflexionPlugin(BasePlugin):
-	"""自我反思插件 — 每轮自评，发现问题注入纠正"""
+	"""English: This documentation describes the related engine component behavior.
+中文：自我反思插件 — 每轮自评，发现问题注入纠正"""
 	name = "reflexion"
 	display_name = "自我反思"
 	priority = 85
@@ -32,7 +34,8 @@ class ReflexionPlugin(BasePlugin):
 		return f"【上轮反思】{self._last_reflection}"
 
 	async def on_execution_end(self, exec_ctx: "ExecutionContext", result: str, error: str) -> None:
-		"""执行结束时做整体反思"""
+		"""English: This documentation describes the related engine component behavior.
+中文：执行结束时做整体反思"""
 		if error:
 			self._last_reflection = f"执行出错: {error}"
 

@@ -1,4 +1,5 @@
-"""Scoring helpers for relevance recall."""
+"""Scoring helpers for relevance recall.
+中文：此文档说明相关引擎组件的行为。"""
 from __future__ import annotations
 
 import re

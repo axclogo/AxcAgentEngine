@@ -1,4 +1,5 @@
-"""POR checkpoint serialization helpers."""
+"""POR checkpoint serialization helpers.
+中文：此文档说明相关引擎组件的行为。"""
 from __future__ import annotations
 
 from typing import Any
@@ -9,7 +10,8 @@ from axc_agent_engine.core.schema import StepStatus
 
 
 def plan_to_state(plan: Plan, current_step_id: int | None = None, phase: str = "por") -> dict[str, Any]:
-	"""Serialize a Plan into checkpoint state."""
+	"""Serialize a Plan into checkpoint state.
+中文：此文档说明相关引擎组件的行为。"""
 	plan_payload = {
 		"goal": plan.goal,
 		"replan_count": plan.replan_count,
@@ -32,14 +34,15 @@ def plan_to_state(plan: Plan, current_step_id: int | None = None, phase: str = "
 		"cursor": {"current_step_id": current_step_id},
 		"payload": {"plan": plan_payload},
 		"metadata": {},
-		# Backward-compatible fields.
+		#English: Backward-compatible fields. 中文：源码说明。
 		"current_step_id": current_step_id,
 		"plan": plan_payload,
 	}
 
 
 def plan_from_state(state: dict[str, Any]) -> Plan | None:
-	"""Deserialize a Plan from checkpoint state."""
+	"""Deserialize a Plan from checkpoint state.
+中文：此文档说明相关引擎组件的行为。"""
 	payload = state.get("payload") if isinstance(state.get("payload"), dict) else {}
 	raw = payload.get("plan") if isinstance(payload, dict) else None
 	if not isinstance(raw, dict):
@@ -76,7 +79,8 @@ async def save_plan_checkpoint(
 	current_step_id: int | None = None,
 	metadata: dict[str, Any] | None = None,
 ) -> None:
-	"""Persist a POR checkpoint through the generic CheckpointStore protocol."""
+	"""Persist a POR checkpoint through the generic CheckpointStore protocol.
+中文：此文档说明相关引擎组件的行为。"""
 	if not store or not run_id:
 		return
 	checkpoint_metadata = metadata or {}

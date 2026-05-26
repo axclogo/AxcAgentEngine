@@ -1,4 +1,6 @@
-"""工具注册表 — Agent 级"""
+"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+工具注册表 — Agent 级"""
 import logging
 import threading
 import time
@@ -11,7 +13,8 @@ logger = logging.getLogger(__name__)
 
 
 class ToolRegistrationResolver:
-	"""Normalizes tool registration input and model-facing names."""
+	"""Normalizes tool registration input and model-facing names.
+中文：此文档说明相关引擎组件的行为。"""
 
 	def __init__(self, name_mapping: ToolNameMappingConfig | ToolNameMapper | None = None) -> None:
 		self._name_mapper = name_mapping if isinstance(name_mapping, ToolNameMapper) else ToolNameMapper(name_mapping)
@@ -32,7 +35,8 @@ class ToolRegistrationResolver:
 
 
 class ToolSchemaPresenter:
-	"""Builds provider-facing tool schemas from internal definitions."""
+	"""Builds provider-facing tool schemas from internal definitions.
+中文：此文档说明相关引擎组件的行为。"""
 
 	def __init__(self, resolver: ToolRegistrationResolver) -> None:
 		self._resolver = resolver
@@ -55,19 +59,22 @@ class ToolRegistry:
 		self._tools: dict[str, ToolDefinition] = {}
 		self._resolver = ToolRegistrationResolver(name_mapping)
 		self._schema_presenter = ToolSchemaPresenter(self._resolver)
-		# 这里刻意使用 threading.Lock：注册只发生在初始化阶段，不在 async 上下文中，
-		# 因此不会阻塞事件循环。
+		#English: Bilingual note. 中文：这里刻意使用 threading.Lock：注册只发生在初始化阶段，不在 async 上下文中，
+		#English: Source note. 中文：因此不会阻塞事件循环。
 		self._lock = threading.Lock()
 		self._frozen = False
 		self._schema_version = 0
 		self._registration_log: list[dict[str, Any]] = []
 
 	def freeze(self) -> None:
-		"""初始化后锁定注册表；仍允许通过 register_late() 后注册。"""
+		"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+初始化后锁定注册表；仍允许通过 register_late() 后注册。"""
 		self._frozen = True
 
 	def register(self, tool: ToolDefinition) -> None:
-		"""注册工具。"""
+		"""English: This documentation describes the related engine component behavior.
+中文：注册工具。"""
 		tool = self._resolver.normalize(tool)
 		if self._frozen:
 			raise RuntimeError(f"ToolRegistry is frozen, cannot register '{tool.name}'")
@@ -91,7 +98,8 @@ class ToolRegistry:
 		plugin_name: str = "",
 		reason: str = "late_registration",
 	) -> None:
-		"""批量后注册。"""
+		"""English: This documentation describes the related engine component behavior.
+中文：批量后注册。"""
 		for t in tools:
 			self.register_late(t, plugin_name=plugin_name, reason=reason)
 
@@ -101,7 +109,8 @@ class ToolRegistry:
 		source: str = "initial",
 		reason: str = "register",
 	) -> None:
-		"""内部注册逻辑。"""
+		"""English: This documentation describes the related engine component behavior.
+中文：内部注册逻辑。"""
 		tool = self._resolver.normalize(tool)
 		if not tool.name:
 			logger.warning("Tool definition missing 'name' field, skipping")
@@ -120,7 +129,8 @@ class ToolRegistry:
 			})
 
 	def register_many(self, tools: list[ToolDefinition]) -> None:
-		"""批量注册。"""
+		"""English: This documentation describes the related engine component behavior.
+中文：批量注册。"""
 		for t in tools:
 			self.register(t)
 
@@ -128,18 +138,22 @@ class ToolRegistry:
 		return self._tools.get(self.resolve_name(name))
 
 	def resolve_name(self, name: str) -> str:
-		"""Resolve a model-facing alias back to the internal tool name."""
+		"""Resolve a model-facing alias back to the internal tool name.
+中文：此文档说明相关引擎组件的行为。"""
 		return self._resolver.resolve_name(name)
 
 	def model_name(self, name: str) -> str:
-		"""Return the model-facing alias for an internal tool name."""
+		"""Return the model-facing alias for an internal tool name.
+中文：此文档说明相关引擎组件的行为。"""
 		return self._resolver.model_name(name)
 
 	def get_all(self) -> list[ToolDefinition]:
 		return list(self._tools.values())
 
 	def get_openai_schemas(self) -> list[dict[str, Any]]:
-		"""返回 OpenAI function calling 格式（按 name 排序，利于 prompt cache）
+		"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+返回 OpenAI function calling 格式（按 name 排序，利于 prompt cache）
 		deferred 工具不包含在初始 schema 中，由 DeferredToolNode 动态注入"""
 		return self._schema_presenter.openai_schemas(self._tools)
 

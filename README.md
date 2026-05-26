@@ -5,7 +5,8 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/python-3.10%2B-blue" alt="python"/>
+  <img src="https://img.shields.io/badge/python-3.11%2B-blue" alt="python"/>
+  <img src="https://img.shields.io/pypi/v/axc-agent-engine" alt="pypi"/>
   <img src="https://img.shields.io/badge/license-Apache--2.0-green" alt="license"/>
   <img src="https://img.shields.io/badge/API-OpenAI%20compatible-orange" alt="api"/>
 </p>
@@ -32,9 +33,17 @@ AxcAgentEngine adds **POR (Plan-Observe-Replan)** on top of ReAct: the agent pro
 
 ```bash
 pip install axc-agent-engine
+
+# Pin the current 2.0 release
+pip install axc-agent-engine==2.0
+
+# Optional extras
+pip install "axc-agent-engine[api]"
+pip install "axc-agent-engine[workflow]"
+pip install "axc-agent-engine[api,knowledge,workflow]"
 ```
 
-
+Requires Python 3.11 or newer.
 
 ```python
 from axc_agent_engine import Engine, LLMConfig, PluginRegistry
@@ -73,7 +82,7 @@ async for event in agent.stream("Build a REST API for user management"):
 - **ReAct executor** - standard think / call / observe loop
 - **Plugin system** - built-in spec registry, YAML-driven loading; optional capabilities live in plugins
 - **Tool protocol** - every tool returns `ToolOutput`; read-only runs concurrent, write serial; safe function-name mapping
-- **Durable workflow** - `WorkflowRuntime` + `CheckpointStore` + Agent resume API
+- **Durable workflow** - `WorkflowRuntime` + `CheckpointStore` + Agent resume API; Burr is optional via `axc-agent-engine[workflow]`
 - **OpenAI compatible** - provider protocol + OpenAI-compatible HTTP client and API subset
 - **Memory & knowledge** - four-layer memory (KV, dedup, decay, graph hooks) + semantic chunking + vector/BM25 hybrid retrieval
 - **MCP** - stdio, JSON-RPC HTTP, official SDK transports
@@ -87,7 +96,7 @@ async for event in agent.stream("Build a REST API for user management"):
 | --- | --- |
 | ReAct loop | `Executor` |
 | POR planning | `auto` / `react_only` / `por_first` |
-| Durable workflow | `WorkflowRuntime` + `CheckpointStore` + Agent resume |
+| Durable workflow | `MemoryWorkflowRuntime` by default; optional `BurrWorkflowRuntime` via `axc-agent-engine[workflow]` |
 | Plugin system | spec registry + YAML-driven loading |
 | LLM provider | provider protocol + OpenAI-compatible HTTP |
 | Parallel tools | read concurrent, write serial |
@@ -314,15 +323,18 @@ flowchart TD
     A["User message"] --> B["Agent.chat() / Agent.stream()"]
     B --> C["ExecutionContext"]
     C --> D["Executor"]
-    D --> E["MessageStore"]
-    E --> F["Plugin hooks"]
-    F --> G["LLM call"]
-    G --> H["TransactionRouter"]
-    H -->|final answer| I["done event"]
-    H -->|tool calls| J["Tool pipeline"]
-    J --> E
-    H -->|plan| K["PORRunner"]
-    K --> I
+    D --> E["ExecutionRunLifecycle + checkpoints"]
+    D --> F["ReActKernel"]
+    F --> G["MessageStore"]
+    F --> H["Plugin hooks"]
+    F --> I["LLMCaller"]
+    I --> J["TransactionRouter"]
+    J -->|final answer| K["done event"]
+    J -->|tool calls| L["Tool pipeline"]
+    L --> G
+    J -->|plan or por_first| M["PORRunner"]
+    M --> N["PORGraphRuntime (pydantic_graph)"]
+    N --> K
 ```
 
 ## Plugin Development
@@ -380,7 +392,9 @@ CLI logging flags are global and must be placed before the subcommand.
 
 ## Design Decisions
 
-- **Engine core = Executor + LLMCaller.** Reads Agent YAML, calls LLM providers, runs the loop, emits events/results.
+- **Engine core = Executor + ReActKernel + LLMCaller.** Reads Agent YAML, calls LLM providers, runs the ReAct loop, emits events/results.
+- **POR state transitions live in pydantic-graph.** `PORGraphRuntime` owns the plan/step/observe/replan loop; services execute work and persist checkpoints.
+- **Workflow resume is a runtime boundary.** `MemoryWorkflowRuntime` is the default; `BurrWorkflowRuntime` is selected when the optional workflow dependency is installed.
 - **Plugins are the runtime extension boundary.** Knowledge, memory, graph, MCP, output repair, skills belong in plugins.
 - **Orchestration is sidecar.** Multi-agent sessions, simulation, mode adapters are host-driven.
 - **Evaluation is sidecar.** EvalRunner, stores, matchers, reports are host-driven test framework pieces.
@@ -396,4 +410,7 @@ CLI logging flags are global and must be placed before the subcommand.
 
 ```bash
 python3 -m pytest -q
+python3 -m pytest --cov --cov-report=term-missing:skip-covered -q
 ```
+
+The release gate requires at least 90% total coverage.

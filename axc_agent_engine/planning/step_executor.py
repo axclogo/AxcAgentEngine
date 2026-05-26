@@ -10,7 +10,9 @@ RECENT_COMPLETED_LIMIT = 3
 
 
 def build_step_prompt(plan: Plan, step: PlanStep) -> str:
-	"""构建步骤执行的 prompt"""
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+构建步骤执行的 prompt"""
 	completed = [s for s in plan.steps if s.status == StepStatus.DONE]
 	context_parts = [f"总目标: {plan.goal}", f"当前步骤 {step.step_id}: {step.description}"]
 	if completed:

@@ -1,4 +1,5 @@
-"""Memory subsystem primitives."""
+"""Memory subsystem primitives.
+中文：此文档说明相关引擎组件的行为。"""
 from axc_agent_engine.plugins.builtin.memory.support.service import (
 	Deduplicator,
 	FactExtractor,

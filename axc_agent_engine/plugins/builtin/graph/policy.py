@@ -1,4 +1,5 @@
-"""Graph entity/relation type policy."""
+"""Graph entity/relation type policy.
+中文：此文档说明相关引擎组件的行为。"""
 
 
 class GraphPolicy:

@@ -12,7 +12,9 @@ if TYPE_CHECKING:
 
 
 class SupervisorScheduler:
-	"""管理者决定谁发言。
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+管理者决定谁发言。
 	The supervisor decides which worker speaks.
 	"""
 
@@ -32,33 +34,35 @@ class SupervisorScheduler:
 
 	def select_speakers(self, ctx: SharedContext, agents: list,
 						step: int) -> list:
-		# 奇数轮（0, 2, 4...）：supervisor 发言。
-		# Even-numbered steps (0, 2, 4...) are supervisor turns.
+		#English: Bilingual note. 中文：奇数轮（0, 2, 4...）：supervisor 发言。
+		#English: Even-numbered steps (0, 2, 4...) are supervisor turns. 中文：源码说明。
 		if step % 2 == 0:
 			return [self._supervisor]
-		# 偶数轮（1, 3, 5...）：解析 supervisor 上一轮回复，找 Worker。
-		# Odd-numbered steps (1, 3, 5...) parse the supervisor reply to find a worker.
+		#English: Bilingual note. 中文：偶数轮（1, 3, 5...）：解析 supervisor 上一轮回复，找 Worker。
+		#English: Odd-numbered steps (1, 3, 5...) parse the supervisor reply to find a worker. 中文：源码说明。
 		last_msg = ctx.get_last_message(exclude_agent="")
 		if last_msg and last_msg["agent"] == self._supervisor.name:
 			worker = self._parse_worker(last_msg["content"])
 			if worker:
 				return [worker]
-		# 解析失败，轮流选 Worker。
-		# If parsing fails, choose workers by fallback rotation.
+		#English: Bilingual note. 中文：解析失败，轮流选 Worker。
+		#English: If parsing fails, choose workers by fallback rotation. 中文：源码说明。
 		return [self._fallback_worker()]
 
 	def _parse_worker(self, content: str) -> Agent | None:
-		"""从 supervisor 回复中解析 Worker 名称。
+		"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+从 supervisor 回复中解析 Worker 名称。
 		Parse a worker name from the supervisor reply.
 		"""
-		# 尝试 ASSIGN:name:task 格式。
-		# Try the ASSIGN:name:task format.
+		#English: Bilingual note. 中文：尝试 ASSIGN:name:task 格式。
+		#English: Try the ASSIGN:name:task format. 中文：源码说明。
 		match = re.search(r'ASSIGN:(\S+?):', content)
 		if match:
 			name = match.group(1)
 			return self._find_worker(name)
-		# 尝试匹配任何已知 Worker 名称。
-		# Try matching any known worker name.
+		#English: Bilingual note. 中文：尝试匹配任何已知 Worker 名称。
+		#English: Try matching any known worker name. 中文：源码说明。
 		for worker in self._workers:
 			if worker.name in content:
 				return worker
@@ -71,7 +75,9 @@ class SupervisorScheduler:
 		return None
 
 	def _fallback_worker(self) -> Agent:
-		"""降级：轮流选 Worker。
+		"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+降级：轮流选 Worker。
 		Fallback: rotate through workers.
 		"""
 		worker = self._workers[self._worker_index % len(self._workers)]

@@ -1,11 +1,13 @@
-"""Tool-call batch planning."""
+"""Tool-call batch planning.
+中文：此文档说明相关引擎组件的行为。"""
 from __future__ import annotations
 
 from axc_agent_engine.tools.registry import ToolRegistry
 
 
 def partition_tool_calls(tool_calls: list[dict], registry: ToolRegistry) -> list[dict]:
-	"""把工具调用划分为批次：连续只读调用并发，其他调用串行。"""
+	"""English: This documentation describes the related engine component behavior.
+中文：把工具调用划分为批次：连续只读调用并发，其他调用串行。"""
 	batches: list[dict] = []
 	for tc in tool_calls:
 		name = tc.get("name", "")

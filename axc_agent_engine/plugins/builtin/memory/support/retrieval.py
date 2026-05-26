@@ -1,4 +1,5 @@
-"""Retrieval helpers private to the memory plugin."""
+"""Retrieval helpers private to the memory plugin.
+中文：此文档说明相关引擎组件的行为。"""
 from __future__ import annotations
 
 import math
@@ -10,7 +11,8 @@ from typing import Any
 
 @dataclass(frozen=True)
 class MemoryDocument:
-	"""A searchable memory document."""
+	"""A searchable memory document.
+中文：此文档说明相关引擎组件的行为。"""
 	id: str
 	text: str
 	metadata: dict[str, Any] = field(default_factory=dict)
@@ -18,7 +20,8 @@ class MemoryDocument:
 
 @dataclass(frozen=True)
 class RetrievalResult:
-	"""One memory retrieval hit."""
+	"""One memory retrieval hit.
+中文：此文档说明相关引擎组件的行为。"""
 	id: str
 	text: str
 	score: float
@@ -28,7 +31,8 @@ class RetrievalResult:
 
 
 class BM25Index:
-	"""Small dependency-free BM25 index for memory content."""
+	"""Small dependency-free BM25 index for memory content.
+中文：此文档说明相关引擎组件的行为。"""
 
 	def __init__(self, documents: list[MemoryDocument] | None = None) -> None:
 		self.documents: list[MemoryDocument] = []
@@ -86,7 +90,8 @@ class BM25Index:
 
 
 def rrf_merge(*ranked_lists: list[RetrievalResult], top_k: int = 10, k: int = 60) -> list[RetrievalResult]:
-	"""Reciprocal rank fusion."""
+	"""Reciprocal rank fusion.
+中文：此文档说明相关引擎组件的行为。"""
 	scores: dict[str, float] = {}
 	items: dict[str, RetrievalResult] = {}
 	retrievals: dict[str, set[str]] = {}
@@ -112,7 +117,8 @@ def rrf_merge(*ranked_lists: list[RetrievalResult], top_k: int = 10, k: int = 60
 
 
 def tokenize(text: str) -> list[str]:
-	"""Tokenize Chinese, English, numbers, and identifiers."""
+	"""Tokenize Chinese, English, numbers, and identifiers.
+中文：此文档说明相关引擎组件的行为。"""
 	text = text.lower()
 	tokens: list[str] = []
 	tokens.extend(re.findall(r"[a-z_][a-z0-9_]*", text))

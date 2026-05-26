@@ -73,7 +73,8 @@ class HooksPlugin(BasePlugin):
 				self._fire_notify(rule, {"event": "on_error", "error": str(error)})
 
 	async def on_plan_created(self, exec_ctx: "ExecutionContext", plan_info: dict) -> None:
-		"""计划创建事件"""
+		"""English: This documentation describes the related engine component behavior.
+中文：计划创建事件"""
 		for rule in self._rules:
 			if rule.get("event") != "on_plan_created":
 				continue
@@ -84,7 +85,8 @@ class HooksPlugin(BasePlugin):
 				self._fire_notify(rule, {"event": "on_plan_created", **(plan_info or {})})
 
 	async def on_step_completed(self, exec_ctx: "ExecutionContext", step_info: dict) -> None:
-		"""步骤完成事件"""
+		"""English: This documentation describes the related engine component behavior.
+中文：步骤完成事件"""
 		for rule in self._rules:
 			if rule.get("event") != "on_step_completed":
 				continue
@@ -95,7 +97,9 @@ class HooksPlugin(BasePlugin):
 				self._fire_notify(rule, {"event": "on_step_completed", **(step_info or {})})
 
 	def _fire_notify(self, rule: dict, payload: dict) -> None:
-		"""触发 NOTIFY 动作"""
+		"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+触发 NOTIFY 动作"""
 		callback = rule.get("params", {}).get("callback")
 		if callback and callable(callback):
 			try:
@@ -132,7 +136,9 @@ _ALLOWED_TYPES = (str, int, float, bool, list, dict, type(None))
 
 
 def _safe_eval_condition(condition: str, context: dict) -> bool:
-	"""安全求值条件表达式。
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+安全求值条件表达式。
 
 	支持语法：比较（==, !=, <, >, in, not in）、布尔运算（and, or, not）、
 	字符串方法（startswith, endswith, get）、下标访问和常量。
@@ -140,7 +146,7 @@ def _safe_eval_condition(condition: str, context: dict) -> bool:
 	if len(condition) > 500:
 		logger.warning(f"[hooks] Condition too long ({len(condition)} chars), rejected")
 		return False
-	# 校验 context 只包含安全类型
+	#English: Bilingual note. 中文：校验 context 只包含安全类型
 	for v in context.values():
 		if not isinstance(v, _ALLOWED_TYPES):
 			return False

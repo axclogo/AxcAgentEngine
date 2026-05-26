@@ -13,7 +13,8 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class StepObservation:
-	"""步骤观察结果。"""
+	"""English: This documentation describes the related engine component behavior.
+中文：步骤观察结果。"""
 	step_id: int
 	step_ok: bool = True
 	key_info: str = ""
@@ -26,7 +27,9 @@ class StepObservation:
 async def observe_step(step_id: int, step_status: StepStatus | str, step_result: str,
 					   step_description: str, plan_goal: str, remaining_steps: int,
 					   llm: Any = None) -> StepObservation:
-	"""评估步骤结果；提供 LLM 时使用 LLM，否则使用启发式规则。"""
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+评估步骤结果；提供 LLM 时使用 LLM，否则使用启发式规则。"""
 	if llm:
 		prompt = OBSERVE_PROMPT.format(
 			goal=plan_goal, step_id=step_id, description=step_description,
@@ -41,7 +44,7 @@ async def observe_step(step_id: int, step_status: StepStatus | str, step_result:
 					action=data.get("action", "continue"), reason=data.get("reason", ""))
 		except Exception as e:
 			logger.warning(f"[observer] LLM evaluation failed, falling back to heuristic: {e}")
-	# 启发式 fallback
+	#English: Bilingual note. 中文：启发式 fallback
 	step_ok = step_status in (StepStatus.DONE, "done")
 	if not step_ok and remaining_steps > 0:
 		return StepObservation(

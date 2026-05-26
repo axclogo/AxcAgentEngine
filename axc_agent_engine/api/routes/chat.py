@@ -1,4 +1,5 @@
-"""OpenAI Chat Completions compatible API subset."""
+"""OpenAI Chat Completions compatible API subset.
+中文：此文档说明相关引擎组件的行为。"""
 from __future__ import annotations
 
 import json
@@ -74,7 +75,8 @@ SUPPORTED_STREAM_OPTIONS = frozenset({"include_usage"})
 
 
 class ChatOptionResolver:
-	"""Extracts provider-facing options from the OpenAI-compatible request."""
+	"""Extracts provider-facing options from the OpenAI-compatible request.
+中文：此文档说明相关引擎组件的行为。"""
 
 	_OPTION_FIELDS = (
 		"temperature",
@@ -103,7 +105,8 @@ class ChatOptionResolver:
 
 
 class ChatSubsetValidator:
-	"""Owns the explicit compatibility boundary for /v1/chat/completions."""
+	"""Owns the explicit compatibility boundary for /v1/chat/completions.
+中文：此文档说明相关引擎组件的行为。"""
 
 	def validate(self, request: ChatRequest) -> JSONResponse | None:
 		extra_keys = sorted((request.model_extra or {}).keys())
@@ -125,7 +128,8 @@ class ChatSubsetValidator:
 
 
 class ChatResponsePresenter:
-	"""Formats OpenAI-compatible response envelopes and SSE chunks."""
+	"""Formats OpenAI-compatible response envelopes and SSE chunks.
+中文：此文档说明相关引擎组件的行为。"""
 
 	def completion(
 		self,
@@ -188,7 +192,9 @@ def _error_response(
 	error_type: str = "invalid_request_error",
 	code: str | None = None,
 ) -> JSONResponse:
-	"""返回 OpenAI-style error object。"""
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+返回 OpenAI-style error object。"""
 	body: dict[str, Any] = {"error": {"message": message, "type": error_type, "param": None}}
 	if code:
 		body["error"]["code"] = code
@@ -207,7 +213,9 @@ def _unsupported_parameter_response(param: str, detail: str = "") -> JSONRespons
 
 
 def _capabilities() -> dict[str, Any]:
-	"""返回当前 API 兼容子集，便于 SDK/调用方做能力探测。"""
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+返回当前 API 兼容子集，便于 SDK/调用方做能力探测。"""
 	return {
 		"object": "axc.api_capabilities",
 		"openai_compatibility": {
@@ -276,7 +284,9 @@ async def _sync_response(
 	request: ChatRequest,
 	llm_options: dict,
 ) -> dict | JSONResponse:
-	"""非流式响应：消费事件流并收集 usage。"""
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+非流式响应：消费事件流并收集 usage。"""
 	content = ""
 	usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
 	finish_reason = "stop"
@@ -307,7 +317,7 @@ async def _stream_response(agent: Any, messages: list[dict], request: ChatReques
 	last_usage: dict[str, int] = {}
 	has_tool_calls = False
 	include_usage = _CHAT_OPTIONS.stream_include_usage(request)
-	# 首个 chunk 发送 role
+	#English: Bilingual note. 中文：首个 chunk 发送 role
 	yield _CHAT_PRESENTER.sse(_CHAT_PRESENTER.chunk(resp_id, model_name, [{"index": 0, "delta": {"role": "assistant"}, "finish_reason": None}]))
 	async for event in agent.stream_with_messages(messages, session_id=request.session_id, llm_options=llm_options):
 		if event.type == EventType.COST_UPDATE:

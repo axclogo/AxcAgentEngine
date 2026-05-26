@@ -1,4 +1,5 @@
-"""Policy evaluation for security-sensitive actions."""
+"""Policy evaluation for security-sensitive actions.
+中文：此文档说明相关引擎组件的行为。"""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -9,7 +10,8 @@ from axc_agent_engine.core.errors import ErrorCategory, ErrorEnvelope
 
 @dataclass(frozen=True)
 class PolicyRequest:
-	"""Input to a policy evaluator."""
+	"""Input to a policy evaluator.
+中文：此文档说明相关引擎组件的行为。"""
 	agent_name: str = ""
 	session_id: str = ""
 	tool_name: str = ""
@@ -22,7 +24,8 @@ class PolicyRequest:
 
 @dataclass(frozen=True)
 class PolicyDecision:
-	"""Policy decision returned by a PolicyEvaluator."""
+	"""Policy decision returned by a PolicyEvaluator.
+中文：此文档说明相关引擎组件的行为。"""
 	allowed: bool
 	reason: str = ""
 	code: str = ""
@@ -39,12 +42,14 @@ class PolicyDecision:
 
 @runtime_checkable
 class PolicyEvaluator(Protocol):
-	"""Evaluates whether an operation is allowed."""
+	"""Evaluates whether an operation is allowed.
+中文：此文档说明相关引擎组件的行为。"""
 	def evaluate(self, request: PolicyRequest) -> PolicyDecision: ...
 
 
 class CapabilityPolicyEvaluator:
-	"""Default policy evaluator based on allowed capability names."""
+	"""Default policy evaluator based on allowed capability names.
+中文：此文档说明相关引擎组件的行为。"""
 
 	def __init__(self, allowed_capabilities: set[str] | frozenset[str] | None = None) -> None:
 		self._allowed_capabilities = frozenset(allowed_capabilities or [])

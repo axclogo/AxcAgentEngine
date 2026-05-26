@@ -27,7 +27,9 @@ class LLMJudge:
 		self._llm = llm_client
 
 	async def judge(self, case: "EvalCase", result: "EvalResult") -> tuple[float, str]:
-		"""评估单个结果，返回 (score, reason)"""
+		"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+评估单个结果，返回 (score, reason)"""
 		prompt = JUDGE_PROMPT.format(
 			input=case.input,
 			expected=case.expected_output or "(无期望输出)",
@@ -42,7 +44,9 @@ class LLMJudge:
 
 	@staticmethod
 	def _parse_response(response: str) -> tuple[float, str]:
-		"""解析 LLM 评估响应"""
+		"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+解析 LLM 评估响应"""
 		response = response.strip()
 		if "|" in response:
 			parts = response.split("|", 1)

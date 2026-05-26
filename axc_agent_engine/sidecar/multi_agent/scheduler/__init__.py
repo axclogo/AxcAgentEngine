@@ -8,12 +8,18 @@ if TYPE_CHECKING:
 
 
 class Scheduler(Protocol):
-	"""调度器协议：选择本轮发言的 Agent 列表"""
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+调度器协议：选择本轮发言的 Agent 列表"""
 	def select_speakers(self, ctx: SharedContext, agents: list,
 						step: int) -> list:
-		"""选择本轮发言的 Agent 列表。返回多个时并行发言，返回一个时串行。"""
+		"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+选择本轮发言的 Agent 列表。返回多个时并行发言，返回一个时串行。"""
 		...
 
 	def steps_per_round(self, agents: list) -> int:
-		"""一轮需要多少步（所有人发完一次言 = 1 轮）。默认 = agent 数量。"""
+		"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+一轮需要多少步（所有人发完一次言 = 1 轮）。默认 = agent 数量。"""
 		return len(agents)

@@ -20,7 +20,9 @@ GENERATE_PERSONA_PROMPT = """请根据以下信息生成一个角色设定：
 
 
 def build_persona_prompt(agent_name: str, persona: dict) -> str:
-	"""构建角色设定 prompt，追加到 Agent 的 system_prompt"""
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+构建角色设定 prompt，追加到 Agent 的 system_prompt"""
 	parts = []
 	if persona.get("role"):
 		parts.append(f"你的角色：{persona['role']}")
@@ -36,7 +38,9 @@ def build_persona_prompt(agent_name: str, persona: dict) -> str:
 
 
 async def generate_persona(topic: str, role_hint: str, llm_client: Any) -> dict:
-	"""调 LLM 自动生成角色设定"""
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+调 LLM 自动生成角色设定"""
 	prompt = GENERATE_PERSONA_PROMPT.format(topic=topic, role_hint=role_hint)
 	messages = [{"role": "user", "content": prompt}]
 	try:
@@ -51,7 +55,9 @@ async def generate_persona(topic: str, role_hint: str, llm_client: Any) -> dict:
 
 
 def _parse_persona_response(content: str) -> dict:
-	"""解析 LLM 返回的角色设定文本"""
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+解析 LLM 返回的角色设定文本"""
 	result: dict[str, str] = {}
 	mapping = {"角色": "role", "立场": "stance", "背景": "background", "行为规则": "rules"}
 	for line in content.strip().split("\n"):

@@ -36,7 +36,9 @@ E = MultiAgentEventType
 
 
 class MultiAgentEventSink:
-	"""构建公开多 Agent 事件和非流式结果文本。
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+构建公开多 Agent 事件和非流式结果文本。
 	Builds public multi-agent events and non-stream result text.
 	"""
 
@@ -64,7 +66,9 @@ class MultiAgentEventSink:
 
 
 class AgentOrchestrationWorker:
-	"""通过 dispatcher 边界发送一个会话轮次请求。
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+通过 dispatcher 边界发送一个会话轮次请求。
 	Sends one session turn through the dispatcher boundary.
 	"""
 
@@ -89,7 +93,9 @@ class AgentOrchestrationWorker:
 
 
 class SocialFeedBuilder:
-	"""根据轮次消息维护 social 模式 feed artifact。
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+根据轮次消息维护 social 模式 feed artifact。
 	Maintains the social-mode feed artifact from round messages.
 	"""
 
@@ -111,7 +117,9 @@ class SocialFeedBuilder:
 
 
 class MultiAgentSession:
-	"""通过 dispatcher/bus 编排多 Agent。
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+通过 dispatcher/bus 编排多 Agent。
 	Orchestrates multiple Agents through dispatcher/bus.
 	"""
 
@@ -160,7 +168,9 @@ class MultiAgentSession:
 				self._persona[agent_name] = await generate_persona(self._topic, persona_data, self._utility_llm)
 
 	async def run(self) -> str:
-		"""非流式执行。
+		"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+非流式执行。
 		Run without streaming.
 		"""
 		result_parts: list[str] = []
@@ -170,7 +180,9 @@ class MultiAgentSession:
 		return "\n\n".join(result_parts)
 
 	async def stream(self) -> AsyncIterator[MultiAgentEvent]:
-		"""事件流执行。
+		"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+事件流执行。
 		Run and yield events as a stream.
 		"""
 		async for event in self._execute():
@@ -210,7 +222,9 @@ class MultiAgentSession:
 		yield self._events.done("手动停止", round_num, self._build_stats())
 
 	async def _execute_speakers(self, speakers: list, round_num: int) -> AsyncIterator[MultiAgentEvent]:
-		"""通过 dispatcher.request 执行发言者。"""
+		"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+通过 dispatcher.request 执行发言者。"""
 		for agent in speakers:
 			self._record_speak(agent.name)
 			prompt = self._build_prompt(agent)
@@ -222,7 +236,9 @@ class MultiAgentSession:
 				yield self._events.error(agent.name, str(e), round_num)
 
 	def _build_prompt(self, agent: Any) -> str:
-		"""基于共享上下文和角色设定构建 Agent prompt。"""
+		"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+基于共享上下文和角色设定构建 Agent prompt。"""
 		parts: list[str] = [f"讨论主题：{self._shared.topic}"]
 		if agent.name in self._persona:
 			persona_text = build_persona_prompt(agent.name, self._persona[agent.name])

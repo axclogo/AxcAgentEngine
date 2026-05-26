@@ -1,4 +1,5 @@
-"""Reusable ReAct turn/loop services."""
+"""Reusable ReAct turn/loop services.
+中文：此文档说明相关引擎组件的行为。"""
 from __future__ import annotations
 
 from collections.abc import AsyncIterator, Callable
@@ -38,7 +39,8 @@ class ReActTurnResult:
 
 
 class ToolCallFlow:
-	"""Parse, execute, store, and optionally emit tool call results for one ReAct round."""
+	"""Parse, execute, store, and optionally emit tool call results for one ReAct round.
+中文：此文档说明相关引擎组件的行为。"""
 
 	def __init__(
 		self,
@@ -79,7 +81,8 @@ class ToolCallFlow:
 
 
 class ReActTurnRunner:
-	"""Run a single ReAct turn against a message store and execution context."""
+	"""Run a single ReAct turn against a message store and execution context.
+中文：此文档说明相关引擎组件的行为。"""
 
 	def __init__(
 		self,

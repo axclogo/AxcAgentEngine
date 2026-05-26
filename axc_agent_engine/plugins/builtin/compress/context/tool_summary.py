@@ -1,4 +1,5 @@
-"""LLM-backed tool-use summaries for compressed context."""
+"""LLM-backed tool-use summaries for compressed context.
+中文：此文档说明相关引擎组件的行为。"""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -7,19 +8,20 @@ from typing import Any
 from axc_agent_engine.tools.tool_output import ToolOutput
 
 
-TOOL_SUMMARY_PROMPT = """Summarize the tool activity below for future context.
+TOOL_SUMMARY_PROMPT = """请总结下面的工具活动，供后续上下文使用。
 
-Keep durable facts, file paths, IDs, errors, and decisions. Omit noise and repeated boilerplate.
-Return a concise bullet list under {max_chars} characters.
+保留长期有效的事实、文件路径、ID、错误和决策。省略噪音和重复模板内容。
+请返回简洁的项目符号列表，总长度不超过 {max_chars} 个字符。
 
-Tool activity:
+工具活动：
 {activity}
 """
 
 
 @dataclass
 class ToolObservation:
-	"""One completed tool invocation ready for summarization."""
+	"""One completed tool invocation ready for summarization.
+中文：此文档说明相关引擎组件的行为。"""
 
 	name: str
 	arguments: dict[str, Any]
@@ -35,7 +37,8 @@ class ToolObservation:
 
 
 class ToolSummaryService:
-	"""Summarizes completed tools with utility_llm, with deterministic fallback."""
+	"""Summarizes completed tools with utility_llm, with deterministic fallback.
+中文：此文档说明相关引擎组件的行为。"""
 
 	def __init__(self, max_chars: int = 1200, max_observations: int = 20) -> None:
 		self.max_chars = max(200, int(max_chars))
@@ -75,7 +78,7 @@ def tool_summaries_message(summaries: list[str]) -> dict[str, str] | None:
 	lines = [item.strip() for item in summaries if item and item.strip()]
 	if not lines:
 		return None
-	return {"role": "system", "content": "[tool summaries]\n" + "\n".join(f"- {item}" for item in lines)}
+	return {"role": "system", "content": "[工具摘要]\n" + "\n".join(f"- {item}" for item in lines)}
 
 
 def _truncate(text: str, max_chars: int) -> str:
@@ -84,4 +87,4 @@ def _truncate(text: str, max_chars: int) -> str:
 	head_len = max_chars * 3 // 4
 	tail_len = max_chars - head_len
 	omitted = len(text) - head_len - tail_len
-	return f"{text[:head_len]}\n...[omitted {omitted} chars]...\n{text[-tail_len:]}"
+	return f"{text[:head_len]}\n...[省略 {omitted} 个字符]...\n{text[-tail_len:]}"

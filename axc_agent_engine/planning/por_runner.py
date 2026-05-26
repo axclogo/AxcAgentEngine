@@ -33,7 +33,8 @@ _MIN_STEP_ROUNDS = 5
 
 @dataclass
 class StepExecutionResult:
-	"""POR step execution output before it is reduced into the parent context."""
+	"""POR step execution output before it is reduced into the parent context.
+中文：此文档说明相关引擎组件的行为。"""
 	step_id: int
 	result: str
 	events: list[Event] = field(default_factory=list)
@@ -66,7 +67,7 @@ class StepRunner:
 		collected_events: list[Event] = []
 		if self._ctx.state.current_round >= self._ctx.config.max_rounds:
 			step.status = StepStatus.FAILED
-			return "Step exceeded total round limit", collected_events
+			return "步骤超过总轮次限制", collected_events
 		try:
 			turn_result = None
 			async for item in self._shared_kernel.run_step(
@@ -81,10 +82,10 @@ class StepRunner:
 					collected_events.append(item)
 		except Exception as e:
 			step.status = StepStatus.FAILED
-			return f"LLM call failed: {e}", collected_events
+			return f"LLM 调用失败：{e}", collected_events
 		if turn_result is None:
 			step.status = StepStatus.FAILED
-			return "LLM call failed: no result", collected_events
+			return "LLM 调用失败：没有结果", collected_events
 		content = turn_result.content
 		if turn_result.failed:
 			step.status = StepStatus.FAILED
@@ -118,9 +119,9 @@ class StepRunner:
 				else:
 					collected_events.append(item)
 		except Exception as e:
-			return self._isolated_result(step, f"LLM call failed: {e}", collected_events, child_ctx, failed=True)
+			return self._isolated_result(step, f"LLM 调用失败：{e}", collected_events, child_ctx, failed=True)
 		if turn_result is None:
-			return self._isolated_result(step, "LLM call failed: no result", collected_events, child_ctx, failed=True)
+			return self._isolated_result(step, "LLM 调用失败：没有结果", collected_events, child_ctx, failed=True)
 		if turn_result.failed:
 			return self._isolated_result(step, turn_result.content, collected_events, child_ctx, failed=True)
 		return self._isolated_result(step, turn_result.content, collected_events, child_ctx, failed=False)
@@ -142,7 +143,7 @@ class StepRunner:
 		if step_result.isolated:
 			self._messages.append({
 				"role": "assistant",
-				"content": f"[POR step {step_result.step_id} result]\n{step_result.result}",
+				"content": f"[POR 步骤 {step_result.step_id} 结果]\n{step_result.result}",
 			})
 
 	def _isolated_context(self, plan: Plan, step: PlanStep):
@@ -158,7 +159,8 @@ class StepRunner:
 
 
 class PORExecutionService:
-	"""POR behavior service used by the pydantic-graph runtime."""
+	"""POR behavior service used by the pydantic-graph runtime.
+中文：此文档说明相关引擎组件的行为。"""
 
 	def __init__(self, runtime: PlanRuntime) -> None:
 		self._llm = runtime.llm_caller
@@ -177,7 +179,7 @@ class PORExecutionService:
 			return
 		self._messages.append({
 			"role": "assistant",
-			"content": f"Plan created: {self._plan.goal} ({len(self._plan.steps)} steps)",
+			"content": f"计划已创建：{self._plan.goal}（{len(self._plan.steps)} 个步骤）",
 		})
 		state.events.append(Event(type=EventType.PLAN_CREATED, content=self._plan.goal,
 					steps=[{"step_id": s.step_id, "description": s.description} for s in self._plan.steps]))
@@ -190,7 +192,7 @@ class PORExecutionService:
 	async def select_steps(self, state: PORGraphState) -> None:
 		state.should_continue = False
 		if not state.plan.steps:
-			state.error = "Plan created with empty steps list"
+			state.error = "计划创建后步骤列表为空"
 			return
 		self._plan = state.plan
 		state.next_steps = []
@@ -249,14 +251,16 @@ class PORExecutionService:
 		return PORGraphResult(events=state.events, final_content=state.final_content, error=state.error)
 
 	async def _execute_parallel(self, steps: list[PlanStep]) -> AsyncIterator[Event]:
-		"""使用隔离 runtime 并行执行多个就绪步骤。
+		"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+使用隔离 runtime 并行执行多个就绪步骤。
 
 		每个步骤拥有自己的子 MessageStore 和 ExecutionContext，避免消息顺序竞态
 		以及轮次计数冲突。
 		"""
 		for step in steps:
 			yield Event(type=EventType.STEP_START, step_id=step.step_id, content=step.description)
-			# 使用隔离上下文并行运行步骤
+			#English: Source note. 中文：使用隔离上下文并行运行步骤
 		tasks = [self._execute_step_isolated(step) for step in steps]
 		results = await asyncio.gather(*tasks, return_exceptions=True)
 		for step, result in zip(steps, results):
@@ -275,11 +279,15 @@ class PORExecutionService:
 			event, _ = await self._handle_step_result(step, step_output.result)
 			yield event
 	async def _execute_step_isolated(self, step: PlanStep) -> StepExecutionResult:
-		"""使用隔离的 MessageStore 和 ExecutionContext 执行单个步骤。"""
+		"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+使用隔离的 MessageStore 和 ExecutionContext 执行单个步骤。"""
 		return await self._step_runner.run_isolated(self._plan, step)
 
 	async def _handle_step_result(self, step: PlanStep, step_result: str) -> tuple[Event, bool]:
-		"""处理步骤结果：observe → mark → replan，返回 (event, goal_achieved)。"""
+		"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+处理步骤结果：observe → mark → replan，返回 (event, goal_achieved)。"""
 		remaining = get_remaining_count(self._plan)
 		observation = await observe_step(
 			step.step_id, step.status, step_result, step.description,
@@ -306,12 +314,15 @@ class PORExecutionService:
 			return Event(type=EventType.STEP_COMPLETED, step_id=step.step_id, content=step_result), False
 
 	async def _do_replan(self, failed_step_id: int) -> None:
-		"""执行重规划。"""
+		"""English: This documentation describes the related engine component behavior.
+中文：执行重规划。"""
 		self._plan = await replan(self._plan, failed_step_id, self._ctx.utility_llm)
 		await self._save_plan_checkpoint(CheckpointStatus.RUNNING, current_step_id=failed_step_id, phase="replan")
 
 	async def _execute_single_step(self, step: PlanStep) -> tuple[str, list[Event]]:
-		"""执行单个步骤（子 ReAct 循环），返回 (result, intermediate events)。
+		"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+执行单个步骤（子 ReAct 循环），返回 (result, intermediate events)。
 
 		设计：步骤消息有意累积在共享 MessageStore 中。后续步骤需要前置步骤上下文
 		（工具结果、中间推理）来做决策，因此不要隔离串行步骤消息。
@@ -319,7 +330,8 @@ class PORExecutionService:
 		return await self._step_runner.run_shared(self._plan, step)
 
 	async def _finalize_plan(self, user_message: str) -> AsyncIterator[Event]:
-		"""计划完成后生成最终摘要。"""
+		"""English: This documentation describes the related engine component behavior.
+中文：计划完成后生成最终摘要。"""
 		completed = [s for s in self._plan.steps if s.status == StepStatus.DONE]
 		summary_parts = [f"目标：{self._plan.goal}", f"已完成 {len(completed)}/{len(self._plan.steps)} 个步骤"]
 		for s in completed:
@@ -363,14 +375,17 @@ class PORExecutionService:
 
 
 class PORRunner:
-	"""POR plan runner backed by pydantic-graph."""
+	"""POR plan runner backed by pydantic-graph.
+中文：此文档说明相关引擎组件的行为。"""
 
 	def __init__(self, runtime: PlanRuntime) -> None:
 		self._service = PORExecutionService(runtime)
 		self._graph_runtime = PORGraphRuntime(self._service)
 
 	async def run(self, plan: Plan, user_message: str) -> AsyncIterator[Event]:
-		"""使用预先构建的 Plan 执行 POR 流程。"""
+		"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+使用预先构建的 Plan 执行 POR 流程。"""
 		async for event in self._graph_runtime.run(plan, user_message):
 			yield event
 

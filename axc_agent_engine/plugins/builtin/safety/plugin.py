@@ -33,7 +33,9 @@ INPUT_MAX_LENGTH = 30000
 
 
 class SafetyPlugin(BasePlugin):
-	"""安全防护 — 输入清洗(transform_messages) + 注入检测(pre_llm_call) + 输出脱敏(post_tool_call)"""
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+安全防护 — 输入清洗(transform_messages) + 注入检测(pre_llm_call) + 输出脱敏(post_tool_call)"""
 	name = "safety"
 	display_name = "安全防护"
 	priority = 10
@@ -46,7 +48,9 @@ class SafetyPlugin(BasePlugin):
 		self._input_sanitize = config.get("input_sanitize", True)
 
 	def transform_messages(self, messages: list, exec_ctx: Any = None, current_message: str = "") -> list:
-		"""只做输入清洗，不做注入检测（注入检测在 pre_llm_call 中）"""
+		"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+只做输入清洗，不做注入检测（注入检测在 pre_llm_call 中）"""
 		if not messages or not self._input_sanitize:
 			return messages
 		return self._sanitize_latest_user(messages)
@@ -74,7 +78,7 @@ class SafetyPlugin(BasePlugin):
 					   result: Any = None, duration_ms: int = 0) -> Any:
 		if not self._pii_masking:
 			return result
-		# PII masking on ToolOutput content
+		#English: PII masking on ToolOutput content 中文：源码说明。
 		from axc_agent_engine.tools.tool_output import ToolOutput
 		if isinstance(result, ToolOutput):
 			if isinstance(result.content, str):
@@ -97,7 +101,8 @@ class SafetyPlugin(BasePlugin):
 
 
 def sanitize_input(text: str) -> str:
-	"""清洗用户输入"""
+	"""English: This documentation describes the related engine component behavior.
+中文：清洗用户输入"""
 	if not text:
 		return text
 	text = re.sub(r'<at\s+user_id="[^"]*">([^<]*)</at>', r'@\1', text)

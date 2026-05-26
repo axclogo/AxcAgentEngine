@@ -17,7 +17,9 @@ def should_replan(plan: Plan) -> bool:
 
 
 async def replan(plan: Plan, failed_step_id: int, llm: Any = None) -> Plan:
-	"""步骤失败后重规划；提供 LLM 时使用 LLM，否则使用启发式规则。"""
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+步骤失败后重规划；提供 LLM 时使用 LLM，否则使用启发式规则。"""
 	if llm:
 		completed_text = "\n".join(
 			f"  Step {s.step_id}: {s.result}" for s in plan.steps if s.status == StepStatus.DONE) or "  None"
@@ -42,7 +44,7 @@ async def replan(plan: Plan, failed_step_id: int, llm: Any = None) -> Plan:
 				return plan
 		except Exception as e:
 			logger.warning(f"[replanner] LLM replan failed, falling back to heuristic: {e}")
-	# 启发式 fallback：跳过依赖失败步骤的步骤
+	#English: Bilingual note. 中文：启发式 fallback：跳过依赖失败步骤的步骤
 	plan.replan_count += 1
 	failed_ids = {s.step_id for s in plan.steps if s.status == StepStatus.FAILED}
 	for step in plan.steps:

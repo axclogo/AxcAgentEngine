@@ -11,7 +11,9 @@ logger = logging.getLogger(__name__)
 
 
 class LLMBasedStop:
-	"""基于 LLM 判断的终止条件基类，子类只需定义 prompt 和判断逻辑"""
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+基于 LLM 判断的终止条件基类，子类只需定义 prompt 和判断逻辑"""
 
 	prompt_template: str = ""
 	success_keyword: str = ""
@@ -41,12 +43,14 @@ class LLMBasedStop:
 		return False, ""
 
 	def _evaluate(self, answer: str, ctx: "SharedContext", round_num: int) -> tuple[bool, str]:
-		"""评估 LLM 回复，子类可覆盖"""
+		"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+评估 LLM 回复，子类可覆盖"""
 		first_line = answer.split("\n")[0].strip().upper()
 		if first_line == self.success_keyword:
 			return True, self.success_reason
-		# 未达成时注入引导建议。
-		# Inject guidance when the target condition has not been reached.
+		#English: Source note. 中文：未达成时注入引导建议。
+		#English: Inject guidance when the target condition has not been reached. 中文：源码说明。
 		if len(answer.split("\n")) > 1:
 			guidance = "\n".join(answer.split("\n")[1:]).strip()
 			if guidance:

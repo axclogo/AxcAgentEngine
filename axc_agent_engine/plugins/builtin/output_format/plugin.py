@@ -44,7 +44,9 @@ class OutputFormatPlugin(BasePlugin):
 		self._plugin_ctx = plugin_ctx
 
 	def inject_context(self, exec_ctx: "ExecutionContext", topic: str = "") -> str:
-		"""注入格式要求到 system_prompt"""
+		"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+注入格式要求到 system_prompt"""
 		if not self._type:
 			return ""
 		if self._type == "json_schema" and self._schema:
@@ -57,7 +59,8 @@ class OutputFormatPlugin(BasePlugin):
 		return ""
 
 	async def on_execution_complete(self, exec_ctx: "ExecutionContext", result: str, trace: dict) -> str:
-		"""校验并可选修复最终输出。"""
+		"""English: This documentation describes the related engine component behavior.
+中文：校验并可选修复最终输出。"""
 		if not result or not self._type:
 			return result
 		service = self._service()
@@ -87,12 +90,12 @@ class OutputFormatPlugin(BasePlugin):
 	def get_tools(self) -> list[ToolDefinition]:
 		return [ToolDefinition(
 			name="output_format_validate",
-			description="Validate draft content against the configured output format contract.",
+			description="根据已配置的输出格式契约校验草稿内容。",
 			parameters={
 				"type": "object",
 				"properties": {
-					"content": {"type": "string", "description": "Draft content to validate"},
-					"repair": {"type": "boolean", "description": "Whether to attempt repair", "default": False},
+					"content": {"type": "string", "description": "需要校验的草稿内容"},
+					"repair": {"type": "boolean", "description": "是否尝试修复", "default": False},
 				},
 				"required": ["content"],
 			},
@@ -194,7 +197,8 @@ class OutputFormatPlugin(BasePlugin):
 
 
 class OutputContractError(PluginError):
-	"""Raised when strict output contract validation fails."""
+	"""Raised when strict output contract validation fails.
+中文：此文档说明相关引擎组件的行为。"""
 
 	def __init__(self, errors: list[str], details: dict[str, Any] | None = None) -> None:
 		self.errors = list(errors)

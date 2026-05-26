@@ -220,4 +220,4 @@ class TestToolResultCompactView:
 		tr = ToolResult(tool_call_id="1", tool_name="t", arguments={}, output=output, success=True)
 		view = tr.compact_view()
 		assert len(view) < 5000
-		assert "omitted" in view
+		assert "省略" in view

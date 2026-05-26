@@ -12,7 +12,7 @@ from axc_agent_engine.core.events import Event, EventType
 def test_main_prints_help_without_command(monkeypatch, capsys):
 	monkeypatch.setattr(sys, "argv", ["axc"])
 	cli.main()
-	assert "AxcAgentEngine CLI" in capsys.readouterr().out
+	assert "AxcAgentEngine 命令行工具" in capsys.readouterr().out
 
 
 def test_chat_requires_env(monkeypatch):

@@ -1,4 +1,5 @@
-"""Storage-neutral hybrid retrieval."""
+"""Storage-neutral hybrid retrieval.
+中文：此文档说明相关引擎组件的行为。"""
 from __future__ import annotations
 
 import math
@@ -15,7 +16,8 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class KnowledgeDocument:
-	"""A searchable document chunk."""
+	"""A searchable document chunk.
+中文：此文档说明相关引擎组件的行为。"""
 	id: str
 	text: str
 	source: str = ""
@@ -28,7 +30,8 @@ class KnowledgeFilter:
 
 	Enterprise ACL systems should translate their permission model into metadata
 	filters before calling the engine; the engine does not own user/org policy.
-	"""
+	
+中文：此文档说明相关引擎组件的行为。"""
 
 	namespace: str = ""
 	metadata: dict[str, Any] = field(default_factory=dict)
@@ -62,7 +65,8 @@ class KnowledgeFilter:
 
 @dataclass(frozen=True)
 class KnowledgeSearchRequest:
-	"""Structured retrieval request used by stores, retrievers, and tools."""
+	"""Structured retrieval request used by stores, retrievers, and tools.
+中文：此文档说明相关引擎组件的行为。"""
 
 	query: str
 	top_k: int = 5
@@ -74,7 +78,8 @@ class KnowledgeSearchRequest:
 
 @dataclass(frozen=True)
 class RetrievalTrace:
-	"""Debug metadata for retrieval observability."""
+	"""Debug metadata for retrieval observability.
+中文：此文档说明相关引擎组件的行为。"""
 
 	query: str
 	rewritten_queries: list[str] = field(default_factory=list)
@@ -96,7 +101,8 @@ class RetrievalTrace:
 
 @dataclass(frozen=True)
 class KnowledgeSearchResponse:
-	"""Structured retrieval response with optional trace."""
+	"""Structured retrieval response with optional trace.
+中文：此文档说明相关引擎组件的行为。"""
 
 	results: list["RetrievalResult"]
 	trace: RetrievalTrace | None = None
@@ -110,7 +116,8 @@ class KnowledgeSearchResponse:
 
 @dataclass(frozen=True)
 class RetrievalResult:
-	"""One retrieval hit."""
+	"""One retrieval hit.
+中文：此文档说明相关引擎组件的行为。"""
 	id: str
 	text: str
 	score: float
@@ -140,25 +147,29 @@ class RetrievalResult:
 
 @runtime_checkable
 class EmbeddingClient(Protocol):
-	"""Embeds texts for vector retrieval."""
+	"""Embeds texts for vector retrieval.
+中文：此文档说明相关引擎组件的行为。"""
 	async def embed(self, texts: list[str]) -> list[list[float]]: ...
 
 
 @runtime_checkable
 class Reranker(Protocol):
-	"""Reranks retrieval candidates."""
+	"""Reranks retrieval candidates.
+中文：此文档说明相关引擎组件的行为。"""
 	async def rerank(self, query: str, results: list[RetrievalResult], top_k: int) -> list[RetrievalResult]: ...
 
 
 @runtime_checkable
 class QueryRewriter(Protocol):
-	"""Expands or rewrites a retrieval query before search."""
+	"""Expands or rewrites a retrieval query before search.
+中文：此文档说明相关引擎组件的行为。"""
 	async def rewrite(self, query: str, max_queries: int = 4) -> list[str]: ...
 
 
 @runtime_checkable
 class KnowledgeIndexStore(Protocol):
-	"""Storage-neutral knowledge index API."""
+	"""Storage-neutral knowledge index API.
+中文：此文档说明相关引擎组件的行为。"""
 	async def add_documents(self, documents: list[KnowledgeDocument], embeddings: list[list[float]] | None = None) -> None: ...
 	async def upsert_documents(self, documents: list[KnowledgeDocument], embeddings: list[list[float]] | None = None) -> None: ...
 	async def delete_documents(self, ids: list[str]) -> int: ...
@@ -171,7 +182,8 @@ class KnowledgeIndexStore(Protocol):
 
 
 class HashEmbeddingClient:
-	"""Dependency-free deterministic embedding fallback for tests and local indexes."""
+	"""Dependency-free deterministic embedding fallback for tests and local indexes.
+中文：此文档说明相关引擎组件的行为。"""
 
 	def __init__(self, dimensions: int = 256) -> None:
 		self.dimensions = max(8, dimensions)
@@ -181,7 +193,8 @@ class HashEmbeddingClient:
 
 
 class OpenAICompatibleEmbeddingClient:
-	"""Small OpenAI-compatible /embeddings client used when configured by plugins."""
+	"""Small OpenAI-compatible /embeddings client used when configured by plugins.
+中文：此文档说明相关引擎组件的行为。"""
 
 	def __init__(self, base_url: str, model: str, api_key: str = "", timeout: int = 30) -> None:
 		if not base_url:
@@ -212,7 +225,8 @@ class OpenAICompatibleEmbeddingClient:
 
 
 class ScoreReranker:
-	"""Lexical reranker that keeps the engine usable without a model dependency."""
+	"""Lexical reranker that keeps the engine usable without a model dependency.
+中文：此文档说明相关引擎组件的行为。"""
 
 	async def rerank(self, query: str, results: list[RetrievalResult], top_k: int) -> list[RetrievalResult]:
 		query_terms = set(tokenize(query))
@@ -240,7 +254,8 @@ class ExternalReranker:
 
 	The endpoint is expected to accept `{model, query, documents}` and return
 	either `results: [{index, score}]`, `data: [{index, score}]`, or a score list.
-	"""
+	
+中文：此文档说明相关引擎组件的行为。"""
 
 	def __init__(self, endpoint: str, model: str = "", api_key: str = "", timeout: float = 30.0) -> None:
 		if not endpoint:
@@ -288,7 +303,8 @@ class ExternalReranker:
 
 
 class LLMReranker:
-	"""LLM scoring fallback for retrieval candidates."""
+	"""LLM scoring fallback for retrieval candidates.
+中文：此文档说明相关引擎组件的行为。"""
 
 	def __init__(self, utility_llm: Any, max_chars_per_doc: int = 700) -> None:
 		self.utility_llm = utility_llm
@@ -321,7 +337,8 @@ class LLMReranker:
 
 
 class CascadeReranker:
-	"""Try rerankers in order and fall back on failure or empty output."""
+	"""Try rerankers in order and fall back on failure or empty output.
+中文：此文档说明相关引擎组件的行为。"""
 
 	def __init__(self, rerankers: list[Reranker]) -> None:
 		self.rerankers = rerankers
@@ -338,14 +355,16 @@ class CascadeReranker:
 
 
 class NoopQueryRewriter:
-	"""Default query rewriter that preserves the original query."""
+	"""Default query rewriter that preserves the original query.
+中文：此文档说明相关引擎组件的行为。"""
 
 	async def rewrite(self, query: str, max_queries: int = 4) -> list[str]:
 		return [query] if query else []
 
 
 class LLMQueryRewriter:
-	"""LLM-based query expansion for better recall."""
+	"""LLM-based query expansion for better recall.
+中文：此文档说明相关引擎组件的行为。"""
 
 	def __init__(self, utility_llm: Any) -> None:
 		self.utility_llm = utility_llm
@@ -356,10 +375,10 @@ class LLMQueryRewriter:
 		if not self.utility_llm or max_queries <= 1:
 			return [query]
 		prompt = (
-			"Rewrite the retrieval query into concise search queries. "
-			"Return a JSON array of strings only.\n"
-			f"Max queries: {max_queries}\n"
-			f"Query: {query}"
+			"请将检索问题改写为简洁的搜索查询。"
+			"只返回字符串组成的 JSON 数组。\n"
+			f"最多查询数：{max_queries}\n"
+			f"原始问题：{query}"
 		)
 		try:
 			content = await self.utility_llm.ask(prompt)
@@ -371,7 +390,8 @@ class LLMQueryRewriter:
 
 
 class InMemoryKnowledgeIndexStore:
-	"""No-database knowledge index with BM25, optional embeddings, and hybrid search."""
+	"""No-database knowledge index with BM25, optional embeddings, and hybrid search.
+中文：此文档说明相关引擎组件的行为。"""
 
 	def __init__(
 		self,
@@ -387,7 +407,8 @@ class InMemoryKnowledgeIndexStore:
 		self._bm25 = BM25Index()
 
 	def set_documents(self, documents: list[KnowledgeDocument], embeddings: list[list[float]] | None = None) -> None:
-		"""Replace indexed documents without requiring async embedding calls."""
+		"""Replace indexed documents without requiring async embedding calls.
+中文：此文档说明相关引擎组件的行为。"""
 		self._documents = {doc.id: doc for doc in documents}
 		self._embeddings = {}
 		if embeddings:
@@ -396,7 +417,8 @@ class InMemoryKnowledgeIndexStore:
 		self._rebuild()
 
 	def set_document_embedding(self, doc_id: str, embedding: list[float]) -> None:
-		"""Set or replace one document embedding."""
+		"""Set or replace one document embedding.
+中文：此文档说明相关引擎组件的行为。"""
 		if doc_id in self._documents:
 			self._embeddings[doc_id] = list(embedding)
 
@@ -496,7 +518,8 @@ class InMemoryKnowledgeIndexStore:
 
 
 class BM25Index:
-	"""Small dependency-free BM25 index."""
+	"""Small dependency-free BM25 index.
+中文：此文档说明相关引擎组件的行为。"""
 
 	def __init__(self, documents: list[KnowledgeDocument] | None = None) -> None:
 		self.documents: list[KnowledgeDocument] = []
@@ -556,7 +579,8 @@ class BM25Index:
 
 
 class HybridRetriever:
-	"""BM25 + vector + optional rerank retrieval pipeline."""
+	"""BM25 + vector + optional rerank retrieval pipeline.
+中文：此文档说明相关引擎组件的行为。"""
 
 	def __init__(
 		self,
@@ -617,7 +641,8 @@ class HybridRetriever:
 
 
 def rrf_merge(*ranked_lists: list[RetrievalResult], top_k: int = 10, k: int = 60) -> list[RetrievalResult]:
-	"""Reciprocal rank fusion."""
+	"""Reciprocal rank fusion.
+中文：此文档说明相关引擎组件的行为。"""
 	scores: dict[str, float] = {}
 	items: dict[str, RetrievalResult] = {}
 	retrievals: dict[str, set[str]] = {}
@@ -718,7 +743,8 @@ def _highlights(query: str, text: str, max_items: int = 3, window: int = 80) -> 
 
 
 def tokenize(text: str) -> list[str]:
-	"""Tokenize Chinese, English, numbers, and identifiers."""
+	"""Tokenize Chinese, English, numbers, and identifiers.
+中文：此文档说明相关引擎组件的行为。"""
 	text = text.lower()
 	tokens: list[str] = []
 	tokens.extend(re.findall(r"[a-z_][a-z0-9_]*", text))
@@ -757,9 +783,9 @@ def _rerank_prompt(query: str, results: list[RetrievalResult], max_chars: int) -
 		text = result.text.replace("\n", " ")[:max_chars]
 		docs.append(f"{idx}. {text}")
 	return (
-		"Score each document for relevance to the query from 0 to 1. "
-		"Return JSON array only, each item {\"index\": number, \"score\": number}.\n"
-		f"Query: {query}\nDocuments:\n" + "\n".join(docs)
+		"请按 0 到 1 给每个文档与问题的相关性打分。"
+		"只返回 JSON 数组，每项格式为 {\"index\": number, \"score\": number}。\n"
+		f"问题：{query}\n文档：\n" + "\n".join(docs)
 	)
 
 

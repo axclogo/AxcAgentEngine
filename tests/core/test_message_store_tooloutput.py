@@ -17,7 +17,7 @@ class TestMessageStoreToolOutput:
 		ms = MessageStore()
 		results = [ToolResult(tool_call_id="1", tool_name="t", arguments={}, error="bad", success=False)]
 		ms.append_tool_results(results)
-		assert "[Error] bad" in ms.get_all()[0]["content"]
+		assert "[错误] bad" in ms.get_all()[0]["content"]
 
 	def test_append_long_content_truncated(self):
 		ms = MessageStore()
@@ -26,7 +26,7 @@ class TestMessageStoreToolOutput:
 		ms.append_tool_results(results)
 		content = ms.get_all()[0]["content"]
 		assert len(content) < 5000
-		assert "omitted" in content
+		assert "省略" in content
 
 	def test_append_with_summary_uses_summary(self):
 		ms = MessageStore()
@@ -57,7 +57,7 @@ class TestMessageStoreToolOutput:
 		output = ToolOutput.error("something failed")
 		results = [ToolResult(tool_call_id="1", tool_name="t", arguments={}, output=output, error="something failed", success=False)]
 		ms.append_tool_results(results)
-		assert "[Error]" in ms.get_all()[0]["content"]
+		assert "[错误]" in ms.get_all()[0]["content"]
 
 	def test_append_multiple_results(self):
 		ms = MessageStore()
@@ -70,7 +70,7 @@ class TestMessageStoreToolOutput:
 		assert ms.count == 3
 		assert "r1" in ms.get_all()[0]["content"]
 		assert "r2" in ms.get_all()[1]["content"]
-		assert "[Error]" in ms.get_all()[2]["content"]
+		assert "[错误]" in ms.get_all()[2]["content"]
 
 	def test_tool_call_id_preserved(self):
 		ms = MessageStore()

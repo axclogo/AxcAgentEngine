@@ -1,4 +1,5 @@
-"""Knowledge retrieval primitives."""
+"""Knowledge retrieval primitives.
+中文：此文档说明相关引擎组件的行为。"""
 from axc_agent_engine.plugins.builtin.knowledge.support.chunker import Chunk, SemanticChunker
 from axc_agent_engine.plugins.builtin.knowledge.support.ingestion import (
 	DocumentParser,

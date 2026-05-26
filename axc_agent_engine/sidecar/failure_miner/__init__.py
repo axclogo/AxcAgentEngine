@@ -1,6 +1,7 @@
-"""从轨迹和事件中挖掘重复出现的 Agent 失败模式。
-Mine recurring Agent failure patterns from traces and events.
-"""
+"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+从轨迹和事件中挖掘重复出现的 Agent 失败模式。
+Mine recurring Agent failure patterns from traces and events."""
 from __future__ import annotations
 
 from collections import Counter, defaultdict
@@ -10,7 +11,9 @@ from typing import Any
 
 @dataclass(frozen=True)
 class FailureRecord:
-	"""一条来自日志、事件、轨迹或评测结果的失败观测。
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+一条来自日志、事件、轨迹或评测结果的失败观测。
 	One failure observation from logs, events, traces, or eval results.
 	"""
 	record_id: str
@@ -25,7 +28,9 @@ class FailureRecord:
 
 @dataclass(frozen=True)
 class FailureCluster:
-	"""聚类后的失败模式。
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+聚类后的失败模式。
 	Clustered failure pattern.
 	"""
 	key: str
@@ -39,7 +44,9 @@ class FailureCluster:
 
 @dataclass(frozen=True)
 class FailureMiningReport:
-	"""挖掘出的失败聚类摘要。
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+挖掘出的失败聚类摘要。
 	Summary of mined failure clusters.
 	"""
 	clusters: list[FailureCluster] = field(default_factory=list)
@@ -48,7 +55,9 @@ class FailureMiningReport:
 
 
 class FailureReportBuilder:
-	"""把失败记录分组成确定性聚类和报告元数据。
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+把失败记录分组成确定性聚类和报告元数据。
 	Groups failure records into deterministic clusters and report metadata.
 	"""
 

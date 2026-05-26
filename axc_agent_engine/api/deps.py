@@ -15,7 +15,9 @@ class EngineState:
 	_agents: dict[str, Any] = field(default_factory=dict)  # name -> Agent 缓存
 
 	def get_agent(self, agent_name: str) -> Any:
-		"""获取或加载 Agent（按名称缓存）"""
+		"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+获取或加载 Agent（按名称缓存）"""
 		if agent_name in self._agents:
 			return self._agents[agent_name]
 		yaml_path = self._resolve_yaml(agent_name)
@@ -26,7 +28,9 @@ class EngineState:
 		return agent
 
 	def list_agents(self) -> list[dict[str, str]]:
-		"""列出可用 Agent"""
+		"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+列出可用 Agent"""
 		result = []
 		for name, agent in self._agents.items():
 			result.append({"name": name, "description": getattr(agent, "description", "")})
@@ -39,7 +43,9 @@ class EngineState:
 		return result
 
 	def _resolve_yaml(self, agent_name: str) -> str | None:
-		"""解析 Agent 名称为 YAML 路径"""
+		"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+解析 Agent 名称为 YAML 路径"""
 		if os.path.exists(agent_name):
 			return agent_name
 		if self.agents_dir:

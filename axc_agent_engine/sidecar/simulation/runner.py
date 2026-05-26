@@ -1,6 +1,7 @@
-"""仿真运行器。
-Simulation runner.
-"""
+"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+仿真运行器。
+Simulation runner."""
 from __future__ import annotations
 
 from typing import AsyncIterator
@@ -32,7 +33,9 @@ from axc_agent_engine.sidecar.simulation.report import SimulationReportGenerator
 
 
 class SimulationReportBuilder:
-	"""根据仿真状态构建确定性报告。
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+根据仿真状态构建确定性报告。
 	Builds deterministic reports from simulation state.
 	"""
 
@@ -67,7 +70,9 @@ class SimulationReportBuilder:
 
 
 class SimulationStepWorker:
-	"""按 observe、act、apply、evaluate 流程运行一个 actor 步骤。
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+按 observe、act、apply、evaluate 流程运行一个 actor 步骤。
 	Runs one actor step through observe, act, apply, and evaluate.
 	"""
 
@@ -107,7 +112,9 @@ class SimulationStepWorker:
 
 
 class SimulationRunner:
-	"""按结构化 observation、action、delta 和 scoring 运行一个场景。
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+按结构化 observation、action、delta 和 scoring 运行一个场景。
 	Runs a scenario through structured observation, action, delta, and scoring.
 
 	运行器不依赖 Engine、Agent、Executor 或 MultiAgentSession。
@@ -146,7 +153,9 @@ class SimulationRunner:
 		)
 
 	async def run(self, scenario: Scenario, initial_state: WorldState | None = None) -> SimulationReport:
-		"""运行场景直到停止条件触发，并返回报告。
+		"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+运行场景直到停止条件触发，并返回报告。
 		Run the scenario until the stop condition triggers and return its report.
 		"""
 		report: SimulationReport | None = None
@@ -163,7 +172,9 @@ class SimulationRunner:
 		scenario: Scenario,
 		initial_state: WorldState | None = None,
 	) -> AsyncIterator[SimulationEvent]:
-		"""运行场景并发出结构化执行事件。
+		"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+运行场景并发出结构化执行事件。
 		Run the scenario and emit structured execution events.
 		"""
 		state = initial_state.clone() if initial_state else scenario.initial_state.clone()

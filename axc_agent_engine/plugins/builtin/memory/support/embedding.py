@@ -1,11 +1,13 @@
-"""Embedding helpers private to the memory plugin."""
+"""Embedding helpers private to the memory plugin.
+中文：此文档说明相关引擎组件的行为。"""
 from __future__ import annotations
 
 import math
 
 
 class HashEmbeddingClient:
-	"""Dependency-free deterministic embedding fallback for local memory vectors."""
+	"""Dependency-free deterministic embedding fallback for local memory vectors.
+中文：此文档说明相关引擎组件的行为。"""
 
 	def __init__(self, dimensions: int = 256) -> None:
 		self.dimensions = max(8, dimensions)
@@ -15,7 +17,8 @@ class HashEmbeddingClient:
 
 
 class OpenAICompatibleEmbeddingClient:
-	"""Small OpenAI-compatible /embeddings client used when configured by memory."""
+	"""Small OpenAI-compatible /embeddings client used when configured by memory.
+中文：此文档说明相关引擎组件的行为。"""
 
 	def __init__(self, base_url: str, model: str, api_key: str = "", timeout: int = 30) -> None:
 		if not base_url:

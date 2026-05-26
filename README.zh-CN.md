@@ -5,7 +5,8 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/python-3.10%2B-blue" alt="python"/>
+  <img src="https://img.shields.io/badge/python-3.11%2B-blue" alt="python"/>
+  <img src="https://img.shields.io/pypi/v/axc-agent-engine" alt="pypi"/>
   <img src="https://img.shields.io/badge/license-Apache--2.0-green" alt="license"/>
   <img src="https://img.shields.io/badge/API-OpenAI%20compatible-orange" alt="api"/>
 </p>
@@ -32,9 +33,17 @@ AxcAgentEngine 在 ReAct 之外加了 **POR（Plan-Observe-Replan）**：先生�
 
 ```bash
 pip install axc-agent-engine
+
+# 固定安装当前 2.0 版本
+pip install axc-agent-engine==2.0
+
+# 可选能力
+pip install "axc-agent-engine[api]"
+pip install "axc-agent-engine[workflow]"
+pip install "axc-agent-engine[api,knowledge,workflow]"
 ```
 
-
+需要 Python 3.11 或更高版本。
 
 ```python
 from axc_agent_engine import Engine, LLMConfig, PluginRegistry
@@ -74,7 +83,7 @@ async for event in agent.stream("Build a REST API for user management"):
 - **ReAct 执行器** —— 思考、工具调用、观察的标准循环
 - **插件体系** —— 内置 spec 注册表，YAML 按需加载；可选能力都在插件里
 - **工具协议** —— 所有工具返回 `ToolOutput`；只读并发，写串行；模型函数名安全映射
-- **中断恢复** —— `WorkflowRuntime` + `CheckpointStore` + Agent resume API
+- **中断恢复** —— `WorkflowRuntime` + `CheckpointStore` + Agent resume API；Burr 通过 `axc-agent-engine[workflow]` 可选启用
 - **OpenAI API 子集** —— Provider 协议 + OpenAI-compatible HTTP 客户端 / API 子集
 - **记忆与知识** —— 四层记忆（KV、去重、衰减、图 hook）+ 语义分块 + 向量/BM25 混合检索
 - **MCP** —— stdio、JSON-RPC HTTP、官方 SDK transport
@@ -88,7 +97,7 @@ async for event in agent.stream("Build a REST API for user management"):
 | --- | --- |
 | ReAct 循环 | `Executor` |
 | POR 规划 | `auto` / `react_only` / `por_first` |
-| 中断恢复 | `WorkflowRuntime` + `CheckpointStore` + Agent resume |
+| 中断恢复 | 默认 `MemoryWorkflowRuntime`；安装 `axc-agent-engine[workflow]` 后可使用 `BurrWorkflowRuntime` |
 | 插件系统 | spec 注册表 + YAML 按需加载 |
 | LLM Provider | Provider 协议 + OpenAI-compatible HTTP |
 | 并行工具 | 只读并发，写串行 |
@@ -293,15 +302,18 @@ flowchart TD
     A["用户消息"] --> B["Agent.chat() / Agent.stream()"]
     B --> C["ExecutionContext"]
     C --> D["Executor"]
-    D --> E["MessageStore"]
-    E --> F["Plugin hooks"]
-    F --> G["LLM 调用"]
-    G --> H["TransactionRouter"]
-    H -->|最终回答| I["done event"]
-    H -->|工具调用| J["工具流水线"]
-    J --> E
-    H -->|计划| K["PORRunner"]
-    K --> I
+    D --> E["ExecutionRunLifecycle + checkpoints"]
+    D --> F["ReActKernel"]
+    F --> G["MessageStore"]
+    F --> H["Plugin hooks"]
+    F --> I["LLMCaller"]
+    I --> J["TransactionRouter"]
+    J -->|最终回答| K["done event"]
+    J -->|工具调用| L["工具流水线"]
+    L --> G
+    J -->|plan 或 por_first| M["PORRunner"]
+    M --> N["PORGraphRuntime (pydantic_graph)"]
+    N --> K
 ```
 
 ## 插件开发
@@ -359,7 +371,9 @@ CLI 日志参数是全局参数，需要放在子命令前。
 
 ## 设计决策
 
-- **Engine core = Executor + LLMCaller。** 读取 Agent YAML，调用 LLM Provider，运行循环，输出事件和结果。
+- **Engine core = Executor + ReActKernel + LLMCaller。** 读取 Agent YAML，调用 LLM Provider，运行 ReAct 循环，输出事件和结果。
+- **POR 状态转移交给 pydantic-graph。** `PORGraphRuntime` 负责 plan/step/observe/replan 循环；service 负责执行和 checkpoint。
+- **Workflow resume 是运行时边界。** 默认使用 `MemoryWorkflowRuntime`；安装 workflow 可选依赖后可选择 `BurrWorkflowRuntime`。
 - **插件是运行时扩展边界。** 知识库、记忆、图谱、MCP、输出修复、Skill 都属于插件。
 - **推演是旁路。** 多 Agent session、simulation kernel、mode adapter 是宿主驱动 SDK 能力。
 - **评测是旁路。** EvalRunner、EvalStore、AnnotationStore、AnnotationMatcher 和 report 是宿主驱动测试框架。
@@ -375,4 +389,7 @@ CLI 日志参数是全局参数，需要放在子命令前。
 
 ```bash
 python3 -m pytest -q
+python3 -m pytest --cov --cov-report=term-missing:skip-covered -q
 ```
+
+发布门禁要求总覆盖率不低于 90%。

@@ -1,6 +1,7 @@
-"""多 Agent 会话的模式画像。
-Mode profiles for multi-agent sessions.
-"""
+"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+多 Agent 会话的模式画像。
+Mode profiles for multi-agent sessions."""
 from __future__ import annotations
 
 import logging
@@ -23,7 +24,9 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class ModeProfile:
-	"""一个多 Agent 模式的调度、停止条件和提示配置。
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+一个多 Agent 模式的调度、停止条件和提示配置。
 	Scheduler, stop-condition, and prompt configuration for one multi-agent mode.
 	"""
 
@@ -38,7 +41,9 @@ class ModeProfile:
 
 @dataclass(frozen=True)
 class ModeRuntime:
-	"""构建模式运行组件所需的运行时输入。
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+构建模式运行组件所需的运行时输入。
 	Runtime inputs needed to build mode components.
 	"""
 

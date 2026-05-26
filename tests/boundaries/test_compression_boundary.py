@@ -69,7 +69,7 @@ async def test_compress_plugin_restores_file_cache_after_summary():
 	restored.initialize({"boundary": {"resource": "boundary"}}, ctx)
 	await restored.on_execution_start(exec_ctx)
 	messages = restored.transform_messages([{"role": "user", "content": "continue"}], exec_ctx)
-	assert any("[restored file cache]" in m.get("content", "") for m in messages)
+	assert any("[恢复的文件缓存]" in m.get("content", "") for m in messages)
 	assert any("print('cached')" in m.get("content", "") for m in messages)
 
 
@@ -103,4 +103,4 @@ async def test_compress_plugin_generates_and_persists_tool_summary():
 	restored.initialize({"boundary": {"resource": "boundary"}}, ctx)
 	await restored.on_execution_start(exec_ctx)
 	messages = restored.transform_messages([{"role": "user", "content": "continue"}], exec_ctx)
-	assert any("[tool summaries]" in m.get("content", "") for m in messages)
+	assert any("[工具摘要]" in m.get("content", "") for m in messages)

@@ -1,27 +1,33 @@
-"""Shared resource registry for engine plugins."""
+"""Shared resource registry for engine plugins.
+中文：此文档说明相关引擎组件的行为。"""
 from __future__ import annotations
 
 from typing import Any
 
 
 class ResourceError(Exception):
-	"""Base error for resource registry failures."""
+	"""Base error for resource registry failures.
+中文：此文档说明相关引擎组件的行为。"""
 
 
 class ResourceNotFoundError(ResourceError):
-	"""Raised when a required resource is missing."""
+	"""Raised when a required resource is missing.
+中文：此文档说明相关引擎组件的行为。"""
 
 
 class ResourceTypeError(ResourceError):
-	"""Raised when a resource does not match the requested type."""
+	"""Raised when a resource does not match the requested type.
+中文：此文档说明相关引擎组件的行为。"""
 
 
 class DuplicateResourceError(ResourceError):
-	"""Raised when registering a duplicate resource without replace=True."""
+	"""Raised when registering a duplicate resource without replace=True.
+中文：此文档说明相关引擎组件的行为。"""
 
 
 class ResourceRegistry:
-	"""Small typed-name container for host-owned shared resources."""
+	"""Small typed-name container for host-owned shared resources.
+中文：此文档说明相关引擎组件的行为。"""
 
 	def __init__(self, initial: dict[str, object] | None = None) -> None:
 		self._resources: dict[str, object] = {}
@@ -62,7 +68,8 @@ class ResourceRegistry:
 
 
 def ensure_resource_registry(resources: dict[str, object] | ResourceRegistry | None) -> ResourceRegistry:
-	"""Normalize public resource input into a ResourceRegistry."""
+	"""Normalize public resource input into a ResourceRegistry.
+中文：此文档说明相关引擎组件的行为。"""
 	if resources is None:
 		return ResourceRegistry()
 	if isinstance(resources, ResourceRegistry):

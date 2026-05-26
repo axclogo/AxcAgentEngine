@@ -1,8 +1,9 @@
-"""内置插件公共 helper。
+"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+内置插件公共 helper。
 
 English: Shared helpers for builtin plugins. Keep this module small and only
-place logic here when multiple plugins already use the same behavior.
-"""
+place logic here when multiple plugins already use the same behavior."""
 from __future__ import annotations
 
 import logging
@@ -10,7 +11,9 @@ from typing import Any
 
 
 def bounded_int(value: Any, minimum: int, maximum: int) -> int:
-	"""把配置值限制在整数区间内。
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+把配置值限制在整数区间内。
 
 	English: Parse and clamp a configuration value into an integer range.
 	"""
@@ -22,7 +25,9 @@ def bounded_int(value: Any, minimum: int, maximum: int) -> int:
 
 
 def exec_ctx_from_tool_context(context: dict) -> Any:
-	"""从工具上下文字典中提取 ExecutionContext。
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+从工具上下文字典中提取 ExecutionContext。
 
 	English: Extract ExecutionContext from a tool context dictionary.
 	"""
@@ -30,7 +35,9 @@ def exec_ctx_from_tool_context(context: dict) -> Any:
 
 
 def result_store_from_context(context: dict, plugin_ctx: Any = None) -> Any:
-	"""优先从工具上下文获取 ResultStore，否则回退到 PluginContext。
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+优先从工具上下文获取 ResultStore，否则回退到 PluginContext。
 
 	English: Resolve ResultStore from tool context first, then PluginContext.
 	"""
@@ -48,7 +55,9 @@ async def externalize_text(
 	source: str,
 	preview_chars: int = 0,
 ) -> tuple[Any, Any]:
-	"""把超阈值文本外置到 ResultStore。
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+把超阈值文本外置到 ResultStore。
 
 	English: Externalize oversized text into ResultStore and return (payload, artifact_ref).
 	"""

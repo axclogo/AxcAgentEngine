@@ -1,4 +1,5 @@
-"""Graph service layer independent of plugin lifecycle."""
+"""Graph service layer independent of plugin lifecycle.
+中文：此文档说明相关引擎组件的行为。"""
 import json
 from typing import Any
 

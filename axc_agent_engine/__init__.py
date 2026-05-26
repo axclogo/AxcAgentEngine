@@ -23,26 +23,26 @@ from axc_agent_engine.runtime.resources import (
 )
 
 __all__ = [
-	# 核心公开 API
+	#English: Bilingual note. 中文：核心公开 API
 	"Engine", "LLMConfig", "Agent", "Event", "EventType",
 	"ConcurrencyConfig", "ExecutionLimiter", "RateLimiter", "SessionExecutionGate",
-	# 审计与错误
+	#English: Source note. 中文：审计与错误
 	"AuditEvent", "AuditEventType", "InMemoryAuditSink", "ErrorEnvelope", "ErrorCategory",
-	# durable execution
+	#English: durable execution 中文：源码说明。
 	"Checkpoint", "CheckpointStatus", "CheckpointStore", "InMemoryCheckpointStore",
-	# policy
+	#English: policy 中文：源码说明。
 	"CapabilityPolicyEvaluator", "PolicyDecision", "PolicyEvaluator", "PolicyRequest",
 	# LLM 响应模型
 	"LLMMessage", "LLMUsage", "LLMResponse", "LLMStreamChunk",
-	# 能力模型
+	#English: Source note. 中文：能力模型
 	"Capability",
-	# 工具输出
+	#English: Source note. 中文：工具输出
 	"ToolOutput", "ArtifactRef", "ResultStore",
-	# 输入和共享资源边界
+	#English: Source note. 中文：输入和共享资源边界
 	"InputProviderResult", "InputProvider", "PassthroughInputProvider",
 	"ResourceRegistry", "ResourceError", "ResourceNotFoundError",
 	"ResourceTypeError", "DuplicateResourceError",
-	# 插件开发
+	#English: Source note. 中文：插件开发
 	"BasePlugin", "PluginRegistry", "ToolDefinition", "tool",
 ]
 

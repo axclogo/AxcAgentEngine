@@ -79,12 +79,12 @@ class TestToolOutput:
 		out = ToolOutput.text(long_text)
 		view = out.compact_view(max_chars=200)
 		assert len(view) <= 250  # some overhead for marker
-		assert "omitted" in view
+		assert "省略" in view
 
 	def test_compact_view_error(self):
 		out = ToolOutput.error("oops")
 		view = out.compact_view()
-		assert "[Error]" in view
+		assert "[错误]" in view
 		assert "oops" in view
 
 	def test_compact_view_with_artifacts(self):
@@ -92,7 +92,7 @@ class TestToolOutput:
 		out = ToolOutput(content="data", content_type="text", artifacts=[ref])
 		view = out.compact_view()
 		assert "abc" in view
-		assert "artifacts" in view
+		assert "附件" in view
 
 	def test_compact_view_json_content(self):
 		out = ToolOutput.json_output({"status": 200, "body": "ok"})
@@ -309,7 +309,7 @@ class TestToolOutputCompactViewEdgeCases:
 	def test_max_chars_zero(self):
 		out = ToolOutput.text("hello")
 		view = out.compact_view(max_chars=0)
-		assert "omitted" in view or view == ""
+		assert "省略" in view or view == ""
 
 	def test_multiple_artifacts(self):
 		refs = [

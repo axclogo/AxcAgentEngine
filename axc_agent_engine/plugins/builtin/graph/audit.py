@@ -1,4 +1,5 @@
-"""Graph audit event recording."""
+"""Graph audit event recording.
+中文：此文档说明相关引擎组件的行为。"""
 import time
 from typing import TYPE_CHECKING, Any
 

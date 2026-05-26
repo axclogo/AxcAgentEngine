@@ -2,7 +2,7 @@
 
 NOTE: InMemoryVectorStore uses linear scan O(n) for search.
 Suitable for up to ~1000 entries. For production use, inject an external VectorStore.
-"""
+中文：此文档说明相关引擎组件的行为。"""
 from __future__ import annotations
 
 import asyncio
@@ -15,12 +15,13 @@ from axc_agent_engine.utils.math_utils import cosine_similarity
 
 
 class InMemoryKVStore:
-	"""Dict-based in-memory KV store with optional TTL and capacity limit."""
+	"""Dict-based in-memory KV store with optional TTL and capacity limit.
+中文：此文档说明相关引擎组件的行为。"""
 
 	def __init__(self, max_size: int = 10000, ttl: int = 0) -> None:
 		self._data: OrderedDict[str, tuple[dict, float]] = OrderedDict()
 		self._max_size = max_size
-		self._ttl = ttl  # 0 = no expiry
+		self._ttl = ttl  # English: 0 means no expiry. 中文：0 表示不过期。
 		self._lock = asyncio.Lock()
 
 	async def get(self, key: str) -> dict | None:
@@ -60,7 +61,8 @@ class InMemoryKVStore:
 
 
 class InMemoryMessagePersistence:
-	"""Dict-based in-memory message persistence with capacity limit."""
+	"""Dict-based in-memory message persistence with capacity limit.
+中文：此文档说明相关引擎组件的行为。"""
 
 	def __init__(self, max_sessions: int = 1000) -> None:
 		self._store: OrderedDict[str, list[dict]] = OrderedDict()
@@ -84,7 +86,8 @@ class InMemoryMessagePersistence:
 
 
 class InMemorySpanStore:
-	"""List-based in-memory span store with capacity limit."""
+	"""List-based in-memory span store with capacity limit.
+中文：此文档说明相关引擎组件的行为。"""
 
 	def __init__(self, max_spans: int = 50000) -> None:
 		self._spans: list[dict] = []
@@ -112,7 +115,8 @@ class InMemoryVectorStore:
 
 	NOTE: Linear scan O(n). Suitable for up to ~1000 entries.
 	For production, inject an external VectorStore implementation.
-	"""
+	
+中文：此文档说明相关引擎组件的行为。"""
 
 	def __init__(self, max_entries: int = 1000) -> None:
 		self._entries: list[dict] = []
@@ -126,7 +130,7 @@ class InMemoryVectorStore:
 				entry_id = uuid.uuid4().hex[:12]
 				self._entries.append({"id": entry_id, "text": text, "embedding": emb, "metadata": meta})
 				ids.append(entry_id)
-			# Evict oldest if over capacity
+			#English: Evict oldest if over capacity 中文：源码说明。
 			if len(self._entries) > self._max_entries:
 				self._entries = self._entries[-self._max_entries:]
 			return ids
@@ -150,7 +154,8 @@ class InMemoryVectorStore:
 
 
 class InMemoryMessageBus:
-	"""asyncio.Queue-based in-memory message bus with graceful shutdown."""
+	"""asyncio.Queue-based in-memory message bus with graceful shutdown.
+中文：此文档说明相关引擎组件的行为。"""
 
 	def __init__(self, max_idle_rounds: int = 30) -> None:
 		self._channels: dict[str, list[asyncio.Queue]] = {}
@@ -183,7 +188,8 @@ class InMemoryMessageBus:
 			self._channels[channel].remove(queue)
 
 	async def close(self) -> None:
-		"""Signal all subscribers to stop."""
+		"""Signal all subscribers to stop.
+中文：此文档说明相关引擎组件的行为。"""
 		self._closed = True
 
 	async def request(self, channel: str, message: dict, timeout: float = 30) -> dict:

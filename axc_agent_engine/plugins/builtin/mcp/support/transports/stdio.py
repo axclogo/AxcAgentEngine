@@ -1,4 +1,5 @@
-"""MCP stdio JSON-RPC transport."""
+"""MCP stdio JSON-RPC transport.
+中文：此文档说明相关引擎组件的行为。"""
 import asyncio
 import json
 import logging

@@ -1,6 +1,7 @@
-"""评估框架。
-Evaluation framework.
-"""
+"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+评估框架。
+Evaluation framework."""
 from axc_agent_engine.sidecar.eval.runner import EvalRunner, EvalCase, EvalDataset, EvalResult
 from axc_agent_engine.sidecar.eval.judge import LLMJudge
 from axc_agent_engine.sidecar.eval.matcher import AnnotationMatch, AnnotationMatcher

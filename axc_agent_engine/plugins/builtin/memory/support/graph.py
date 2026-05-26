@@ -1,4 +1,5 @@
-"""In-memory entity relationship graph for memory retrieval."""
+"""In-memory entity relationship graph for memory retrieval.
+中文：此文档说明相关引擎组件的行为。"""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -29,7 +30,8 @@ class GraphRelation:
 
 @runtime_checkable
 class EntityResolver(Protocol):
-	"""Resolves whether a mention should merge with an existing entity."""
+	"""Resolves whether a mention should merge with an existing entity.
+中文：此文档说明相关引擎组件的行为。"""
 	def resolve(
 		self,
 		name: str,
@@ -40,7 +42,8 @@ class EntityResolver(Protocol):
 
 
 class DefaultEntityResolver:
-	"""Type-aware alias resolver for graph entity disambiguation."""
+	"""Type-aware alias resolver for graph entity disambiguation.
+中文：此文档说明相关引擎组件的行为。"""
 
 	def resolve(
 		self,
@@ -64,7 +67,8 @@ class DefaultEntityResolver:
 
 
 class GraphMemory:
-	"""Entity disambiguation and relation storage."""
+	"""Entity disambiguation and relation storage.
+中文：此文档说明相关引擎组件的行为。"""
 
 	def __init__(self, resolver: EntityResolver | None = None) -> None:
 		self.entities: dict[str, GraphEntity] = {}

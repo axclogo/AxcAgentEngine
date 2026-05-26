@@ -1,4 +1,5 @@
-"""Shared helpers for sandbox executors."""
+"""Shared helpers for sandbox executors.
+中文：此文档说明相关引擎组件的行为。"""
 from __future__ import annotations
 
 import os

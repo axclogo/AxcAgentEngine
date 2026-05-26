@@ -1,4 +1,5 @@
-"""Artifact result builtin tools."""
+"""Artifact result builtin tools.
+中文：此文档说明相关引擎组件的行为。"""
 from typing import Any
 
 from axc_agent_engine.tools.tool_output import ToolOutput

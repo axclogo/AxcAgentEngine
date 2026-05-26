@@ -1,4 +1,5 @@
-"""Shared helpers for builtin tool implementations."""
+"""Shared helpers for builtin tool implementations.
+中文：此文档说明相关引擎组件的行为。"""
 from typing import Any
 
 

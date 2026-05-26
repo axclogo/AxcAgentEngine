@@ -1,4 +1,5 @@
-"""Output validation and repair service."""
+"""Output validation and repair service.
+中文：此文档说明相关引擎组件的行为。"""
 from __future__ import annotations
 
 import json
@@ -176,24 +177,24 @@ class RepairPromptBuilder:
 		if self.format_type == "json_schema":
 			schema_str = json.dumps(self.config.get("schema", {}), ensure_ascii=False, indent=2)
 			return (
-				"Convert the following content into valid JSON matching the JSON Schema. "
-				"Return only JSON.\n\n"
-				f"Content:\n{content}\n\nSchema:\n{schema_str}"
+				"请将以下内容转换为符合 JSON Schema 的合法 JSON。"
+				"只返回 JSON，不要输出其他文字。\n\n"
+				f"内容：\n{content}\n\nSchema：\n{schema_str}"
 			)
 		if self.format_type == "markdown":
 			return (
-				"Rewrite the following content to match the Markdown template. Preserve important information.\n\n"
-				f"Content:\n{content}\n\nTemplate:\n{self.config.get('template', '')}"
+				"请重写以下内容，使其符合 Markdown 模板，并保留重要信息。\n\n"
+				f"内容：\n{content}\n\n模板：\n{self.config.get('template', '')}"
 			)
 		if self.format_type == "text":
 			requirements = []
 			if self.config.get("max_length"):
-				requirements.append(f"Length must be <= {self.config['max_length']} characters.")
-			requirements.extend(f"Must contain: {kw}" for kw in self.config.get("must_contain", []))
-			requirements.extend(f"Must not contain: {kw}" for kw in self.config.get("must_not_contain", []))
+				requirements.append(f"长度必须不超过 {self.config['max_length']} 个字符。")
+			requirements.extend(f"必须包含：{kw}" for kw in self.config.get("must_contain", []))
+			requirements.extend(f"不得包含：{kw}" for kw in self.config.get("must_not_contain", []))
 			return (
-				"Rewrite the following content to satisfy the requirements. Preserve core meaning.\n\n"
-				f"Content:\n{content}\n\nRequirements:\n" + "\n".join(requirements)
+				"请重写以下内容，使其满足要求，并保留核心含义。\n\n"
+				f"内容：\n{content}\n\n要求：\n" + "\n".join(requirements)
 			)
 		return ""
 
@@ -225,7 +226,8 @@ class OutputRepairer:
 
 
 class OutputFormatService:
-	"""Validate and optionally repair final model output."""
+	"""Validate and optionally repair final model output.
+中文：此文档说明相关引擎组件的行为。"""
 
 	def __init__(self, format_type: str = "", config: dict[str, Any] | None = None,
 				 utility_llm: Any = None, max_repair_chars: int = 3000,
@@ -244,7 +246,8 @@ class OutputFormatService:
 		return self._validator.validate(content)
 
 	async def repair(self, content: str) -> str:
-		"""Repair content with a utility LLM if available."""
+		"""Repair content with a utility LLM if available.
+中文：此文档说明相关引擎组件的行为。"""
 		return await self._repairer.repair(content)
 
 	async def validate_and_repair(self, content: str, max_attempts: int = 1) -> tuple[str, ValidationResult]:

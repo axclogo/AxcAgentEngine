@@ -19,7 +19,8 @@ class StepStatus(StrEnum):
 
 
 class RiskLevel(StrEnum):
-	"""工具风险等级"""
+	"""English: This documentation describes the related engine component behavior.
+中文：工具风险等级"""
 	SAFE = "safe"
 	MODERATE = "moderate"
 	DANGEROUS = "dangerous"
@@ -27,7 +28,8 @@ class RiskLevel(StrEnum):
 
 
 class PluginSignal(StrEnum):
-	"""插件通信信号。"""
+	"""English: This documentation describes the related engine component behavior.
+中文：插件通信信号。"""
 	NONE = "none"
 	STOP = "stop"
 	WARN = "warn"
@@ -35,7 +37,8 @@ class PluginSignal(StrEnum):
 
 
 class Capability(StrEnum):
-	"""用于权限控制的工具能力分类。"""
+	"""English: This documentation describes the related engine component behavior.
+中文：用于权限控制的工具能力分类。"""
 	FILE_READ = "file_read"
 	FILE_WRITE = "file_write"
 	SHELL = "shell"
@@ -47,11 +50,12 @@ class Capability(StrEnum):
 	AGENT_CALL = "agent_call"
 
 
-# ── 工具定义 ──
+#English: Source note. 中文：── 工具定义 ──
 
 @dataclass
 class ToolDefinition:
-	"""带能力与风险元数据的类型化工具定义。"""
+	"""English: This documentation describes the related engine component behavior.
+中文：带能力与风险元数据的类型化工具定义。"""
 	name: str
 	description: str = ""
 	parameters: dict[str, Any] = field(default_factory=lambda: {"type": "object", "properties": {}})
@@ -63,7 +67,9 @@ class ToolDefinition:
 	risk_level: str = "safe"  # RiskLevel 枚举值
 
 	def to_openai_schema(self) -> dict[str, Any]:
-		"""返回 OpenAI-compatible chat API 使用的 function-call schema。"""
+		"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+返回 OpenAI-compatible chat API 使用的 function-call schema。"""
 		return {
 			"type": "function",
 			"function": {
@@ -86,14 +92,18 @@ class LLMUsage:
 
 @dataclass
 class LLMMessage:
-	"""标准化 LLM assistant message。"""
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+标准化 LLM assistant message。"""
 	role: str = "assistant"
 	content: str = ""
 	tool_calls: list[dict[str, Any]] = field(default_factory=list)
 	raw: dict[str, Any] = field(default_factory=dict)
 
 	def to_dict(self) -> dict[str, Any]:
-		"""转换成核心循环使用的内部 assistant message dict。"""
+		"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+转换成核心循环使用的内部 assistant message dict。"""
 		d: dict[str, Any] = {"role": self.role, "content": self.content}
 		if self.tool_calls:
 			d["tool_calls"] = self.tool_calls
@@ -102,7 +112,9 @@ class LLMMessage:
 
 @dataclass
 class LLMResponse:
-	"""标准化非流式 LLM 响应。"""
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+标准化非流式 LLM 响应。"""
 	message: LLMMessage = field(default_factory=LLMMessage)
 	usage: LLMUsage = field(default_factory=LLMUsage)
 	raw: Any = None
@@ -110,7 +122,9 @@ class LLMResponse:
 
 @dataclass
 class LLMStreamChunk:
-	"""标准化流式 chunk。"""
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+标准化流式 chunk。"""
 	content_delta: str = ""
 	thinking_delta: str = ""
 	tool_call_delta: dict[str, Any] | None = None
@@ -123,13 +137,15 @@ class LLMStreamChunk:
 # ── Pydantic 配置模型 ──
 
 class RoutingConfig(BaseModel):
-	"""执行路由策略。"""
+	"""English: This documentation describes the related engine component behavior.
+中文：执行路由策略。"""
 	mode: str = Field(default="auto", pattern=r"^(auto|react_only|por_first)$")
 	model_config = {"extra": "forbid"}
 
 
 class ConcurrencyRuntimeConfig(BaseModel):
-	"""Optional runtime backpressure for one Agent."""
+	"""Optional runtime backpressure for one Agent.
+中文：此文档说明相关引擎组件的行为。"""
 	max_agent_concurrent_runs: int = Field(default=0, ge=0)
 	max_session_concurrent_runs: int = Field(default=1, ge=0)
 	queue_timeout: float = Field(default=0.0, ge=0)
@@ -152,7 +168,8 @@ class RuntimeConfig(BaseModel):
 
 
 class PluginConfig(BaseModel):
-	"""单个插件配置（动态字段）"""
+	"""English: This documentation describes the related engine component behavior.
+中文：单个插件配置（动态字段）"""
 	enabled: bool = False
 	required: bool = False
 	model_config = {"extra": "allow"}

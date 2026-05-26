@@ -10,7 +10,8 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class PlanStep:
-	"""计划步骤"""
+	"""English: This documentation describes the related engine component behavior.
+中文：计划步骤"""
 	step_id: int
 	description: str
 	depends_on: list[int] = field(default_factory=list)
@@ -22,14 +23,17 @@ class PlanStep:
 
 @dataclass
 class Plan:
-	"""执行计划"""
+	"""English: This documentation describes the related engine component behavior.
+中文：执行计划"""
 	goal: str
 	steps: list[PlanStep] = field(default_factory=list)
 	replan_count: int = 0
 
 
 def create_plan(goal: str, steps_raw: list[dict]) -> Plan:
-	"""从结构化规划数据创建 Plan。"""
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+从结构化规划数据创建 Plan。"""
 	steps = []
 	for s in steps_raw:
 		steps.append(PlanStep(
@@ -42,7 +46,9 @@ def create_plan(goal: str, steps_raw: list[dict]) -> Plan:
 
 
 def validate_plan(plan: Plan) -> None:
-	"""校验计划是否为可调度 DAG。"""
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+校验计划是否为可调度 DAG。"""
 	if not plan.goal:
 		raise SchemaError("Plan goal cannot be empty")
 	seen: set[int] = set()

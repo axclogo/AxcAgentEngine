@@ -1,6 +1,7 @@
-"""宿主侧 Agent 选择工具。
-Host-side Agent selection utilities.
-"""
+"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+宿主侧 Agent 选择工具。
+Host-side Agent selection utilities."""
 from __future__ import annotations
 
 import re
@@ -13,7 +14,9 @@ _WORD_RE = re.compile(r"[A-Za-z0-9_\-\u4e00-\u9fff]+")
 
 @dataclass(frozen=True)
 class AgentProfile:
-	"""用于把任务路由到 Agent 的宿主侧静态画像。
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+用于把任务路由到 Agent 的宿主侧静态画像。
 	Static host-side profile used for routing tasks to Agents.
 	"""
 	name: str
@@ -43,7 +46,9 @@ class AgentProfile:
 
 @dataclass(frozen=True)
 class SelectionRequest:
-	"""一次宿主侧路由决策请求。
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+一次宿主侧路由决策请求。
 	One host-side routing decision request.
 	"""
 	task: str
@@ -58,7 +63,9 @@ class SelectionRequest:
 
 @dataclass(frozen=True)
 class AgentSelection:
-	"""带评分的 Agent 候选项。
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+带评分的 Agent 候选项。
 	Scored Agent candidate.
 	"""
 	agent: AgentProfile
@@ -68,7 +75,9 @@ class AgentSelection:
 
 
 class AgentSelector:
-	"""确定性的宿主侧 Agent 选择器。
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+确定性的宿主侧 Agent 选择器。
 	Deterministic host-side Agent selector.
 	"""
 

@@ -1,4 +1,5 @@
-"""Rate-limited LLM provider wrapper."""
+"""Rate-limited LLM provider wrapper.
+中文：此文档说明相关引擎组件的行为。"""
 from __future__ import annotations
 
 from typing import Any, AsyncIterator
@@ -10,7 +11,8 @@ from axc_agent_engine.tools.name_mapping import ToolNameMappingConfig
 
 
 class RateLimitedProvider:
-	"""Wrap an LLMProvider with provider-level backpressure."""
+	"""Wrap an LLMProvider with provider-level backpressure.
+中文：此文档说明相关引擎组件的行为。"""
 
 	def __init__(
 		self,

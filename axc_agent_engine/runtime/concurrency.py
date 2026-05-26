@@ -2,7 +2,7 @@
 
 These utilities protect the Agent runtime itself. Transport-level policies such
 as per-WebSocket limits still belong to the host.
-"""
+中文：此文档说明相关引擎组件的行为。"""
 from __future__ import annotations
 
 import asyncio
@@ -17,13 +17,15 @@ from axc_agent_engine.core.errors import ExecutionTimeoutError
 
 @dataclass(frozen=True)
 class ConcurrencyConfig:
-	"""Engine-level execution limits."""
+	"""Engine-level execution limits.
+中文：此文档说明相关引擎组件的行为。"""
 	max_engine_concurrent_runs: int = 0
 	queue_timeout: float = 0.0
 
 
 class ExecutionLimiter:
-	"""Async semaphore wrapper with optional acquire timeout."""
+	"""Async semaphore wrapper with optional acquire timeout.
+中文：此文档说明相关引擎组件的行为。"""
 
 	def __init__(self, limit: int = 0, queue_timeout: float = 0.0, name: str = "execution") -> None:
 		self._limit = int(limit or 0)
@@ -60,7 +62,8 @@ class SessionExecutionGate:
 
 	By default each session runs one turn at a time. Different session IDs do not
 	block each other. Empty session IDs are treated as stateless and bypassed.
-	"""
+	
+中文：此文档说明相关引擎组件的行为。"""
 
 	def __init__(self, max_per_session: int = 1, queue_timeout: float = 0.0) -> None:
 		self._max_per_session = max(0, int(max_per_session or 0))
@@ -120,7 +123,8 @@ class _SessionGateEntry:
 
 
 class RateLimiter:
-	"""Combined concurrency and fixed-window request limiter."""
+	"""Combined concurrency and fixed-window request limiter.
+中文：此文档说明相关引擎组件的行为。"""
 
 	def __init__(self, max_concurrent: int = 0, requests_per_minute: int = 0, queue_timeout: float = 0.0) -> None:
 		self._concurrency = ExecutionLimiter(max_concurrent, queue_timeout, name="provider")

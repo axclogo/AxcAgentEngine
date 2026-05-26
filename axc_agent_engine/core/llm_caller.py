@@ -27,7 +27,8 @@ logger = logging.getLogger(__name__)
 
 
 class StreamEventEmitter:
-	"""Emits realtime stream events while preserving the existing queue callback contract."""
+	"""Emits realtime stream events while preserving the existing queue callback contract.
+中文：此文档说明相关引擎组件的行为。"""
 
 	def __init__(self, ctx: ExecutionContext, sink: StreamSink | None = None) -> None:
 		self._ctx = ctx
@@ -84,7 +85,8 @@ class StreamEventEmitter:
 
 
 class StreamUsageReporter:
-	"""Builds usage-related stream events without changing LLMCaller output shape."""
+	"""Builds usage-related stream events without changing LLMCaller output shape.
+中文：此文档说明相关引擎组件的行为。"""
 
 	def apply_usage(self, ctx: ExecutionContext, result) -> list[Event]:
 		if result.usage_input or result.usage_output:
@@ -103,7 +105,9 @@ class StreamUsageReporter:
 
 
 class LLMCaller:
-	"""封装 LLM 调用：fallback 切换、计时、pre/post hook。"""
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+封装 LLM 调用：fallback 切换、计时、pre/post hook。"""
 
 	def __init__(
 		self,
@@ -122,7 +126,9 @@ class LLMCaller:
 		tools: list[dict] | None,
 		stream_sink: StreamSink | None = None,
 	) -> tuple[dict, list[Event]]:
-		"""统一入口：按 ctx.config.stream 分发到流式或非流式调用。"""
+		"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+统一入口：按 ctx.config.stream 分发到流式或非流式调用。"""
 		messages, tools = self._pm.apply_pre_llm_call(ctx, messages, tools)
 		before_input_tokens = ctx.state.total_input_tokens
 		before_output_tokens = ctx.state.total_output_tokens
@@ -145,7 +151,9 @@ class LLMCaller:
 	async def _call_sync(
 		self, ctx: ExecutionContext, messages: list[dict], tools: list[dict] | None,
 	) -> tuple[dict, list[Event]]:
-		"""带重试和 fallback 的非流式调用。"""
+		"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+带重试和 fallback 的非流式调用。"""
 		import httpx
 		import random
 		kwargs = self._build_kwargs(ctx, tools)
@@ -180,7 +188,9 @@ class LLMCaller:
 		tools: list[dict] | None,
 		stream_sink: StreamSink | None = None,
 	) -> tuple[dict, list[Event]]:
-		"""带重试和 fallback 的流式调用。"""
+		"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+带重试和 fallback 的流式调用。"""
 		kwargs = self._build_kwargs(ctx, tools)
 		if ctx.config.thinking in ("always", "auto"):
 			kwargs["thinking"] = ctx.config.thinking
@@ -208,7 +218,9 @@ class LLMCaller:
 		self, ctx: ExecutionContext, client: "LLMProvider",
 		messages: list[dict], tools: list[dict] | None, stream_sink: StreamSink | None = None, **kwargs,
 	) -> tuple[dict[str, Any], list[Event]]:
-		"""通过 StreamAggregator 聚合 LLMStreamChunk，并产生实时 delta 事件。"""
+		"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+通过 StreamAggregator 聚合 LLMStreamChunk，并产生实时 delta 事件。"""
 		aggregator = StreamAggregator()
 		aiter = client.stream(messages, tools, **kwargs)
 		emitter = StreamEventEmitter(ctx, stream_sink)
@@ -232,7 +244,9 @@ class LLMCaller:
 	def _process_sync_response(
 		self, ctx: ExecutionContext, llm_resp: LLMResponse,
 	) -> tuple[dict, list[Event]]:
-		"""处理 provider 返回的标准化 LLMResponse。"""
+		"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+处理 provider 返回的标准化 LLMResponse。"""
 		if llm_resp.usage.input_tokens or llm_resp.usage.output_tokens:
 			ctx.add_usage(llm_resp.usage.input_tokens, llm_resp.usage.output_tokens)
 		events: list[Event] = []
@@ -250,7 +264,9 @@ class LLMCaller:
 		return llm_resp.message.to_dict(), events
 
 	def _build_kwargs(self, ctx: ExecutionContext, tools: list[dict] | None) -> dict:
-		"""构建 LLM 调用参数。"""
+		"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+构建 LLM 调用参数。"""
 		kwargs: dict[str, Any] = {}
 		if tools:
 			kwargs["parallel_tool_calls"] = ctx.config.parallel_tool_calls

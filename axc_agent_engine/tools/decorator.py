@@ -26,7 +26,9 @@ def tool(
 	timeout: int = 120,
 	deferred: bool = False,
 ) -> Callable:
-	"""从带类型标注的 async 函数创建 ToolDefinition。
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+从带类型标注的 async 函数创建 ToolDefinition。
 
 	用法：
 		@tool(name="my_tool", description="执行某个操作")
@@ -39,7 +41,7 @@ def tool(
 		tool_name = name or fn.__name__
 		tool_desc = description or (fn.__doc__ or "").strip().split("\n")[0]
 		parameters = _build_parameters_schema(fn)
-		# 校验返回类型标注
+		#English: Source note. 中文：校验返回类型标注
 		hints = get_type_hints(fn)
 		return_type = hints.get("return")
 		if return_type is not None and return_type is not ToolOutput:
@@ -81,7 +83,9 @@ def tool(
 
 
 def _build_parameters_schema(fn: Callable) -> dict[str, Any]:
-	"""根据函数类型标注构建 JSON Schema。"""
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+根据函数类型标注构建 JSON Schema。"""
 	hints = get_type_hints(fn)
 	sig = inspect.signature(fn)
 	properties: dict[str, Any] = {}

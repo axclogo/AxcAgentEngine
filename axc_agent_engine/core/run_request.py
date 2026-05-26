@@ -1,4 +1,5 @@
-"""Normalized per-run request objects."""
+"""Normalized per-run request objects.
+中文：此文档说明相关引擎组件的行为。"""
 from __future__ import annotations
 
 from dataclasses import dataclass, field

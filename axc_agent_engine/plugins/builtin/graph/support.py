@@ -1,4 +1,5 @@
-"""General entity relationship graph store."""
+"""General entity relationship graph store.
+中文：此文档说明相关引擎组件的行为。"""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -13,7 +14,8 @@ class GraphSearchResult:
 
 @runtime_checkable
 class GraphStore(Protocol):
-	"""Storage-neutral entity/relation graph API."""
+	"""Storage-neutral entity/relation graph API.
+中文：此文档说明相关引擎组件的行为。"""
 	def upsert_entity(self, name: str, entity_type: str = "concept", aliases: list[str] | None = None, **metadata: Any) -> dict[str, Any]: ...
 	def get_entity(self, entity_id: str) -> dict[str, Any] | None: ...
 	def list_entities(self, limit: int = 100, offset: int = 0) -> list[dict[str, Any]]: ...
@@ -26,7 +28,8 @@ class GraphStore(Protocol):
 
 
 class InMemoryGraphStore:
-	"""Dependency-free graph store for engine default usage."""
+	"""Dependency-free graph store for engine default usage.
+中文：此文档说明相关引擎组件的行为。"""
 
 	def __init__(self) -> None:
 		self.entities: dict[str, dict[str, Any]] = {}

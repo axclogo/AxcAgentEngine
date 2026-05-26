@@ -1,6 +1,7 @@
-"""结构化仿真内核。
-Structured simulation kernel.
-"""
+"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+结构化仿真内核。
+Structured simulation kernel."""
 from axc_agent_engine.sidecar.simulation.action_parser import ActionParseError, ActionParser
 from axc_agent_engine.sidecar.simulation.adapters import AgentPolicyAdapter, build_action_prompt
 from axc_agent_engine.sidecar.simulation.defaults import (

@@ -1,4 +1,5 @@
-"""L3 session summary management."""
+"""L3 session summary management.
+中文：此文档说明相关引擎组件的行为。"""
 from __future__ import annotations
 
 from axc_agent_engine.plugins.builtin.compress.context.models import ContextSummary
@@ -6,7 +7,8 @@ from axc_agent_engine.plugins.builtin.compress.prompts import SUMMARY_PROMPT
 
 
 class SessionSummarizer:
-	"""Circuit-broken summary generator using utility_llm."""
+	"""Circuit-broken summary generator using utility_llm.
+中文：此文档说明相关引擎组件的行为。"""
 
 	def __init__(self, max_tokens: int = 800, max_failures: int = 3) -> None:
 		self.state = ContextSummary()

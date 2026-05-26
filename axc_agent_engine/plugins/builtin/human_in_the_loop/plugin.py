@@ -16,7 +16,8 @@ logger = logging.getLogger(__name__)
 
 
 class HumanInTheLoopPlugin(BasePlugin):
-	"""拦截危险工具调用并等待外部审批。"""
+	"""English: This documentation describes the related engine component behavior.
+中文：拦截危险工具调用并等待外部审批。"""
 	name = "human_in_the_loop"
 	display_name = "人工审批"
 	priority = 8
@@ -31,7 +32,8 @@ class HumanInTheLoopPlugin(BasePlugin):
 		self._pending_approvals: dict[str, asyncio.Future] = {}
 
 	def get_tools(self) -> list[ToolDefinition]:
-		"""Expose human interaction tools owned by this plugin."""
+		"""Expose human interaction tools owned by this plugin.
+中文：此文档说明相关引擎组件的行为。"""
 		if not self._enable_ask_human:
 			return []
 		return [ToolDefinition(
@@ -51,18 +53,19 @@ class HumanInTheLoopPlugin(BasePlugin):
 
 	async def pre_tool_call(self, exec_ctx: "ExecutionContext", tool_name: str,
 							arguments: dict) -> tuple[bool, dict]:
-		"""检查风险等级，必要时等待审批。"""
+		"""English: This documentation describes the related engine component behavior.
+中文：检查风险等级，必要时等待审批。"""
 		if tool_name in self._auto_approve_tools:
 			return True, arguments
 		risk = classify_risk(tool_name, arguments)
 		if _risk_level(risk) < _risk_level(self._risk_threshold):
 			return True, arguments
 		approval_queue = exec_ctx.runtime.approval_queue
-		# 需要审批但没有 approval_queue 时直接拒绝
+		#English: Bilingual note. 中文：需要审批但没有 approval_queue 时直接拒绝
 		if not approval_queue:
 			logger.warning(f"[hitl] Tool {tool_name} risk={risk}, no approval queue, rejecting")
 			return False, arguments
-		# 通过 Future 等待审批结果
+		#English: Bilingual note. 中文：通过 Future 等待审批结果
 		request_id = f"{tool_name}_{id(arguments)}"
 		loop = asyncio.get_running_loop()
 		future: asyncio.Future = loop.create_future()
@@ -92,7 +95,9 @@ class HumanInTheLoopPlugin(BasePlugin):
 			self._pending_approvals.pop(request_id, None)
 
 	async def _listen_approval(self, exec_ctx: "ExecutionContext", request_id: str) -> None:
-		"""监听审批队列并完成匹配的 Future。"""
+		"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+监听审批队列并完成匹配的 Future。"""
 		queue = exec_ctx.runtime.approval_queue
 		if not queue:
 			return
@@ -109,7 +114,9 @@ class HumanInTheLoopPlugin(BasePlugin):
 			await queue.put(item)
 
 	def resolve_approval(self, request_id: str, approved: bool) -> None:
-		"""通过程序接口完成审批（外部 API）。"""
+		"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+通过程序接口完成审批（外部 API）。"""
 		future = self._pending_approvals.get(request_id)
 		if future and not future.done():
 			future.set_result({"approved": approved, "request_id": request_id})

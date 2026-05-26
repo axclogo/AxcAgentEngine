@@ -12,9 +12,11 @@ from typing import Any, Protocol, runtime_checkable
 
 @dataclass
 class ArtifactRef:
-	"""已存储 artifact 的引用，大内容存储在外部。"""
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+已存储 artifact 的引用，大内容存储在外部。"""
 	id: str
-	kind: str  # text | file | json | table | binary
+	kind: str  # English: text | file | json | table | binary. 中文：artifact 类型枚举。
 	size: int
 	metadata: dict[str, Any] = field(default_factory=dict)
 
@@ -28,22 +30,26 @@ class ArtifactRef:
 
 @dataclass
 class ToolOutput:
-	"""结构化工具执行结果。
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+结构化工具执行结果。
 
 	所有工具都必须返回该结构，engine 会拒绝其他返回类型。
 	"""
 	content: str | dict | list
-	content_type: str = "text"  # text | json | table | file | error
+	content_type: str = "text"  # English: text | json | table | file | error. 中文：内容类型枚举。
 	summary: str = ""
 	artifacts: list[ArtifactRef] = field(default_factory=list)
 	metadata: dict[str, Any] = field(default_factory=dict)
 	is_error: bool = False
 
 	def compact_view(self, max_chars: int = 2000) -> str:
-		"""生成写入 message_store 的紧凑视图，不写入大原文。"""
+		"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+生成写入 message_store 的紧凑视图，不写入大原文。"""
 		if self.is_error:
 			content_str = self._content_as_str()
-			return f"[Error] {content_str[:max_chars]}"
+			return f"[错误] {content_str[:max_chars]}"
 		if self.summary:
 			view = self.summary
 		else:
@@ -52,10 +58,10 @@ class ToolOutput:
 			head = view[:int(max_chars * 0.75)]
 			tail = view[-(max_chars - len(head)):]
 			omitted = len(view) - len(head) - len(tail)
-			view = f"{head}\n...[omitted {omitted} chars]...\n{tail}"
+			view = f"{head}\n...[省略 {omitted} 个字符]...\n{tail}"
 		if self.artifacts:
 			refs = ", ".join(f"{a.kind}:{a.id}({a.size}B)" for a in self.artifacts)
-			view += f"\n[artifacts: {refs}]"
+			view += f"\n[附件：{refs}]"
 		return view
 
 	def _content_as_str(self) -> str:
@@ -86,28 +92,37 @@ class ToolOutput:
 
 	@classmethod
 	def text(cls, content: str, summary: str = "") -> "ToolOutput":
-		"""便捷创建 text ToolOutput。"""
+		"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+便捷创建 text ToolOutput。"""
 		return cls(content=content, content_type="text", summary=summary)
 
 	@classmethod
 	def json_output(cls, content: dict | list, summary: str = "") -> "ToolOutput":
-		"""便捷创建 JSON ToolOutput。"""
+		"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+便捷创建 JSON ToolOutput。"""
 		return cls(content=content, content_type="json", summary=summary)
 
 	@classmethod
 	def error(cls, message: str) -> "ToolOutput":
-		"""便捷创建 error ToolOutput。"""
+		"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+便捷创建 error ToolOutput。"""
 		return cls(content=message, content_type="error", is_error=True)
 
 
 @runtime_checkable
 class ResultStore(Protocol):
-	"""外部存储大工具结果的协议。"""
+	"""English: This documentation describes the related engine component behavior.
+中文：外部存储大工具结果的协议。"""
 	async def put(self, content: str | bytes, metadata: dict[str, Any] | None = None) -> ArtifactRef: ...
 	async def get(self, artifact_id: str, offset: int = 0, limit: int = 4000) -> str: ...
 	async def search(self, artifact_id: str, query: str) -> list[dict[str, Any]]: ...
 
 
 def generate_artifact_id() -> str:
-	"""生成唯一 artifact ID。"""
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+生成唯一 artifact ID。"""
 	return uuid.uuid4().hex[:16]

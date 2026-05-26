@@ -1,6 +1,7 @@
-"""仿真报告生成辅助。
-Simulation report generation helpers.
-"""
+"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+仿真报告生成辅助。
+Simulation report generation helpers."""
 from __future__ import annotations
 
 import json
@@ -15,7 +16,9 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class GeneratedSimulationReport:
-	"""附加到结构化仿真报告上的 LLM 叙述内容。
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+附加到结构化仿真报告上的 LLM 叙述内容。
 	LLM-generated narrative attached to a structured simulation report.
 	"""
 
@@ -27,7 +30,9 @@ class GeneratedSimulationReport:
 
 @runtime_checkable
 class SimulationReportGenerator(Protocol):
-	"""仿真报告生成器协议。
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+仿真报告生成器协议。
 	Simulation report generator protocol.
 	"""
 
@@ -35,7 +40,9 @@ class SimulationReportGenerator(Protocol):
 
 
 class LLMSimulationReportGenerator:
-	"""使用 utility LLM 生成结构化叙述报告字段。
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+使用 utility LLM 生成结构化叙述报告字段。
 	Generate structured narrative report fields with a utility LLM.
 	"""
 
@@ -56,7 +63,9 @@ class LLMSimulationReportGenerator:
 
 
 def apply_generated_report(report: SimulationReport, generated: GeneratedSimulationReport) -> SimulationReport:
-	"""把生成的叙述字段附加到现有结构化报告。
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+把生成的叙述字段附加到现有结构化报告。
 	Attach generated narrative fields to the existing structured report.
 	"""
 	if generated.summary:
@@ -93,9 +102,9 @@ def _build_prompt(report: SimulationReport, max_steps: int) -> str:
 		"timeline": steps,
 	}
 	return (
-		"Generate a structured simulation report from this JSON. "
-		"Return JSON only with keys: summary, key_findings, risks, recommendations. "
-		"Each list should contain concise strings.\n"
+		"请根据以下 JSON 生成结构化仿真报告。"
+		"只返回 JSON，字段必须包含：summary、key_findings、risks、recommendations。"
+		"每个列表字段都使用简洁字符串。\n"
 		f"{json.dumps(payload, ensure_ascii=False)}"
 	)
 

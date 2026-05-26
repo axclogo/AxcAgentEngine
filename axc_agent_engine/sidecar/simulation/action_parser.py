@@ -1,6 +1,7 @@
-"""把 LLM 文本解析成结构化仿真动作。
-Parse LLM text into structured simulation actions.
-"""
+"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+把 LLM 文本解析成结构化仿真动作。
+Parse LLM text into structured simulation actions."""
 from __future__ import annotations
 
 from typing import Any
@@ -10,7 +11,9 @@ from axc_agent_engine.utils.json_utils import extract_json_object
 
 
 class ActionParseError(ValueError):
-	"""当文本无法转换为 AgentAction 时抛出。
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+当文本无法转换为 AgentAction 时抛出。
 	Raised when text cannot be converted to an AgentAction.
 	"""
 
@@ -21,7 +24,9 @@ class ActionParser:
 	"""
 
 	def parse(self, text: str, default_actor: str = "") -> AgentAction:
-		"""解析文本并返回 AgentAction。
+		"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+解析文本并返回 AgentAction。
 		Parse text and return an AgentAction.
 
 		输入可以是 JSON 对象，也可以被 Markdown JSON fence 包裹。

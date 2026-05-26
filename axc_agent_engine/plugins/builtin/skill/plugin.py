@@ -227,7 +227,9 @@ class SkillPlugin(BasePlugin):
 		return "\n".join(lines)
 
 	def get_tools(self) -> list[ToolDefinition]:
-		"""提供 skill 查询、加载、状态、重载和脚本执行工具。"""
+		"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+提供 skill 查询、加载、状态、重载和脚本执行工具。"""
 		return [
 			ToolDefinition(
 				name="list_skills",
@@ -296,7 +298,8 @@ class SkillPlugin(BasePlugin):
 		]
 
 	def _load_skills(self) -> None:
-		"""扫描技能目录"""
+		"""English: This documentation describes the related engine component behavior.
+中文：扫描技能目录"""
 		self._skills.clear()
 		self._load_errors.clear()
 		for path in self._paths:
@@ -316,7 +319,8 @@ class SkillPlugin(BasePlugin):
 		logger.info(f"[skill] Loaded {len(self._skills)} skills")
 
 	def _load_skill_dir(self, skill_dir: str, skill_md: str) -> None:
-		"""加载单个技能目录"""
+		"""English: This documentation describes the related engine component behavior.
+中文：加载单个技能目录"""
 		try:
 			with open(skill_md, "r", encoding="utf-8") as f:
 				content = f.read()
@@ -659,7 +663,9 @@ def _find_skill_markdown(skill_dir: str) -> str:
 
 
 def _parse_frontmatter(content: str) -> tuple[dict, str]:
-	"""解析 Markdown frontmatter（YAML 格式）"""
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+解析 Markdown frontmatter（YAML 格式）"""
 	if not content.startswith("---"):
 		return {}, content
 	parts = content.split("---", 2)

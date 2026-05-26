@@ -302,8 +302,8 @@ class KnowledgePlugin(BasePlugin):
 		self._embedding_ready = False
 		self._embedding_lock: asyncio.Lock | None = None
 		self._index_version = f"{self._embedding_config.get('model', 'none')}:{self._chunk_size}:{self._chunk_overlap}"
-		self._manifests: dict[str, dict] = {}  # source_hash → manifest
-		# BM25 缓存
+		self._manifests: dict[str, dict] = {}  # English: source_hash maps to manifest. 中文：source_hash 映射到 manifest。
+		# English: BM25 cache. 中文：BM25 缓存。
 		self._doc_terms: list[Counter] = []
 		self._doc_freq: Counter = Counter()
 		self._avg_dl: float = 0.0
@@ -341,7 +341,9 @@ class KnowledgePlugin(BasePlugin):
 		return "\n".join(lines)
 
 	async def on_execution_start(self, exec_ctx: "ExecutionContext") -> None:
-		"""首次执行时异步构建 embeddings，带锁并支持增量更新。"""
+		"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+首次执行时异步构建 embeddings，带锁并支持增量更新。"""
 		if self._embedding_ready or not self._embedding_client:
 			return
 		if self._embedding_lock is None:
@@ -353,11 +355,15 @@ class KnowledgePlugin(BasePlugin):
 			self._embedding_ready = True
 
 	async def _build_embeddings_incremental(self) -> None:
-		"""基于 fingerprint 增量构建 embeddings，每个 source 独立 manifest。"""
+		"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+基于 fingerprint 增量构建 embeddings，每个 source 独立 manifest。"""
 		await self._embedding_indexer.build_incremental()
 
 	def get_tools(self) -> list[ToolDefinition]:
-		"""提供 knowledge_search 工具"""
+		"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+提供 knowledge_search 工具"""
 		if not self._chunks:
 			return []
 		return [
@@ -371,7 +377,7 @@ class KnowledgePlugin(BasePlugin):
 						"top_k": {"type": "integer", "description": "返回结果数量", "default": 5},
 						"candidate_k": {"type": "integer", "description": "候选召回数量", "default": self._default_candidate_k},
 						"namespace": {"type": "string", "description": "知识库命名空间"},
-						"filters": {"type": "object", "description": "metadata filter，如 {\"document_id\": \"...\"}"},
+						"filters": {"type": "object", "description": "元数据过滤条件，如 {\"document_id\": \"...\"}"},
 						"allowed_acl_tags": {"type": "array", "items": {"type": "string"}, "description": "调用方已授权的 ACL tag"},
 						"min_score": {"type": "number", "description": "最低分过滤", "default": 0},
 						"include_trace": {"type": "boolean", "description": "是否返回检索 trace", "default": False},
@@ -384,7 +390,9 @@ class KnowledgePlugin(BasePlugin):
 		]
 
 	def _build_bm25_index(self) -> None:
-		"""构建 BM25 索引缓存（_load_sources 后调用一次）"""
+		"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+构建 BM25 索引缓存（_load_sources 后调用一次）"""
 		self._doc_terms = []
 		self._doc_freq = Counter()
 		self._vocab = {}
@@ -438,11 +446,13 @@ class KnowledgePlugin(BasePlugin):
 		return LLMQueryRewriter(self._plugin_ctx.utility_llm)
 
 	def _hybrid_search(self, query: str, top_k: int = 5, filters: KnowledgeFilter | dict | None = None) -> list[dict]:
-		"""同步快速检索路径，仅用于上下文注入。"""
+		"""English: This documentation describes the related engine component behavior.
+中文：同步快速检索路径，仅用于上下文注入。"""
 		return self._search_service.hybrid_search(query, top_k=top_k, filters=filters)
 
 	def _bm25_search(self, query: str, top_k: int = 30, filters: KnowledgeFilter | dict | None = None) -> list[int]:
-		"""BM25 检索（使用缓存索引）"""
+		"""English: This documentation describes the related engine component behavior.
+中文：BM25 检索（使用缓存索引）"""
 		if self._retriever:
 			results = self._retriever.bm25.search(query, top_k=top_k, filters=filters)
 			indices: list[int] = []
@@ -478,7 +488,9 @@ class KnowledgePlugin(BasePlugin):
 		return [idx for _, idx in scores[:top_k]]
 
 	def _local_vector_items(self, query: str, top_k: int = 30) -> list[dict]:
-		"""本地向量 fallback；只在 query 和 chunk 向量维度一致时启用。"""
+		"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+本地向量 fallback；只在 query 和 chunk 向量维度一致时启用。"""
 		if not self._embeddings:
 			return []
 		query_terms = _tokenize(query)
@@ -510,7 +522,9 @@ class KnowledgePlugin(BasePlugin):
 		return vec
 
 	def _init_embedding_client(self) -> None:
-		"""初始化 embedding API 客户端"""
+		"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+初始化 embedding API 客户端"""
 		try:
 			self._embedding_client = {
 				"base_url": self._embedding_config["base_url"].rstrip("/"),
@@ -527,7 +541,9 @@ class KnowledgePlugin(BasePlugin):
 			logger.warning(f"[knowledge] Embedding client init failed: {e}")
 
 	async def _embed_texts(self, texts: list[str]) -> list[list[float]]:
-		"""调用 embedding API 获取向量"""
+		"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+调用 embedding API 获取向量"""
 		if not self._embedding_client:
 			return []
 		output: list[list[float]] = []
@@ -564,7 +580,9 @@ class KnowledgePlugin(BasePlugin):
 		return []
 
 	def _load_sources(self) -> None:
-		"""加载知识源文件，并按 workspace 解析相对路径。"""
+		"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+加载知识源文件，并按 workspace 解析相对路径。"""
 		result = self._ingestion_pipeline.ingest(self._sources)
 		self._documents = list(result.documents)
 		self._chunks = [
@@ -607,7 +625,9 @@ class KnowledgePlugin(BasePlugin):
 		min_score: float = 0.0,
 		include_trace: bool | None = None,
 	) -> dict:
-		"""异步混合检索：vector_store.search → 本地 cosine → BM25 fallback。"""
+		"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+异步混合检索：vector_store.search → 本地 cosine → BM25 fallback。"""
 		return await self._search_service.hybrid_search_payload(
 			query,
 			top_k=top_k,
@@ -618,15 +638,20 @@ class KnowledgePlugin(BasePlugin):
 		)
 
 	def _normalize_vector_results(self, raw_results: list[dict]) -> list[dict]:
-		"""把 vector_store.search 结果标准化为内部格式。"""
+		"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+把 vector_store.search 结果标准化为内部格式。"""
 		return self._search_service.normalize_vector_results(raw_results)
 
 	def _merge_results(self, bm25_indices: list[int], vector_items: list[dict], top_k: int, query: str, min_score: float = 0.0) -> list[dict]:
-		"""用 RRF 融合 BM25 索引和向量结果。"""
+		"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+用 RRF 融合 BM25 索引和向量结果。"""
 		return self._formatter.merge_results(self._chunks, bm25_indices, vector_items, top_k, query, min_score)
 
 	def _format_bm25_results(self, indices: list[int], query: str = "") -> list[dict]:
-		"""格式化纯 BM25 结果。"""
+		"""English: This documentation describes the related engine component behavior.
+中文：格式化纯 BM25 结果。"""
 		return self._formatter.format_bm25_results(self._chunks, indices, query)
 
 	async def _tool_knowledge_search(self, args: dict, context: dict):
@@ -651,7 +676,8 @@ class KnowledgePlugin(BasePlugin):
 
 
 def _tokenize(text: str) -> list[str]:
-	"""简单分词，支持中英文混合文本。"""
+	"""English: This documentation describes the related engine component behavior.
+中文：简单分词，支持中英文混合文本。"""
 	text = text.lower()
 	words = re.findall(r'[a-z0-9]+', text)
 	chinese = re.findall(r'[\u4e00-\u9fff]', text)

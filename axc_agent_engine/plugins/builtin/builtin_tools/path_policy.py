@@ -1,4 +1,5 @@
-"""Workspace path policy for builtin file and command tools."""
+"""Workspace path policy for builtin file and command tools.
+中文：此文档说明相关引擎组件的行为。"""
 import os
 from datetime import datetime, timezone
 from typing import Any
@@ -7,7 +8,8 @@ from axc_agent_engine.tools.tool_output import ToolOutput
 
 
 class PathValidationError(ValueError):
-	"""Raised when a path does not pass workspace boundary validation."""
+	"""Raised when a path does not pass workspace boundary validation.
+中文：此文档说明相关引擎组件的行为。"""
 
 
 class BuiltinPathPolicy:

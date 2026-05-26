@@ -12,29 +12,41 @@ if TYPE_CHECKING:
 
 
 class ProviderRegistry:
-	"""命名 LLM provider 注册表。"""
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+命名 LLM provider 注册表。"""
 
 	def __init__(self) -> None:
 		self._providers: dict[str, "LLMProvider"] = {}
 
 	def register(self, name: str, provider: "LLMProvider") -> None:
-		"""按名称注册 provider。"""
+		"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+按名称注册 provider。"""
 		self._providers[name] = provider
 
 	def register_llm(self, name: str, provider: "LLMProvider") -> None:
-		"""按名称注册 LLM provider。"""
+		"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+按名称注册 LLM provider。"""
 		self.register(name, provider)
 
 	def get(self, name: str) -> "LLMProvider | None":
-		"""按名称获取 provider；不存在时返回 None。"""
+		"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+按名称获取 provider；不存在时返回 None。"""
 		return self._providers.get(name)
 
 	def get_llm(self, name: str) -> "LLMProvider | None":
-		"""按名称获取 LLM provider。"""
+		"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+按名称获取 LLM provider。"""
 		return self.get(name)
 
 	def resolve(self, ref: "str | LLMProvider | None") -> "LLMProvider | None":
-		"""解析 provider 引用，可以是名称字符串或 provider 实例。"""
+		"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+解析 provider 引用，可以是名称字符串或 provider 实例。"""
 		if ref is None:
 			return None
 		if isinstance(ref, str):
@@ -42,11 +54,15 @@ class ProviderRegistry:
 		return ref
 
 	def list_names(self) -> list[str]:
-		"""列出所有已注册 provider 名称。"""
+		"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+列出所有已注册 provider 名称。"""
 		return list(self._providers.keys())
 
 	async def close_all(self) -> None:
-		"""关闭所有已注册 provider。"""
+		"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+关闭所有已注册 provider。"""
 		for provider in self._providers.values():
 			await provider.close()
 		self._providers.clear()

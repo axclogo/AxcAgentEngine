@@ -1,4 +1,5 @@
-"""Workspace-bounded command execution."""
+"""Workspace-bounded command execution.
+中文：此文档说明相关引擎组件的行为。"""
 from __future__ import annotations
 
 import asyncio
@@ -12,7 +13,8 @@ from axc_agent_engine.runtime.sandbox_utils import write_text
 
 
 class WorkspaceCommandExecutor:
-	"""Command executor that keeps execution and logs inside one workspace."""
+	"""Command executor that keeps execution and logs inside one workspace.
+中文：此文档说明相关引擎组件的行为。"""
 
 	def __init__(
 		self,

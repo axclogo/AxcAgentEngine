@@ -1,7 +1,7 @@
 """Self-developed ReAct execution kernel.
 
 This module intentionally has no dependency on POR graph or workflow runtime.
-"""
+中文：此文档说明相关引擎组件的行为。"""
 from __future__ import annotations
 
 import time
@@ -24,7 +24,8 @@ DetectPlan = Callable[[dict[str, Any], str], Awaitable[tuple[bool, Any, str]]]
 
 
 class ReActKernel:
-	"""Owns the self-developed ReAct loop and delegates POR only through callbacks."""
+	"""Owns the self-developed ReAct loop and delegates POR only through callbacks.
+中文：此文档说明相关引擎组件的行为。"""
 
 	def __init__(
 		self,
@@ -53,13 +54,14 @@ class ReActKernel:
 		user_message: str,
 		stream_llm_call: Callable[[list[dict], list[dict] | None], AsyncIterator[Event | tuple[dict, list[Event]]]],
 	) -> AsyncIterator[Event]:
-		"""Run the ReAct loop until final answer, POR handoff, or error."""
+		"""Run the ReAct loop until final answer, POR handoff, or error.
+中文：此文档说明相关引擎组件的行为。"""
 		if self.start_time <= 0:
 			self.start_time = time.time()
 		while self._ctx.state.current_round < self._ctx.config.max_rounds:
 			self._ctx.check_cancelled()
 			if self._timed_out():
-				yield Event(type=EventType.ERROR, content=f"Total execution timeout ({self._ctx.config.total_timeout}s)")
+				yield Event(type=EventType.ERROR, content=f"总执行超时（{self._ctx.config.total_timeout}s）")
 				return
 			self._ctx.state.current_round += 1
 			await self._checkpoint("round", CheckpointStatus.RUNNING, {"phase": "round_start"})
@@ -114,12 +116,13 @@ class ReActKernel:
 		event_filter: EventFilter | None = None,
 		increment_parent_round: bool = True,
 	) -> AsyncIterator[Event | ReActTurnResult]:
-		"""Run a bounded ReAct sub-loop for one POR step."""
+		"""Run a bounded ReAct sub-loop for one POR step.
+中文：此文档说明相关引擎组件的行为。"""
 		start_time = time.time()
 		for _ in range(max_rounds):
 			self._ctx.check_cancelled()
 			if step_timeout > 0 and time.time() - start_time > step_timeout:
-				yield ReActTurnResult(message={}, content=f"Step execution timeout ({step_timeout}s)", failed=True)
+				yield ReActTurnResult(message={}, content=f"步骤执行超时（{step_timeout}s）", failed=True)
 				return
 			if increment_parent_round:
 				self._ctx.state.current_round += 1
@@ -133,12 +136,12 @@ class ReActKernel:
 				else:
 					yield item
 			if turn_result is None:
-				yield ReActTurnResult(message={}, content="LLM call failed: no result", failed=True)
+				yield ReActTurnResult(message={}, content="LLM 调用失败：没有结果", failed=True)
 				return
 			yield turn_result
 			if not turn_result.has_tool_calls:
 				return
-		yield ReActTurnResult(message={}, content="Step exceeded sub-loop round limit", failed=True)
+		yield ReActTurnResult(message={}, content="步骤超过子循环轮次限制", failed=True)
 
 	def _timed_out(self) -> bool:
 		return self._ctx.config.total_timeout > 0 and time.time() - self.start_time > self._ctx.config.total_timeout

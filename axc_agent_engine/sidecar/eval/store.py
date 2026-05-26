@@ -1,6 +1,7 @@
-"""存储无关的评测仓储。
-Storage-neutral evaluation stores.
-"""
+"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+存储无关的评测仓储。
+Storage-neutral evaluation stores."""
 from __future__ import annotations
 
 import asyncio
@@ -14,7 +15,9 @@ if TYPE_CHECKING:
 
 @dataclass
 class AnnotationReply:
-	"""评测用例的参考答案或评分规则。
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+评测用例的参考答案或评分规则。
 	Reference answer or rubric for an eval case.
 	"""
 	case_id: str
@@ -25,7 +28,9 @@ class AnnotationReply:
 
 @runtime_checkable
 class EvalStore(Protocol):
-	"""持久化评测用例和结果，但不规定具体数据库。
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+持久化评测用例和结果，但不规定具体数据库。
 	Persists eval cases and results without dictating a database.
 	"""
 	async def save_case(self, suite_id: str, case: "EvalCase") -> None: ...
@@ -37,7 +42,9 @@ class EvalStore(Protocol):
 
 @runtime_checkable
 class AnnotationStore(Protocol):
-	"""按 case_id 存储参考标注。
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+按 case_id 存储参考标注。
 	Stores reference annotations keyed by case_id.
 	"""
 	async def save_reply(self, reply: AnnotationReply) -> None: ...
@@ -46,7 +53,9 @@ class AnnotationStore(Protocol):
 
 
 class InMemoryEvalStore:
-	"""有容量边界的内存 EvalStore 实现。
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+有容量边界的内存 EvalStore 实现。
 	Bounded in-memory EvalStore implementation.
 	"""
 
@@ -99,7 +108,9 @@ class InMemoryEvalStore:
 
 
 class InMemoryAnnotationStore:
-	"""内存 AnnotationStore 实现。
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+内存 AnnotationStore 实现。
 	In-memory AnnotationStore implementation.
 	"""
 

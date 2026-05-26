@@ -1,6 +1,7 @@
-"""评估报告生成。
-Evaluation report generation.
-"""
+"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+评估报告生成。
+Evaluation report generation."""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -12,7 +13,9 @@ if TYPE_CHECKING:
 
 @dataclass
 class EvalReport:
-	"""评估报告。
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+评估报告。
 	Evaluation report.
 	"""
 	total_cases: int = 0
@@ -36,7 +39,9 @@ class EvalReport:
 
 
 def generate_report(results: list["EvalResult"], pass_threshold: float = 0.6) -> EvalReport:
-	"""从评估结果生成报告。
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+从评估结果生成报告。
 	Generate a report from evaluation results.
 	"""
 	if not results:

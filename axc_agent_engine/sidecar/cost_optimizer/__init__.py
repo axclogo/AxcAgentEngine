@@ -1,6 +1,7 @@
-"""宿主侧成本分析和优化建议。
-Host-side cost analysis and optimization suggestions.
-"""
+"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+宿主侧成本分析和优化建议。
+Host-side cost analysis and optimization suggestions."""
 from __future__ import annotations
 
 from collections import defaultdict
@@ -10,7 +11,9 @@ from typing import Any
 
 @dataclass(frozen=True)
 class CostSample:
-	"""一条观测到的执行成本样本。
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+一条观测到的执行成本样本。
 	One observed execution cost sample.
 	"""
 	sample_id: str
@@ -27,7 +30,9 @@ class CostSample:
 
 @dataclass(frozen=True)
 class ModelPrice:
-	"""按 token 计费的模型价格。
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+按 token 计费的模型价格。
 	Per-token model price.
 	"""
 	input_per_1k: float = 0.0
@@ -36,7 +41,9 @@ class ModelPrice:
 
 @dataclass(frozen=True)
 class CostFinding:
-	"""一条可执行的优化发现。
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+一条可执行的优化发现。
 	One actionable optimization finding.
 	"""
 	title: str
@@ -47,7 +54,9 @@ class CostFinding:
 
 @dataclass(frozen=True)
 class CostOptimizationReport:
-	"""聚合后的成本分析结果。
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+聚合后的成本分析结果。
 	Aggregated cost analysis.
 	"""
 	total_cost: float
@@ -59,7 +68,9 @@ class CostOptimizationReport:
 
 
 class CostReportBuilder:
-	"""把成本样本聚合成报告字段和优化发现。
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+把成本样本聚合成报告字段和优化发现。
 	Aggregates cost samples into report fields and findings.
 	"""
 
@@ -155,7 +166,9 @@ class CostReportBuilder:
 
 
 class CostEstimator:
-	"""估算单条样本的模型花费。
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+估算单条样本的模型花费。
 	Estimates one sample's model spend.
 	"""
 

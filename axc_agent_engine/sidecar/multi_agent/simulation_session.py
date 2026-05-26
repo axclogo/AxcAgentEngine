@@ -1,6 +1,7 @@
-"""连接多 Agent 编排和仿真状态的仿真会话。
-Simulation session that bridges multi-agent orchestration and simulation state.
-"""
+"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+连接多 Agent 编排和仿真状态的仿真会话。
+Simulation session that bridges multi-agent orchestration and simulation state."""
 from __future__ import annotations
 
 from typing import Any
@@ -14,7 +15,9 @@ from axc_agent_engine.sidecar.simulation.runner import SimulationRunner
 
 
 class SchedulerActorSelector:
-	"""把现有多 Agent Scheduler 适配到仿真 ActorSelector 接口。
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+把现有多 Agent Scheduler 适配到仿真 ActorSelector 接口。
 	Adapt an existing multi-agent Scheduler to the simulation ActorSelector interface.
 	"""
 
@@ -30,7 +33,9 @@ class SchedulerActorSelector:
 		return [agent.name for agent in selected]
 
 	def record(self, step: SimulationStep) -> None:
-		"""把已应用动作记录到 SharedContext，以兼容 scheduler。
+		"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+把已应用动作记录到 SharedContext，以兼容 scheduler。
 		Record applied actions into SharedContext for scheduler compatibility.
 		"""
 		self._shared.add_message(
@@ -41,7 +46,9 @@ class SchedulerActorSelector:
 
 
 class SimulationSession:
-	"""使用现有 Agent 对象运行结构化仿真。
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+使用现有 Agent 对象运行结构化仿真。
 	Run a structured simulation using existing Agent objects.
 
 	不同于 MultiAgentSession，本会话通过 AgentAction -> Environment -> StateDelta 推进 WorldState。

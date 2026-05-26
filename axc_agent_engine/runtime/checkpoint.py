@@ -3,7 +3,7 @@
 This module is a storage-neutral foundation for durable execution. Core loops
 can persist round, tool, POR, or simulation snapshots through CheckpointStore
 without coupling to a database implementation.
-"""
+中文：此文档说明相关引擎组件的行为。"""
 from __future__ import annotations
 
 import asyncio
@@ -16,7 +16,8 @@ from typing import Any, Protocol, runtime_checkable
 
 
 class CheckpointStatus(StrEnum):
-	"""Checkpoint lifecycle states."""
+	"""Checkpoint lifecycle states.
+中文：此文档说明相关引擎组件的行为。"""
 	RUNNING = "running"
 	COMPLETED = "completed"
 	FAILED = "failed"
@@ -25,7 +26,8 @@ class CheckpointStatus(StrEnum):
 
 @dataclass(frozen=True)
 class Checkpoint:
-	"""A durable execution snapshot."""
+	"""A durable execution snapshot.
+中文：此文档说明相关引擎组件的行为。"""
 	id: str = field(default_factory=lambda: uuid.uuid4().hex[:16])
 	run_id: str = ""
 	sequence: int = 0
@@ -50,7 +52,8 @@ class Checkpoint:
 
 @runtime_checkable
 class CheckpointStore(Protocol):
-	"""Stores durable execution checkpoints."""
+	"""Stores durable execution checkpoints.
+中文：此文档说明相关引擎组件的行为。"""
 	async def save(self, checkpoint: Checkpoint) -> None: ...
 	async def latest(self, run_id: str) -> Checkpoint | None: ...
 	async def list(self, run_id: str) -> list[Checkpoint]: ...
@@ -59,7 +62,8 @@ class CheckpointStore(Protocol):
 
 
 class InMemoryCheckpointStore:
-	"""Bounded in-memory checkpoint store for local development and tests."""
+	"""Bounded in-memory checkpoint store for local development and tests.
+中文：此文档说明相关引擎组件的行为。"""
 
 	def __init__(self, max_runs: int = 1000, max_checkpoints_per_run: int = 1000) -> None:
 		self._runs: OrderedDict[str, list[Checkpoint]] = OrderedDict()

@@ -1,4 +1,5 @@
-"""Connection owner for a single MCP server."""
+"""Connection owner for a single MCP server.
+中文：此文档说明相关引擎组件的行为。"""
 from __future__ import annotations
 
 import asyncio
@@ -13,7 +14,8 @@ logger = logging.getLogger(__name__)
 
 
 class MCPConnection:
-	"""Connection owner for a single MCP server."""
+	"""Connection owner for a single MCP server.
+中文：此文档说明相关引擎组件的行为。"""
 
 	def __init__(self, config: dict[str, Any]) -> None:
 		self.config = dict(config)

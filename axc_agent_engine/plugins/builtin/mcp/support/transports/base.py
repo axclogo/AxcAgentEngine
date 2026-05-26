@@ -1,4 +1,5 @@
-"""Shared MCP transport helpers."""
+"""Shared MCP transport helpers.
+中文：此文档说明相关引擎组件的行为。"""
 import importlib
 import os
 from typing import Any

@@ -2,7 +2,7 @@
 
 The node functions delegate behavior to a service while graph edges own state
 transitions and loop control.
-"""
+中文：此文档说明相关引擎组件的行为。"""
 from __future__ import annotations
 
 from pydantic_graph import StepContext

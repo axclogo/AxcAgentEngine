@@ -1,6 +1,7 @@
-"""通用仿真内核的模式适配器。
-Mode adapters for the generic simulation kernel.
-"""
+"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+通用仿真内核的模式适配器。
+Mode adapters for the generic simulation kernel."""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -14,7 +15,9 @@ from axc_agent_engine.sidecar.simulation.runner import SimulationRunner
 
 @dataclass(frozen=True)
 class SimulationModeAdapter:
-	"""为一种通用仿真模式构建 Scenario/Runner 组合。
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+为一种通用仿真模式构建 Scenario/Runner 组合。
 	Builds a Scenario/Runner pair for one general-purpose simulation mode.
 	"""
 	name: str

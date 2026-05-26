@@ -3,7 +3,7 @@
 The chunker is storage-neutral and intentionally has no dependency on the
 Knowledge plugin. It preserves heading context for Markdown documents and
 falls back to sentence-aware splitting for plain text.
-"""
+中文：此文档说明相关引擎组件的行为。"""
 from __future__ import annotations
 
 import hashlib
@@ -16,7 +16,8 @@ DEFAULT_CHUNK_OVERLAP = 200
 
 @dataclass(frozen=True)
 class Chunk:
-	"""A semantically bounded text chunk."""
+	"""A semantically bounded text chunk.
+中文：此文档说明相关引擎组件的行为。"""
 	content: str
 	content_with_context: str
 	source: str = ""
@@ -38,7 +39,8 @@ class Chunk:
 
 
 class SemanticChunker:
-	"""Markdown heading-aware and sentence-boundary chunker."""
+	"""Markdown heading-aware and sentence-boundary chunker.
+中文：此文档说明相关引擎组件的行为。"""
 
 	def __init__(self, max_chunk_size: int = DEFAULT_MAX_CHUNK_SIZE,
 				 chunk_overlap: int = DEFAULT_CHUNK_OVERLAP) -> None:
@@ -46,7 +48,8 @@ class SemanticChunker:
 		self.chunk_overlap = max(0, int(chunk_overlap))
 
 	def chunk_document(self, content: str, source: str = "", title: str = "") -> list[Chunk]:
-		"""Split one document into semantic chunks."""
+		"""Split one document into semantic chunks.
+中文：此文档说明相关引擎组件的行为。"""
 		if not content or not content.strip():
 			return []
 		sections = self._parse_markdown_sections(content)

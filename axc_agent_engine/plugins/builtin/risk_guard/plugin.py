@@ -13,7 +13,9 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 class RiskGuardPlugin(BasePlugin):
-	"""工具风险动态分级 — blocked 直接拒绝，dangerous 通过 exec_ctx.metadata 标记"""
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+工具风险动态分级 — blocked 直接拒绝，dangerous 通过 exec_ctx.metadata 标记"""
 	name = "risk_guard"
 	display_name = "风险分级"
 	priority = 7
@@ -38,5 +40,6 @@ class RiskGuardPlugin(BasePlugin):
 def classify_risk(tool_name: str, arguments: dict[str, Any],
 				  static_risk: str = "safe",
 				  custom_rules: list[dict] | None = None) -> RiskLevel:
-	"""动态评估工具风险等级"""
+	"""English: This documentation describes the related engine component behavior.
+中文：动态评估工具风险等级"""
 	return classify_tool_risk(tool_name, arguments, static_risk=static_risk, custom_rules=custom_rules).level

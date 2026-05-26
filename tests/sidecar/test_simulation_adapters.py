@@ -72,7 +72,7 @@ async def test_simulation_session_uses_agent_chat_policy():
 
 	assert report.final_state.variables["isolated"] is True
 	assert report.timeline[0].action.intent == "isolate endpoint"
-	assert "structured simulation" in agent.prompts[0]
+	assert "结构化仿真场景" in agent.prompts[0]
 
 
 async def test_simulation_session_accepts_custom_policies():

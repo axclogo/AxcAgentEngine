@@ -1,6 +1,7 @@
-"""插件注册表。
-Plugin registry.
-"""
+"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+插件注册表。
+Plugin registry."""
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable
@@ -21,7 +22,9 @@ class PluginRegistry:
 		self._factories: dict[str, PluginFactory] = {}
 
 	def register(self, plugin_cls: type[BasePlugin]) -> None:
-		"""注册插件类。
+		"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+注册插件类。
 		Register a plugin class.
 		"""
 		name = self._class_name(plugin_cls)
@@ -30,14 +33,18 @@ class PluginRegistry:
 		self.register_factory(name, plugin_cls)
 
 	def register_many(self, plugin_classes: Iterable[type[BasePlugin]]) -> None:
-		"""批量注册插件类。
+		"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+批量注册插件类。
 		Register multiple plugin classes.
 		"""
 		for plugin_cls in plugin_classes:
 			self.register(plugin_cls)
 
 	def register_factory(self, name: str, factory: PluginFactory) -> None:
-		"""注册插件工厂。
+		"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+注册插件工厂。
 		Register a plugin factory.
 		"""
 		if not name:
@@ -47,7 +54,9 @@ class PluginRegistry:
 		self._factories[name] = factory
 
 	def create(self, name: str) -> BasePlugin | None:
-		"""创建已注册插件实例。
+		"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+创建已注册插件实例。
 		Create a registered plugin instance.
 		"""
 		factory = self._factories.get(name)
@@ -58,13 +67,17 @@ class PluginRegistry:
 		return plugin
 
 	def get(self, name: str) -> PluginFactory | None:
-		"""返回插件工厂。
+		"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+返回插件工厂。
 		Return a plugin factory.
 		"""
 		return self._factories.get(name)
 
 	def names(self) -> list[str]:
-		"""返回已注册插件名。
+		"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+返回已注册插件名。
 		Return registered plugin names.
 		"""
 		return sorted(self._factories)

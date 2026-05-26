@@ -89,7 +89,7 @@ class TestMessageStore:
 		ms.append_tool_results(results)
 		assert ms.count == 2
 		assert "ok" in ms.get_all()[0]["content"]
-		assert "[Error]" in ms.get_all()[1]["content"]
+		assert "[错误]" in ms.get_all()[1]["content"]
 
 	def test_get_first(self):
 		ms = MessageStore()

@@ -1,4 +1,5 @@
-"""Graph source ingestion."""
+"""Graph source ingestion.
+中文：此文档说明相关引擎组件的行为。"""
 import logging
 import os
 from collections.abc import Callable

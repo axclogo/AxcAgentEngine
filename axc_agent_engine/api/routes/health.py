@@ -1,4 +1,5 @@
-"""健康检查"""
+"""English: This documentation describes the related engine component behavior.
+中文：健康检查"""
 from fastapi import APIRouter
 
 router = APIRouter(tags=["health"])

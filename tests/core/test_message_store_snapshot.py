@@ -83,12 +83,12 @@ class TestMessageStoreSnapshot:
 		assert ms.count == 1
 
 	def test_error_message_format(self):
-		"""Verify tool error messages use English format."""
+		"""Verify tool error messages use Chinese format."""
 		ms = MessageStore()
 		from axc_agent_engine.tools.executor import ToolResult
 		results = [ToolResult(tool_call_id="t1", tool_name="test", arguments={}, error="fail", success=False)]
 		ms.append_tool_results(results)
-		assert "[Error]" in ms.get_all()[0]["content"]
+		assert "[错误]" in ms.get_all()[0]["content"]
 
 	def test_get_all_returns_deep_copy(self):
 		ms = MessageStore()

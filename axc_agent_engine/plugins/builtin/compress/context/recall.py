@@ -1,4 +1,5 @@
-"""L4 relevance recall."""
+"""L4 relevance recall.
+中文：此文档说明相关引擎组件的行为。"""
 from __future__ import annotations
 
 import inspect
@@ -11,7 +12,8 @@ from axc_agent_engine.plugins.builtin.compress.context.scoring import importance
 
 
 def fallback_recall(messages: list[dict[str, Any]], query: str, top_k: int, token_limit: int) -> list[RecallItem]:
-	"""Keyword + recency fallback recall."""
+	"""Keyword + recency fallback recall.
+中文：此文档说明相关引擎组件的行为。"""
 	items: list[RecallItem] = []
 	total = len(messages)
 	used_tokens = 0
@@ -31,7 +33,8 @@ def fallback_recall(messages: list[dict[str, Any]], query: str, top_k: int, toke
 
 
 def read_recall_resource(resource: Any, query: str, top_k: int) -> list[RecallItem]:
-	"""Read from sync or async recall resources."""
+	"""Read from sync or async recall resources.
+中文：此文档说明相关引擎组件的行为。"""
 	if resource is None or not hasattr(resource, "search"):
 		return []
 	result = resource.search(query, top_k=top_k)
@@ -70,7 +73,8 @@ def _to_item(raw: Any) -> RecallItem:
 
 
 def _await_sync(awaitable: Any) -> Any:
-	"""Run an awaitable from sync plugin hooks, including inside active event loops."""
+	"""Run an awaitable from sync plugin hooks, including inside active event loops.
+中文：此文档说明相关引擎组件的行为。"""
 	try:
 		asyncio.get_running_loop()
 	except RuntimeError:

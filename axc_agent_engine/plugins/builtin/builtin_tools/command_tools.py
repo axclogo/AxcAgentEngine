@@ -1,4 +1,5 @@
-"""Command execution builtin tools."""
+"""Command execution builtin tools.
+中文：此文档说明相关引擎组件的行为。"""
 import os
 import re
 import sys
@@ -116,7 +117,8 @@ class BuiltinCommandTools:
 
 
 async def ensure_venv(venv_dir: str, context: dict[str, Any]) -> str:
-	"""Ensure a venv exists and return its python executable path."""
+	"""Ensure a venv exists and return its python executable path.
+中文：此文档说明相关引擎组件的行为。"""
 	if sys.platform == "win32":
 		python_path = os.path.join(venv_dir, "Scripts", "python.exe")
 	else:
@@ -138,7 +140,8 @@ async def ensure_venv(venv_dir: str, context: dict[str, Any]) -> str:
 
 
 def get_command_executor(context: dict[str, Any]):
-	"""Return configured command executor or the local restricted baseline."""
+	"""Return configured command executor or the local restricted baseline.
+中文：此文档说明相关引擎组件的行为。"""
 	return context.get("command_executor") or LocalSubprocessExecutor()
 
 
@@ -148,5 +151,6 @@ async def store_command_artifacts(
 	stdout_limit: int = 1500,
 	stderr_limit: int = 500,
 ):
-	"""Build command output content and artifact refs."""
+	"""Build command output content and artifact refs.
+中文：此文档说明相关引擎组件的行为。"""
 	return await BuiltinCommandPresenter().store_artifacts(result, context, stdout_limit, stderr_limit)

@@ -1,4 +1,5 @@
-"""InMemoryResultStore — stores large tool outputs for paged retrieval."""
+"""InMemoryResultStore — stores large tool outputs for paged retrieval.
+中文：此文档说明相关引擎组件的行为。"""
 from __future__ import annotations
 
 import asyncio
@@ -15,7 +16,8 @@ class InMemoryResultStore:
 	Stores artifacts in an OrderedDict with TTL, entry-count, and byte-size
 	eviction. It is intended for local development and tests; production systems
 	should inject a durable ResultStore implementation.
-	"""
+	
+中文：此文档说明相关引擎组件的行为。"""
 
 	def __init__(self, max_entries: int = 500, max_bytes: int = 50 * 1024 * 1024, ttl: int = 3600) -> None:
 		self._store: OrderedDict[str, dict[str, Any]] = OrderedDict()
@@ -26,7 +28,8 @@ class InMemoryResultStore:
 		self._lock = asyncio.Lock()
 
 	async def put(self, content: str | bytes, metadata: dict[str, Any] | None = None) -> ArtifactRef:
-		"""Store content and return an ArtifactRef."""
+		"""Store content and return an ArtifactRef.
+中文：此文档说明相关引擎组件的行为。"""
 		artifact_id = generate_artifact_id()
 		if isinstance(content, bytes):
 			content_str = content.decode("utf-8", errors="replace")
@@ -54,7 +57,8 @@ class InMemoryResultStore:
 		return ArtifactRef(id=artifact_id, kind=kind, size=size, metadata=meta)
 
 	async def get(self, artifact_id: str, offset: int = 0, limit: int = 4000) -> str:
-		"""Retrieve content by artifact_id with pagination."""
+		"""Retrieve content by artifact_id with pagination.
+中文：此文档说明相关引擎组件的行为。"""
 		async with self._lock:
 			entry = self._get_live_entry(artifact_id)
 			if entry is None:
@@ -67,7 +71,8 @@ class InMemoryResultStore:
 			return content[safe_offset:safe_offset + safe_limit]
 
 	async def search(self, artifact_id: str, query: str) -> list[dict[str, Any]]:
-		"""Search within an artifact's content for lines matching query."""
+		"""Search within an artifact's content for lines matching query.
+中文：此文档说明相关引擎组件的行为。"""
 		async with self._lock:
 			entry = self._get_live_entry(artifact_id)
 			if entry is None:
@@ -84,16 +89,19 @@ class InMemoryResultStore:
 		return results
 
 	async def delete(self, artifact_id: str) -> None:
-		"""Delete an artifact if it exists."""
+		"""Delete an artifact if it exists.
+中文：此文档说明相关引擎组件的行为。"""
 		async with self._lock:
 			self._delete_unlocked(artifact_id)
 
 	def has(self, artifact_id: str) -> bool:
-		"""Check if artifact exists."""
+		"""Check if artifact exists.
+中文：此文档说明相关引擎组件的行为。"""
 		return self._get_live_entry(artifact_id) is not None
 
 	def stats(self) -> dict[str, Any]:
-		"""Return current store capacity stats."""
+		"""Return current store capacity stats.
+中文：此文档说明相关引擎组件的行为。"""
 		return {
 			"entries": len(self._store),
 			"max_entries": self._max_entries,

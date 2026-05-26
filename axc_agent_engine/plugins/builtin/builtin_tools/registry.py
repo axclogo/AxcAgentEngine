@@ -1,4 +1,5 @@
-"""Tool registry for builtin tools."""
+"""Tool registry for builtin tools.
+中文：此文档说明相关引擎组件的行为。"""
 from collections.abc import Callable
 from typing import Any
 
@@ -16,7 +17,8 @@ def register_tool(
 	is_read_only: bool = False,
 	capability: str = "",
 ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
-	"""Declare a builtin tool and store its OpenAI schema metadata."""
+	"""Declare a builtin tool and store its OpenAI schema metadata.
+中文：此文档说明相关引擎组件的行为。"""
 	def decorator(fn: Callable[..., Any]) -> Callable[..., Any]:
 		ALL_TOOLS[name] = ToolDefinition(
 			name=name,

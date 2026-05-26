@@ -1,8 +1,9 @@
-"""工具执行器 — 单个工具调用的重试与校验。
+"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+工具执行器 — 单个工具调用的重试与校验。
 
 English: Executes one tool call with argument validation, timeout handling, and
-read-only retry behavior.
-"""
+read-only retry behavior."""
 import asyncio
 import logging
 import time
@@ -33,7 +34,9 @@ _NON_RETRYABLE_KEYWORDS = [
 
 @dataclass
 class ToolResult:
-	"""工具执行结果。
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+工具执行结果。
 
 	English: Normalized result of one tool execution.
 	"""
@@ -46,7 +49,9 @@ class ToolResult:
 	duration_ms: int = 0
 
 	def compact_view(self) -> str:
-		"""返回写入上下文或消息的紧凑字符串表示。
+		"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+返回写入上下文或消息的紧凑字符串表示。
 
 		English: Return the compact string representation stored in context/messages.
 		"""
@@ -149,7 +154,9 @@ class SingleToolExecutor:
 
 
 def is_retryable_error(error_str: str) -> bool:
-	"""判断错误是否可重试。
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+判断错误是否可重试。
 
 	English: Decide whether an error is retryable.
 	"""
@@ -164,7 +171,9 @@ def is_retryable_error(error_str: str) -> bool:
 
 
 def _type_matches(value: Any, expected_type: str) -> bool:
-	"""检查值是否匹配期望的 JSON Schema 类型。"""
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+检查值是否匹配期望的 JSON Schema 类型。"""
 	if value is None:
 		return True
 	if expected_type == "boolean":
@@ -187,7 +196,9 @@ async def execute_tool(
 	tool_def: ToolDefinition, arguments: dict[str, Any],
 	tool_call_id: str = "", context: "ToolContext | dict[str, Any] | None" = None,
 ) -> ToolResult:
-	"""执行单个工具调用，包含参数校验和自动重试。
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+执行单个工具调用，包含参数校验和自动重试。
 
 	English: Execute one tool call with validation and automatic retry for read-only tools.
 	"""
@@ -198,7 +209,9 @@ async def _execute_once(
 	tool_def: ToolDefinition, arguments: dict[str, Any],
 	tool_call_id: str = "", context: dict[str, Any] | None = None,
 ) -> ToolResult:
-	"""执行一次工具调用尝试，并强制返回 ToolOutput。"""
+	"""English: Bilingual documentation follows.
+中文：以下为双语文档说明。
+执行一次工具调用尝试，并强制返回 ToolOutput。"""
 	start = time.time()
 	try:
 		raw_result = await asyncio.wait_for(tool_def.execute(arguments, context or {}), timeout=tool_def.timeout)
@@ -216,8 +229,8 @@ async def _execute_once(
 			arguments=arguments, error=str(e), success=False,
 			duration_ms=int((time.time() - start) * 1000),
 		)
-	# 工具执行后强制校验 ToolOutput 返回类型。这是插件作者必须遵守的硬边界；
-	# 上层编排器可以把异常转成 LLM 循环里的工具失败。
+	#English: Bilingual note. 中文：工具执行后强制校验 ToolOutput 返回类型。这是插件作者必须遵守的硬边界；
+	#English: Bilingual note. 中文：上层编排器可以把异常转成 LLM 循环里的工具失败。
 	if not isinstance(raw_result, ToolOutput):
 		raise TypeError(f"工具必须返回 ToolOutput，实际得到 {type(raw_result).__name__}")
 	if raw_result.is_error:
