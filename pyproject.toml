@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "axc-agent-engine"
-version = "2.0"
+version = "2.0.1"
 description = "Agent execution engine with Plan-Observe-Replan (POR) and plugin architecture"
 readme = "README.md"
 license = "Apache-2.0"
@@ -59,10 +59,10 @@ all = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/axcteam/axc-agent-engine"
-Documentation = "https://github.com/axcteam/axc-agent-engine#readme"
-Repository = "https://github.com/axcteam/axc-agent-engine"
-Issues = "https://github.com/axcteam/axc-agent-engine/issues"
+Homepage = "https://github.com/axclogo/AxcAgentEngine"
+Documentation = "https://github.com/axclogo/AxcAgentEngine#readme"
+Repository = "https://github.com/axclogo/AxcAgentEngine"
+Issues = "https://github.com/axclogo/AxcAgentEngine/issues"
 
 [project.scripts]
 axc = "axc_agent_engine.cli:main"
