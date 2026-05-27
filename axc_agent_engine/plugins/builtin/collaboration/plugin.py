@@ -7,6 +7,7 @@ from typing import Any, TYPE_CHECKING
 from axc_agent_engine.core.constants import MAX_CALL_DEPTH
 from axc_agent_engine.core.schema import ToolDefinition
 from axc_agent_engine.plugins.base import BasePlugin
+from axc_agent_engine.plugins.builtin.config_schemas import COLLABORATION_CONFIG_SCHEMA
 
 if TYPE_CHECKING:
 	from axc_agent_engine.plugins import PluginContext
@@ -82,6 +83,7 @@ class CollaborationPlugin(BasePlugin):
 	display_name = "Agent 协作"
 	priority = 40
 	version = "3.0.0"
+	config_schema = COLLABORATION_CONFIG_SCHEMA
 
 	def initialize(self, config: dict, plugin_ctx: "PluginContext") -> None:
 		self._enabled = config.get("enabled", True)

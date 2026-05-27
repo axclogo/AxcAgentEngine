@@ -85,7 +85,7 @@ class TestKnowledgeVectorStore:
 			plugin = KnowledgePlugin()
 			plugin.initialize({
 				"sources": ["doc.txt"],
-				"embedding": {"base_url": "http://fake", "model": "test"},
+				"embedding": {"base_url": "http://fake"},
 			}, ctx)
 			async def fake_embed(texts):
 				return [[0.1, 0.2, 0.3] for _ in texts]
@@ -110,7 +110,7 @@ class TestKnowledgeVectorStore:
 			plugin = KnowledgePlugin()
 			plugin.initialize({
 				"sources": ["doc.txt"],
-				"embedding": {"base_url": "http://fake", "model": "test"},
+				"embedding": {"base_url": "http://fake"},
 			}, ctx)
 			call_count = [0]
 			async def counting_embed(texts):
@@ -138,7 +138,7 @@ class TestKnowledgeVectorStore:
 			plugin = KnowledgePlugin()
 			plugin.initialize({
 				"sources": ["doc.txt"],
-				"embedding": {"base_url": "http://fake", "model": "test"},
+				"embedding": {"base_url": "http://fake"},
 			}, ctx)
 			async def fake_embed(texts):
 				return [[0.1] for _ in texts]
@@ -166,7 +166,7 @@ class TestKnowledgeVectorStore:
 			plugin = KnowledgePlugin()
 			plugin.initialize({
 				"sources": ["doc.txt"],
-				"embedding": {"base_url": "http://fake", "model": "test"},
+				"embedding": {"base_url": "http://fake"},
 			}, ctx)
 			call_count = [0]
 			async def counting_embed(texts):
@@ -242,7 +242,7 @@ class TestVectorStoreSearch:
 			plugin = KnowledgePlugin()
 			plugin.initialize({
 				"sources": ["doc.txt"],
-				"embedding": {"base_url": "http://fake", "model": "test"},
+				"embedding": {"base_url": "http://fake"},
 			}, ctx)
 			async def fake_embed(texts):
 				return [[0.1, 0.2, 0.3] for _ in texts]
@@ -274,7 +274,7 @@ class TestVectorStoreSearch:
 			plugin = KnowledgePlugin()
 			plugin.initialize({
 				"sources": ["doc.txt"],
-				"embedding": {"base_url": "http://fake", "model": "test"},
+				"embedding": {"base_url": "http://fake"},
 			}, ctx)
 			async def fake_embed(texts):
 				return [[0.1] for _ in texts]
@@ -315,7 +315,7 @@ class TestMultiSourceManifest:
 			plugin = KnowledgePlugin()
 			plugin.initialize({
 				"sources": ["a.txt", "b.txt"],
-				"embedding": {"base_url": "http://fake", "model": "test"},
+				"embedding": {"base_url": "http://fake"},
 			}, ctx)
 			async def fake_embed(texts):
 				return [[0.1] for _ in texts]
@@ -351,7 +351,7 @@ class TestMultiSourceManifest:
 			plugin = KnowledgePlugin()
 			plugin.initialize({
 				"sources": ["a.txt", "b.txt"],
-				"embedding": {"base_url": "http://fake", "model": "test"},
+				"embedding": {"base_url": "http://fake"},
 			}, ctx)
 			async def fake_embed(texts):
 				return [[0.1] for _ in texts]

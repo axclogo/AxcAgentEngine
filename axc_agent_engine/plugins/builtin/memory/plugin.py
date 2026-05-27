@@ -11,6 +11,7 @@ from axc_agent_engine.plugins.builtin.memory.support.embedding import HashEmbedd
 from axc_agent_engine.plugins.builtin.memory.support.service import MemoryLayer, MemoryService, char_similarity, parse_facts_response
 from axc_agent_engine.plugins.base import BasePlugin
 from axc_agent_engine.plugins.builtin.common import bounded_int
+from axc_agent_engine.plugins.builtin.config_schemas import MEMORY_CONFIG_SCHEMA
 
 if TYPE_CHECKING:
 	from axc_agent_engine.core.context import ExecutionContext
@@ -398,6 +399,7 @@ class MemoryPlugin(BasePlugin):
 	display_name = "记忆系统"
 	priority = 20
 	version = "2.0.0"
+	config_schema = MEMORY_CONFIG_SCHEMA
 
 	def initialize(self, config: dict, plugin_ctx: "PluginContext") -> None:
 		self._context_budget = config.get("context_budget", 2000)
@@ -810,10 +812,9 @@ class MemoryPlugin(BasePlugin):
 		if not self._vector_store:
 			return None
 		mode = str(self._embedding_config.get("mode", "")).lower()
-		if self._embedding_config.get("base_url") and self._embedding_config.get("model"):
+		if self._embedding_config.get("base_url"):
 			return OpenAICompatibleEmbeddingClient(
 				str(self._embedding_config["base_url"]),
-				str(self._embedding_config["model"]),
 				str(self._embedding_config.get("api_key", "")),
 				int(self._embedding_config.get("timeout", 30)),
 			)

@@ -33,9 +33,7 @@ async def test_hash_embedding_and_openai_embedding(monkeypatch):
 	assert len(vectors[0]) == 8
 
 	with pytest.raises(ValueError):
-		OpenAICompatibleEmbeddingClient("", "model")
-	with pytest.raises(ValueError):
-		OpenAICompatibleEmbeddingClient("http://x", "")
+		OpenAICompatibleEmbeddingClient("")
 
 	class Response:
 		def raise_for_status(self): return None
@@ -49,7 +47,7 @@ async def test_hash_embedding_and_openai_embedding(monkeypatch):
 			return Response()
 	Httpx = types.SimpleNamespace(AsyncClient=AsyncClient)
 	monkeypatch.setitem(sys.modules, "httpx", Httpx)
-	emb = OpenAICompatibleEmbeddingClient("http://base/", "m", api_key="k")
+	emb = OpenAICompatibleEmbeddingClient("http://base/", api_key="k")
 	assert await emb.embed([]) == []
 	assert await emb.embed(["x"]) == [[1, 2]]
 

@@ -247,7 +247,7 @@ async def test_external_reranker_and_parse_helpers(monkeypatch):
 		RetrievalResult(id="a", text="alpha", score=0.1, retrieval="bm25"),
 		RetrievalResult(id="b", text="beta", score=0.2, retrieval="bm25"),
 	]
-	reranked = await ExternalReranker("http://rerank", model="m", api_key="k").rerank("q", results, 2)
+	reranked = await ExternalReranker("http://rerank", api_key="k").rerank("q", results, 2)
 	assert [item.id for item in reranked] == ["b", "a"]
 
 	assert _parse_rerank_scores([0.1, 0.2], 2) == [(0, 0.1), (1, 0.2)]

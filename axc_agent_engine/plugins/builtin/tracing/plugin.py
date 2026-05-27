@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any, Callable
 from axc_agent_engine.core.errors import ErrorCategory, ErrorEnvelope
 from axc_agent_engine.core.schema import ToolDefinition
 from axc_agent_engine.plugins.base import BasePlugin
+from axc_agent_engine.plugins.builtin.config_schemas import TRACING_CONFIG_SCHEMA
 
 if TYPE_CHECKING:
 	from axc_agent_engine.core.context import ExecutionContext
@@ -160,6 +161,7 @@ class TracingPlugin(BasePlugin):
 	display_name = "链路追踪"
 	priority = 1
 	version = "3.0.0"
+	config_schema = TRACING_CONFIG_SCHEMA
 
 	def initialize(self, config: dict, plugin_ctx: "PluginContext") -> None:
 		super().initialize(config, plugin_ctx)

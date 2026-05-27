@@ -341,12 +341,30 @@ flowchart TD
 
 ```python
 from axc_agent_engine import BasePlugin, ToolDefinition, ToolOutput
+from axc_agent_engine.plugins.config_schema import config_field, config_schema
 
 class MyPlugin(BasePlugin):
     name = "my_plugin"
     display_name = "My Plugin"
     priority = 30
     phase = "core"
+    config_schema = config_schema(
+        "my_plugin",
+        "My Plugin",
+        "Configuration for MyPlugin.",
+        [
+            config_field(
+                "api_url",
+                "接口地址",
+                "string",
+                "插件调用的后端接口地址。",
+                label_en="API URL",
+                default="http://localhost:5000",
+                required=True,
+            ),
+        ],
+        display_name_en="My Plugin",
+    )
 
     def initialize(self, config: dict, ctx) -> None:
         super().initialize(config, ctx)
@@ -367,7 +385,9 @@ class MyPlugin(BasePlugin):
         return ToolOutput.text(f"Result for {args['query']}")
 ```
 
-Plugins must inherit `BasePlugin`, and tools must be returned as `ToolDefinition` instances. `ToolRegistry` does not accept dicts.
+Plugins must inherit `BasePlugin`, declare `config_schema`, and return tools as `ToolDefinition` instances. `ToolRegistry` does not accept dicts.
+
+Hosts can inspect registered plugin schemas through `registry.list_plugin_config_schemas()` or `registry.get_plugin_config_schema("my_plugin")`. The schema is for UI, templates, default display, and optional validation; YAML extra keys are still passed to `initialize(config, ctx)`.
 
 ```yaml
 plugins:
@@ -399,6 +419,7 @@ CLI logging flags are global and must be placed before the subcommand.
 - **Orchestration is sidecar.** Multi-agent sessions, simulation, mode adapters are host-driven.
 - **Evaluation is sidecar.** EvalRunner, stores, matchers, reports are host-driven test framework pieces.
 - **Registration is not loading.** The spec registry is the full plugin table; agents load only YAML-enabled plugins.
+- **Plugin schema is mandatory.** A plugin without `config_schema` cannot be registered.
 - **Tools come from plugins.** The engine core embeds no business tools.
 - **Tools must return `ToolOutput`.** Non-`ToolOutput` returns are rejected.
 - **Tool definitions must be `ToolDefinition`.** No dicts.

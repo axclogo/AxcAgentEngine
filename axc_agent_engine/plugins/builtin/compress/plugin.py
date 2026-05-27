@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from axc_agent_engine.plugins.base import BasePlugin
+from axc_agent_engine.plugins.builtin.config_schemas import COMPRESS_CONFIG_SCHEMA
 from axc_agent_engine.plugins.builtin.compress.context.boundary import (
 	CompressionBoundary,
 	CompressionBoundaryStore,
@@ -147,6 +148,7 @@ class CompressPlugin(BasePlugin):
 	display_name = "上下文治理"
 	priority = 80
 	version = "2.0.0"
+	config_schema = COMPRESS_CONFIG_SCHEMA
 
 	def initialize(self, config: dict, plugin_ctx: "PluginContext") -> None:
 		super().initialize(config, plugin_ctx)

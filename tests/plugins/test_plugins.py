@@ -6,11 +6,11 @@ from axc_agent_engine.plugins.base import BasePlugin
 from axc_agent_engine.core.errors import PluginInitError
 from axc_agent_engine.plugins.loader import load_plugins, _phase_order
 from axc_agent_engine.plugins.registry import PluginRegistry
+from axc_agent_engine.plugins.config_schema import config_schema
 from axc_agent_engine.core.plugin_manager import PluginManager
 from axc_agent_engine.core.context import ExecutionContext
 from axc_agent_engine.runtime.sandbox_models import CommandResult
 from axc_agent_engine.tools.tool_output import ToolOutput
-from axc_agent_engine.plugins import model_info_from_providers
 
 
 class TestBasePlugin:
@@ -100,9 +100,11 @@ class TestPluginLoader:
 	def test_registry_duplicate_name_raises(self):
 		class PluginA(BasePlugin):
 			name = "dup"
+			config_schema = config_schema("dup", "重复插件", "重复名称测试插件。", [])
 
 		class PluginB(BasePlugin):
 			name = "dup"
+			config_schema = config_schema("dup", "重复插件", "重复名称测试插件。", [])
 
 		registry = PluginRegistry()
 		registry.register(PluginA)
@@ -112,22 +114,20 @@ class TestPluginLoader:
 	def test_plugin_name_mismatch_raises(self, plugin_ctx):
 		class WrongNamePlugin(BasePlugin):
 			name = "actual_name"
+			config_schema = config_schema("actual_name", "错名插件", "名称不匹配测试插件。", [])
 
 		registry = PluginRegistry()
-		registry.register_factory("configured_name", WrongNamePlugin)
-		config = {"configured_name": {"enabled": True}}
 		with pytest.raises(PluginInitError, match="Plugin name mismatch"):
-			load_plugins(config, plugin_ctx, registry)
+			registry.register_factory("configured_name", WrongNamePlugin)
 
 	def test_factory_returning_different_name_raises(self, plugin_ctx):
 		class DuplicateRuntimePlugin(BasePlugin):
 			name = "dup"
+			config_schema = config_schema("dup", "运行插件", "运行时名称测试插件。", [])
 
 		registry = PluginRegistry()
-		registry.register_factory("a", DuplicateRuntimePlugin)
-		config = {"a": {"enabled": True}}
 		with pytest.raises(PluginInitError, match="Plugin name mismatch"):
-			load_plugins(config, plugin_ctx, registry)
+			registry.register_factory("a", DuplicateRuntimePlugin)
 
 
 class TestPluginManager:
@@ -326,15 +326,14 @@ class TestCostStatisticsPlugin:
 	async def test_records_llm_token_summary(self, plugin_ctx):
 		from axc_agent_engine.plugins.builtin.cost_statistics.plugin import CostStatisticsPlugin
 		p = CostStatisticsPlugin()
-		p.initialize({"model": "gpt-4o-mini"}, plugin_ctx)
+		p.initialize({}, plugin_ctx)
 		ctx = ExecutionContext()
 		await p.post_llm_call(ctx, [], {"usage": {"input_tokens": 1000, "output_tokens": 500}}, 10)
 		summary = ctx.state.metadata["cost_statistics"]
 		assert summary["input_tokens"] == 1000
 		assert summary["output_tokens"] == 500
 		assert summary["total_tokens"] == 1500
-		assert summary["llm_calls"] == 1
-		assert summary["by_model"]["gpt-4o-mini"]["total_tokens"] == 1500
+		assert set(summary) == {"input_tokens", "output_tokens", "total_tokens"}
 
 	@pytest.mark.asyncio
 	async def test_records_usage_without_config(self, plugin_ctx):
@@ -349,37 +348,20 @@ class TestCostStatisticsPlugin:
 		assert ctx.state.metadata["cost_statistics"]["total_tokens"] == 12
 
 	@pytest.mark.asyncio
-	async def test_records_active_runtime_model(self, plugin_ctx):
-		from axc_agent_engine.plugins.builtin.cost_statistics.plugin import CostStatisticsPlugin
-		p = CostStatisticsPlugin()
-		p.initialize({}, plugin_ctx)
-		class Primary:
-			model = "primary"
-		class Fallback:
-			model = "fallback"
-		ctx = ExecutionContext()
-		ctx.runtime.model_info = model_info_from_providers(Primary(), Fallback(), active_llm=Fallback())
-		ctx.state.metadata["model"] = ctx.runtime.model_info.to_dict()
-		await p.post_llm_call(ctx, [], {"usage": {"input_tokens": 4, "output_tokens": 2}}, 10)
-		summary = ctx.state.metadata["cost_statistics"]
-		assert summary["model"] == "fallback"
-		assert summary["by_model"]["fallback"]["total_tokens"] == 6
-
-	@pytest.mark.asyncio
 	async def test_cost_statistics_tool(self, plugin_ctx):
 		from axc_agent_engine.plugins.builtin.cost_statistics.plugin import CostStatisticsPlugin
 		p = CostStatisticsPlugin()
-		p.initialize({"model": "gpt-4o-mini"}, plugin_ctx)
+		p.initialize({}, plugin_ctx)
 		ctx = ExecutionContext()
 		await p.post_llm_call(ctx, [], {"usage": {"input_tokens": 1000, "output_tokens": 100}}, 10)
 		tool = p.get_tools()[0]
 		output = await tool.execute({}, {"exec_ctx": ctx})
 		assert output.content_type == "json"
 		assert output.content["total_tokens"] == 1100
-		assert output.content["llm_calls"] == 1
+		assert set(output.content) == {"input_tokens", "output_tokens", "total_tokens"}
 
 	@pytest.mark.asyncio
-	async def test_records_tool_call_count(self, plugin_ctx):
+	async def test_tool_calls_do_not_affect_token_statistics(self, plugin_ctx):
 		from axc_agent_engine.plugins.builtin.cost_statistics.plugin import CostStatisticsPlugin
 		p = CostStatisticsPlugin()
 		p.initialize({}, plugin_ctx)
@@ -387,9 +369,7 @@ class TestCostStatisticsPlugin:
 		output = ToolOutput.json_output({"ok": True})
 		result = await p.post_tool_call(ctx, "paid_tool", {}, output, 5)
 		assert result is output
-		summary = ctx.state.metadata["cost_statistics"]
-		assert summary["tool_calls"] == 1
-		assert summary["by_tool"]["paid_tool"]["calls"] == 1
+		assert "cost_statistics" not in ctx.state.metadata
 
 
 class TestSafetyPlugin:

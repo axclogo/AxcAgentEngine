@@ -320,12 +320,30 @@ flowchart TD
 
 ```python
 from axc_agent_engine import BasePlugin, ToolDefinition, ToolOutput
+from axc_agent_engine.plugins.config_schema import config_field, config_schema
 
 class MyPlugin(BasePlugin):
     name = "my_plugin"
     display_name = "My Plugin"
     priority = 30
     phase = "core"
+    config_schema = config_schema(
+        "my_plugin",
+        "我的插件",
+        "配置示例。",
+        [
+            config_field(
+                "api_url",
+                "接口地址",
+                "string",
+                "插件调用的后端接口地址。",
+                label_en="API URL",
+                default="http://localhost:5000",
+                required=True,
+            ),
+        ],
+        display_name_en="My Plugin",
+    )
 
     def initialize(self, config: dict, ctx) -> None:
         super().initialize(config, ctx)
@@ -346,7 +364,9 @@ class MyPlugin(BasePlugin):
         return ToolOutput.text(f"Result for {args['query']}")
 ```
 
-插件必须继承 `BasePlugin`，工具必须返回 `ToolDefinition` 实例，`ToolRegistry` 不接受 dict。
+插件必须继承 `BasePlugin`，必须声明 `config_schema`，工具必须返回 `ToolDefinition` 实例，`ToolRegistry` 不接受 dict。
+
+宿主可以通过 `registry.list_plugin_config_schemas()` 或 `registry.get_plugin_config_schema("my_plugin")` 读取已注册插件 schema。schema 用于前端展示、模板生成、默认值展示和可选校验；YAML 中的额外 key 仍会传给 `initialize(config, ctx)`。
 
 ```yaml
 plugins:

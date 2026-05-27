@@ -7,6 +7,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from axc_agent_engine.plugins.config_schema import PluginConfigSchema
+
 if TYPE_CHECKING:
 	from axc_agent_engine.core.context import ExecutionContext
 	from axc_agent_engine.plugins import PluginContext
@@ -36,6 +38,7 @@ class BasePlugin:
 	version: str = "0.1.0"
 	depends_on: list[str] = []  # English: explicit plugin dependency names. 中文：显式依赖声明。
 	fail_closed: bool = False  # English: fail hook errors closed. 中文：hook 失败时中止执行，而不是吞掉错误。
+	config_schema: PluginConfigSchema | dict | None = None
 
 	def initialize(self, config: dict, plugin_ctx: "PluginContext") -> None:
 		"""Engine 级初始化，传入配置和上下文。

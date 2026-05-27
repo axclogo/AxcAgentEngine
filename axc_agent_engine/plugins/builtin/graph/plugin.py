@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, Any
 
 from axc_agent_engine.core.schema import ToolDefinition
 from axc_agent_engine.plugins.base import BasePlugin
+from axc_agent_engine.plugins.builtin.config_schemas import GRAPH_CONFIG_SCHEMA
 from axc_agent_engine.plugins.builtin.graph.audit import GraphAuditRecorder
 from axc_agent_engine.plugins.builtin.graph.config import GraphConfig
 from axc_agent_engine.plugins.builtin.graph.presenter import GraphPresenter
@@ -22,6 +23,7 @@ class GraphPlugin(BasePlugin):
 	display_name = "知识图谱"
 	priority = 20
 	version = "2.0.0"
+	config_schema = GRAPH_CONFIG_SCHEMA
 
 	def initialize(self, config: dict, plugin_ctx: "PluginContext") -> None:
 		super().initialize(config, plugin_ctx)

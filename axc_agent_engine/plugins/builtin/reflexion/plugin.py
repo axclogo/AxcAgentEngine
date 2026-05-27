@@ -4,6 +4,7 @@ import logging
 from typing import TYPE_CHECKING
 
 from axc_agent_engine.plugins.base import BasePlugin
+from axc_agent_engine.plugins.builtin.config_schemas import REFLEXION_CONFIG_SCHEMA
 
 if TYPE_CHECKING:
 	from axc_agent_engine.core.context import ExecutionContext
@@ -21,6 +22,7 @@ class ReflexionPlugin(BasePlugin):
 	display_name = "自我反思"
 	priority = 85
 	version = "1.0.0"
+	config_schema = REFLEXION_CONFIG_SCHEMA
 
 	def initialize(self, config: dict, plugin_ctx: "PluginContext") -> None:
 		self._llm = plugin_ctx.utility_llm or plugin_ctx.default_llm

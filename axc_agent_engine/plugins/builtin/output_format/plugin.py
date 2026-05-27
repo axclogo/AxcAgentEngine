@@ -5,8 +5,9 @@ from typing import Any, TYPE_CHECKING
 
 from axc_agent_engine.core.errors import ErrorCategory, ErrorEnvelope, PluginError
 from axc_agent_engine.core.schema import ToolDefinition
-from axc_agent_engine.plugins.builtin.output_format.support import OutputFormatService
 from axc_agent_engine.plugins.base import BasePlugin
+from axc_agent_engine.plugins.builtin.config_schemas import OUTPUT_FORMAT_CONFIG_SCHEMA
+from axc_agent_engine.plugins.builtin.output_format.support import OutputFormatService
 
 if TYPE_CHECKING:
 	from axc_agent_engine.core.context import ExecutionContext
@@ -26,6 +27,7 @@ class OutputFormatPlugin(BasePlugin):
 	display_name = "输出格式"
 	priority = 95
 	version = "1.0.0"
+	config_schema = OUTPUT_FORMAT_CONFIG_SCHEMA
 
 	def initialize(self, config: dict, plugin_ctx: "PluginContext") -> None:
 		self._type = config.get("type", "")

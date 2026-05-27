@@ -27,6 +27,7 @@ from axc_agent_engine.plugins.builtin.knowledge.support import (
 	SemanticChunker,
 )
 from axc_agent_engine.plugins.base import BasePlugin
+from axc_agent_engine.plugins.builtin.config_schemas import KNOWLEDGE_CONFIG_SCHEMA
 from axc_agent_engine.utils.math_utils import cosine_similarity
 
 if TYPE_CHECKING:
@@ -260,7 +261,6 @@ class KnowledgeEmbeddingIndexer:
 				"source": src,
 				"fingerprint": fingerprint,
 				"chunk_ids": chunk_ids,
-				"embedding_model": plugin._embedding_config.get("model", ""),
 				"index_version": plugin._index_version,
 				"updated_at": time.time(),
 			}
@@ -275,6 +275,7 @@ class KnowledgePlugin(BasePlugin):
 	display_name = "知识库"
 	priority = 20
 	version = "1.0.0"
+	config_schema = KNOWLEDGE_CONFIG_SCHEMA
 
 	def initialize(self, config: dict, plugin_ctx: "PluginContext") -> None:
 		super().initialize(config, plugin_ctx)
@@ -301,7 +302,7 @@ class KnowledgePlugin(BasePlugin):
 		self._workspace = plugin_ctx.workspace or ""
 		self._embedding_ready = False
 		self._embedding_lock: asyncio.Lock | None = None
-		self._index_version = f"{self._embedding_config.get('model', 'none')}:{self._chunk_size}:{self._chunk_overlap}"
+		self._index_version = f"{self._chunk_size}:{self._chunk_overlap}"
 		self._manifests: dict[str, dict] = {}  # English: source_hash maps to manifest. 中文：source_hash 映射到 manifest。
 		# English: BM25 cache. 中文：BM25 缓存。
 		self._doc_terms: list[Counter] = []
@@ -323,7 +324,7 @@ class KnowledgePlugin(BasePlugin):
 		self._reranker = self._build_reranker()
 		self._query_rewriter = self._build_query_rewriter()
 		self._index_store = InMemoryKnowledgeIndexStore(reranker=self._reranker, query_rewriter=self._query_rewriter)
-		if self._embedding_config.get("base_url") and self._embedding_config.get("model"):
+		if self._embedding_config.get("base_url"):
 			self._init_embedding_client()
 		self._load_sources()
 		self._build_bm25_index()
@@ -429,7 +430,6 @@ class KnowledgePlugin(BasePlugin):
 		if endpoint and mode in {"model", "external", "cascade"}:
 			rerankers.append(ExternalReranker(
 				endpoint=endpoint,
-				model=self._rerank_config.get("model", ""),
 				api_key=self._rerank_config.get("api_key", ""),
 				timeout=float(self._rerank_config.get("timeout", 30)),
 			))
@@ -529,14 +529,12 @@ class KnowledgePlugin(BasePlugin):
 			self._embedding_client = {
 				"base_url": self._embedding_config["base_url"].rstrip("/"),
 				"api_key": self._embedding_config.get("api_key", ""),
-				"model": self._embedding_config["model"],
 			}
 			self._index_store.embedding_client = OpenAICompatibleEmbeddingClient(
 				self._embedding_client["base_url"],
-				self._embedding_client["model"],
 				self._embedding_client["api_key"],
 			)
-			logger.info(f"[knowledge] Embedding API configured: {self._embedding_config['model']}")
+			logger.info("[knowledge] Embedding API configured")
 		except Exception as e:
 			logger.warning(f"[knowledge] Embedding client init failed: {e}")
 
@@ -568,7 +566,7 @@ class KnowledgePlugin(BasePlugin):
 						f"{self._embedding_client['base_url']}/embeddings",
 						headers={"Authorization": f"Bearer {self._embedding_client['api_key']}",
 								 "Content-Type": "application/json"},
-						json={"model": self._embedding_client["model"], "input": texts})
+						json={"input": texts})
 					resp.raise_for_status()
 					data = resp.json()
 					return [item["embedding"] for item in data.get("data", [])]

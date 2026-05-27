@@ -3,6 +3,7 @@ import logging
 from typing import Any, TYPE_CHECKING
 
 from axc_agent_engine.plugins.base import BasePlugin
+from axc_agent_engine.plugins.builtin.config_schemas import RISK_GUARD_CONFIG_SCHEMA
 from axc_agent_engine.core.schema import RiskLevel
 from axc_agent_engine.runtime.risk import classify_tool_risk
 
@@ -21,6 +22,7 @@ class RiskGuardPlugin(BasePlugin):
 	priority = 7
 	version = "1.0.0"
 	fail_closed = True
+	config_schema = RISK_GUARD_CONFIG_SCHEMA
 
 	def initialize(self, config: dict, plugin_ctx: "PluginContext" = None) -> None:
 		self._custom_rules = config.get("rules", [])

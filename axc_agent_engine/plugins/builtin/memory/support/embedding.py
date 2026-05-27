@@ -17,16 +17,13 @@ class HashEmbeddingClient:
 
 
 class OpenAICompatibleEmbeddingClient:
-	"""Small OpenAI-compatible /embeddings client used when configured by memory.
+	"""Small embedding HTTP client used when configured by memory.
 中文：此文档说明相关引擎组件的行为。"""
 
-	def __init__(self, base_url: str, model: str, api_key: str = "", timeout: int = 30) -> None:
+	def __init__(self, base_url: str, api_key: str = "", timeout: int = 30) -> None:
 		if not base_url:
 			raise ValueError("base_url is required")
-		if not model:
-			raise ValueError("model is required")
 		self.base_url = base_url.rstrip("/")
-		self.model = model
 		self.api_key = api_key
 		self.timeout = timeout
 
@@ -41,7 +38,7 @@ class OpenAICompatibleEmbeddingClient:
 			response = await client.post(
 				f"{self.base_url}/embeddings",
 				headers=headers,
-				json={"model": self.model, "input": texts},
+				json={"input": texts},
 			)
 			response.raise_for_status()
 			data = response.json()

@@ -50,4 +50,4 @@ try:
 	from importlib.metadata import version as _get_version
 	__version__ = _get_version("axc-agent-engine")
 except Exception:
-	__version__ = "2.0.1"
+	__version__ = "2.1.0"

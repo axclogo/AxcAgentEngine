@@ -4,6 +4,7 @@ from typing import Any, TYPE_CHECKING
 
 from axc_agent_engine.core.schema import ToolDefinition
 from axc_agent_engine.plugins.base import BasePlugin
+from axc_agent_engine.plugins.builtin.config_schemas import BUILTIN_TOOLS_CONFIG_SCHEMA
 from axc_agent_engine.tools.tool_output import ToolOutput
 
 from .registry import ALL_TOOLS as _ALL_TOOLS
@@ -18,6 +19,7 @@ class BuiltinToolsPlugin(BasePlugin):
 	display_name = "内置工具"
 	priority = 30
 	version = "3.0.0"
+	config_schema = BUILTIN_TOOLS_CONFIG_SCHEMA
 
 	def initialize(self, config: dict, plugin_ctx: Any = None) -> None:  # type: ignore[override]
 		self._load: list[str] = config.get("load", [])

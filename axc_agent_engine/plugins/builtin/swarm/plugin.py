@@ -12,6 +12,7 @@ from axc_agent_engine.core.errors import ErrorCategory, ErrorEnvelope
 from axc_agent_engine.core.schema import ToolDefinition
 from axc_agent_engine.plugins.base import BasePlugin
 from axc_agent_engine.plugins.builtin.common import bounded_int, externalize_text
+from axc_agent_engine.plugins.builtin.config_schemas import SWARM_CONFIG_SCHEMA
 
 if TYPE_CHECKING:
 	from axc_agent_engine.plugins import PluginContext
@@ -32,6 +33,7 @@ class SwarmPlugin(BasePlugin):
 	display_name = "并行调度"
 	priority = 40
 	version = "3.1.0"
+	config_schema = SWARM_CONFIG_SCHEMA
 
 	def initialize(self, config: dict, plugin_ctx: "PluginContext") -> None:
 		self._enabled = config.get("enabled", True)

@@ -52,6 +52,51 @@ close()
 同步 hook 必须保持轻量，不能做阻塞 I/O。  
 Synchronous hooks must stay lightweight and must not perform blocking I/O.
 
+## Configuration Schema
+
+插件必须声明 `config_schema`。未声明 schema 的插件不能注册，也不能通过 `Engine.load_agent()` 加载。  
+Plugins must declare `config_schema`. Plugins without a schema cannot be registered or loaded through `Engine.load_agent()`.
+
+```python
+from axc_agent_engine import BasePlugin
+from axc_agent_engine.plugins.config_schema import config_field, config_schema
+
+class MyPlugin(BasePlugin):
+    name = "my_plugin"
+    display_name = "我的插件"
+    config_schema = config_schema(
+        "my_plugin",
+        "我的插件",
+        "配置示例。",
+        [
+            config_field(
+                "api_url",
+                "接口地址",
+                "string",
+                "插件调用的后端接口地址。",
+                label_en="API URL",
+                default="http://localhost:5000",
+                required=True,
+            ),
+        ],
+        display_name_en="My plugin",
+    )
+```
+
+schema 字段支持 `string`、`integer`、`number`、`boolean`、`object` 和 `array`，并可声明默认值、枚举、必填、嵌套对象、数组元素、advanced、deprecated。  
+Schema fields support `string`, `integer`, `number`, `boolean`, `object`, and `array`, plus defaults, enums, required flags, nested objects, array items, advanced, and deprecated metadata.
+
+宿主可以从注册表读取 schema，用于前端详情页、模板生成、默认值展示和可选校验。  
+Hosts can read schemas from the registry for detail pages, template generation, default displays, and optional validation.
+
+```python
+schemas = registry.list_plugin_config_schemas()
+compress_schema = registry.get_plugin_config_schema("compress")
+```
+
+注册表会自动补充通用字段 `enabled` 和 `required`。schema 不改变 `initialize(config, plugin_ctx)` 的执行语义；插件仍会收到 YAML 中的额外自定义 key。  
+The registry automatically adds the shared `enabled` and `required` fields. The schema does not change `initialize(config, plugin_ctx)` execution semantics; plugins still receive extra custom YAML keys.
+
 ## Tool Definitions
 
 工具必须返回 `ToolOutput`。非 `ToolOutput` 返回会被视为契约错误。  

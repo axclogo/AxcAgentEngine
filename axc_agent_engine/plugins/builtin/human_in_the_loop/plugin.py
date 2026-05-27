@@ -4,6 +4,7 @@ import logging
 from typing import TYPE_CHECKING
 
 from axc_agent_engine.plugins.base import BasePlugin
+from axc_agent_engine.plugins.builtin.config_schemas import HUMAN_IN_THE_LOOP_CONFIG_SCHEMA
 from axc_agent_engine.plugins.builtin.risk_guard.plugin import classify_risk
 from axc_agent_engine.core.schema import ToolDefinition
 from axc_agent_engine.tools.tool_output import ToolOutput
@@ -23,6 +24,7 @@ class HumanInTheLoopPlugin(BasePlugin):
 	priority = 8
 	version = "1.0.0"
 	fail_closed = True
+	config_schema = HUMAN_IN_THE_LOOP_CONFIG_SCHEMA
 
 	def initialize(self, config: dict, plugin_ctx: "PluginContext") -> None:
 		self._risk_threshold = config.get("risk_threshold", "dangerous")

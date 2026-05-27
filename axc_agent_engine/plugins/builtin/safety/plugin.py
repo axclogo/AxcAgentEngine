@@ -4,6 +4,7 @@ import logging
 from typing import Any
 
 from axc_agent_engine.plugins.base import BasePlugin
+from axc_agent_engine.plugins.builtin.config_schemas import SAFETY_CONFIG_SCHEMA
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +42,7 @@ class SafetyPlugin(BasePlugin):
 	priority = 10
 	version = "1.0.0"
 	fail_closed = True
+	config_schema = SAFETY_CONFIG_SCHEMA
 
 	def initialize(self, config: dict, plugin_ctx: Any = None) -> None:
 		self._prompt_injection = config.get("prompt_injection", True)

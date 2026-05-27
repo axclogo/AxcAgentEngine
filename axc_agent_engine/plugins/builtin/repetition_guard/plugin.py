@@ -6,6 +6,7 @@ import re
 from typing import TYPE_CHECKING
 
 from axc_agent_engine.plugins.base import BasePlugin
+from axc_agent_engine.plugins.builtin.config_schemas import REPETITION_GUARD_CONFIG_SCHEMA
 
 if TYPE_CHECKING:
 	from axc_agent_engine.core.context import ExecutionContext
@@ -29,6 +30,7 @@ class RepetitionGuardPlugin(BasePlugin):
 	display_name = "重复防护"
 	priority = 6
 	version = "1.0.0"
+	config_schema = REPETITION_GUARD_CONFIG_SCHEMA
 
 	def initialize(self, config: dict, plugin_ctx: "PluginContext") -> None:
 		self._rules = config.get("rules", DEFAULT_RULES)

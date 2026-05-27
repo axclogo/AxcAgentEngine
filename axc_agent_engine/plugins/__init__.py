@@ -13,6 +13,7 @@ if TYPE_CHECKING:
 	from axc_agent_engine.tools.registry import ToolRegistry
 
 from axc_agent_engine.runtime.resources import ResourceRegistry
+from axc_agent_engine.plugins.config_schema import PluginConfigField, PluginConfigSchema
 
 
 @dataclass(frozen=True)
@@ -127,3 +128,14 @@ def agent_info_from_runtime(name: str = "", description: str = "", workspace: st
 		session_id=str(session_id or ""),
 		routing_mode=str(routing_mode or ""),
 	)
+
+
+__all__ = [
+	"AgentInfo",
+	"ModelInfo",
+	"PluginConfigField",
+	"PluginConfigSchema",
+	"PluginContext",
+	"agent_info_from_runtime",
+	"model_info_from_providers",
+]

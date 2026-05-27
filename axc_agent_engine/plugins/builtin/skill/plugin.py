@@ -18,6 +18,7 @@ from axc_agent_engine.plugins.builtin.common import (
 	externalize_text,
 	result_store_from_context,
 )
+from axc_agent_engine.plugins.builtin.config_schemas import SKILL_CONFIG_SCHEMA
 from axc_agent_engine.runtime.sandbox_local import LocalSubprocessExecutor
 from axc_agent_engine.runtime.sandbox_models import CommandSpec
 from axc_agent_engine.runtime.sandbox_workspace import WorkspaceCommandExecutor
@@ -191,6 +192,7 @@ class SkillPlugin(BasePlugin):
 	display_name = "技能系统"
 	priority = 20
 	version = "2.0.0"
+	config_schema = SKILL_CONFIG_SCHEMA
 
 	def initialize(self, config: dict, plugin_ctx: "PluginContext") -> None:
 		self._plugin_ctx = plugin_ctx

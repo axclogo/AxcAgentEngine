@@ -90,7 +90,7 @@ def test_comments_and_docstrings_are_english_first_bilingual():
 def test_hardcoded_model_prompts_are_chinese():
 	offenders: list[str] = []
 	for path in _python_files():
-		text = path.read_text(encoding="utf-8")
+		text = "\n".join(_all_string_literals(ast.parse(path.read_text(encoding="utf-8"))))
 		for phrase in ENGLISH_PROMPT_PHRASES:
 			if phrase in text:
 				offenders.append(f"{path.relative_to(ROOT)} contains {phrase!r}")
@@ -146,6 +146,22 @@ def _string_literals(node: ast.AST) -> list[_Literal]:
 		text = "".join(values)
 		return [_Literal(text, node.lineno)] if text else []
 	return []
+
+
+def _all_string_literals(tree: ast.AST) -> list[str]:
+	values: list[str] = []
+	for node in ast.walk(tree):
+		if isinstance(node, ast.Constant) and isinstance(node.value, str):
+			values.append(node.value)
+		elif isinstance(node, ast.JoinedStr):
+			parts = [
+				part.value
+				for part in node.values
+				if isinstance(part, ast.Constant) and isinstance(part.value, str)
+			]
+			if parts:
+				values.append("".join(parts))
+	return values
 
 
 def _english_only(text: str) -> bool:

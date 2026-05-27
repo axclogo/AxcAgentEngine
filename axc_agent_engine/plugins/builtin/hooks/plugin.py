@@ -5,6 +5,7 @@ import operator
 from typing import Any, TYPE_CHECKING
 
 from axc_agent_engine.plugins.base import BasePlugin
+from axc_agent_engine.plugins.builtin.config_schemas import HOOKS_CONFIG_SCHEMA
 
 if TYPE_CHECKING:
 	from axc_agent_engine.core.context import ExecutionContext
@@ -19,6 +20,7 @@ class HooksPlugin(BasePlugin):
 	display_name = "声明式钩子"
 	priority = 5
 	version = "1.0.0"
+	config_schema = HOOKS_CONFIG_SCHEMA
 
 	def initialize(self, config: dict, plugin_ctx: "PluginContext") -> None:
 		self._rules: list[dict] = config.get("rules", [])

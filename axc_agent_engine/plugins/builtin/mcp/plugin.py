@@ -8,6 +8,7 @@ from typing import Any, TYPE_CHECKING
 
 from axc_agent_engine.plugins.base import BasePlugin
 from axc_agent_engine.plugins.builtin.common import bounded_int, externalize_text, result_store_from_context
+from axc_agent_engine.plugins.builtin.config_schemas import MCP_CONFIG_SCHEMA
 from axc_agent_engine.plugins.builtin.mcp.support import MCPConnection, MCPTool
 from axc_agent_engine.core.schema import ToolDefinition
 
@@ -122,6 +123,7 @@ class MCPPlugin(BasePlugin):
 	display_name = "MCP 工具"
 	priority = 30
 	version = "2.0.0"
+	config_schema = MCP_CONFIG_SCHEMA
 
 	def initialize(self, config: dict, plugin_ctx: "PluginContext") -> None:
 		super().initialize(config, plugin_ctx)

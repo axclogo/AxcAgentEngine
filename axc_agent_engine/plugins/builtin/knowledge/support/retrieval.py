@@ -193,16 +193,13 @@ class HashEmbeddingClient:
 
 
 class OpenAICompatibleEmbeddingClient:
-	"""Small OpenAI-compatible /embeddings client used when configured by plugins.
+	"""Small embedding HTTP client used when configured by plugins.
 中文：此文档说明相关引擎组件的行为。"""
 
-	def __init__(self, base_url: str, model: str, api_key: str = "", timeout: int = 30) -> None:
+	def __init__(self, base_url: str, api_key: str = "", timeout: int = 30) -> None:
 		if not base_url:
 			raise ValueError("base_url is required")
-		if not model:
-			raise ValueError("model is required")
 		self.base_url = base_url.rstrip("/")
-		self.model = model
 		self.api_key = api_key
 		self.timeout = timeout
 
@@ -217,7 +214,7 @@ class OpenAICompatibleEmbeddingClient:
 			response = await client.post(
 				f"{self.base_url}/embeddings",
 				headers=headers,
-				json={"model": self.model, "input": texts},
+				json={"input": texts},
 			)
 			response.raise_for_status()
 			data = response.json()
@@ -250,18 +247,17 @@ class ScoreReranker:
 
 
 class ExternalReranker:
-	"""OpenAI-style HTTP reranker endpoint adapter.
+	"""HTTP reranker endpoint adapter.
 
-	The endpoint is expected to accept `{model, query, documents}` and return
+	The endpoint is expected to accept query and documents, then return
 	either `results: [{index, score}]`, `data: [{index, score}]`, or a score list.
 	
 中文：此文档说明相关引擎组件的行为。"""
 
-	def __init__(self, endpoint: str, model: str = "", api_key: str = "", timeout: float = 30.0) -> None:
+	def __init__(self, endpoint: str, api_key: str = "", timeout: float = 30.0) -> None:
 		if not endpoint:
 			raise ValueError("endpoint is required")
 		self.endpoint = endpoint
-		self.model = model
 		self.api_key = api_key
 		self.timeout = timeout
 
@@ -276,8 +272,6 @@ class ExternalReranker:
 			"query": query,
 			"documents": [result.text for result in results],
 		}
-		if self.model:
-			payload["model"] = self.model
 		async with httpx.AsyncClient(timeout=self.timeout) as client:
 			response = await client.post(self.endpoint, headers=headers, json=payload)
 			response.raise_for_status()
