@@ -171,7 +171,6 @@ class PluginConfig(BaseModel):
 	"""English: This documentation describes the related engine component behavior.
 中文：单个插件配置（动态字段）"""
 	enabled: bool = False
-	required: bool = False
 	model_config = {"extra": "allow"}
 
 

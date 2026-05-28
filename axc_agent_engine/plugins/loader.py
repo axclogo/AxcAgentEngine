@@ -28,19 +28,14 @@ def load_plugins(
 			continue
 		plugin = registry.create(name)
 		if plugin is None:
-			if config.get("required", False):
-				raise PluginInitError(f"Required plugin {name} is enabled but not registered")
-			logger.warning(f"Plugin {name} is enabled but not registered, skipping")
-			continue
+			raise PluginInitError(f"Plugin {name} is enabled but not registered")
 		_validate_plugin_name(name, plugin)
 		try:
 			plugin.initialize(config, ctx)
 			active.append(plugin)
 			logger.info(f"Plugin {name} loaded (priority={plugin.priority})")
 		except Exception as e:
-			if config.get("required", False):
-				raise PluginInitError(f"Required plugin {name} initialization failed: {e}") from e
-			logger.error(f"Plugin {name} initialization failed: {e}")
+			raise PluginInitError(f"Plugin {name} initialization failed: {e}") from e
 	active.sort(key=lambda p: (_phase_order(p.phase), p.priority))
 	_validate_unique_plugin_names(active)
 	_validate_dependencies(active)
@@ -94,10 +89,7 @@ def _validate_dependencies(plugins: list[BasePlugin]) -> None:
 	for plugin in plugins:
 		for dep in plugin.depends_on:
 			if dep not in name_set:
-				if plugin.fail_closed:
-					raise PluginInitError(f"Plugin {plugin.name} (fail_closed) depends on {dep} which is not loaded")
-				logger.warning(f"Plugin {plugin.name} depends on {dep} which is not loaded")
-				continue
+				raise PluginInitError(f"Plugin {plugin.name} depends on {dep} which is not loaded")
 			graph[dep].append(plugin.name)
 			in_degree[plugin.name] += 1
 	queue = [name for name, deg in in_degree.items() if deg == 0]

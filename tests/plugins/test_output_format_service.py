@@ -164,7 +164,7 @@ async def test_output_format_plugin_strict_failure_raises(plugin_ctx):
 
 
 @pytest.mark.asyncio
-async def test_plugin_manager_propagates_fail_closed_complete_error(plugin_ctx):
+async def test_plugin_manager_propagates_complete_error(plugin_ctx):
 	plugin = OutputFormatPlugin()
 	plugin.initialize({
 		"type": "json_schema",

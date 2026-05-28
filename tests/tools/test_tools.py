@@ -11,6 +11,7 @@ from axc_agent_engine.tools.decorator import tool
 from axc_agent_engine.tools.tool_output import ToolOutput
 from axc_agent_engine.core.schema import ToolDefinition
 from axc_agent_engine.core.context import ExecutionContext, ExecutionConfig
+from axc_agent_engine.plugins.base import BasePlugin
 
 
 class TestParseToolCalls:
@@ -308,7 +309,7 @@ class TestOrchestrator:
 
 	@pytest.mark.asyncio
 	async def test_plugin_rejection(self, tool_registry):
-		class RejectPlugin:
+		class RejectPlugin(BasePlugin):
 			name = "reject"
 			async def pre_tool_call(self, ctx, name, args):
 				return False, args

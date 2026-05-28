@@ -84,7 +84,6 @@ class TestPluginConfig:
 	def test_defaults(self):
 		pc = PluginConfig()
 		assert pc.enabled is False
-		assert pc.required is False
 
 	def test_extra_allowed(self):
 		pc = PluginConfig(enabled=True, custom_field="value")

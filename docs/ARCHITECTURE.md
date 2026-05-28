@@ -44,7 +44,7 @@ Agent.chat/stream(message, session_id, llm_options)
           ├─ if tool_calls:
           │   └─ execute_tool_calls (orchestrator)
           │       ├─ partition (read=concurrent, write=serial)
-          │       ├─ pre_tool_call hooks (fail_closed enforced)
+          │       ├─ pre_tool_call hooks (errors propagate)
           │       ├─ capability policy (explicit allowed_capabilities)
           │       ├─ validate_arguments (enum/range/type)
           │       ├─ execute with timeout + retry (read-only only)
@@ -144,7 +144,7 @@ in `runtime.allowed_capabilities` or a custom policy evaluator allows them.
 orchestrator.execute_tool_calls
   → partition_tool_calls (read-only=concurrent batch, write=serial)
   → _execute_single:
-      1. pre_tool_call hooks (fail_closed → reject)
+      1. pre_tool_call hooks (errors propagate; explicit rejection returns false)
       2. resolve ToolDefinition from registry
       3. evaluate capability policy
       4. build ToolContext (workspace + ExecutionServices)

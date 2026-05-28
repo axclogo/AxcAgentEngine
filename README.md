@@ -385,12 +385,11 @@ class MyPlugin(BasePlugin):
                 "api_url",
                 "接口地址",
                 "string",
-                "插件调用的后端接口地址。",
-                label_en="API URL",
-                default="http://localhost:5000",
-                required=True,
-            ),
-        ],
+				"插件调用的后端接口地址。",
+				label_en="API URL",
+				default="http://localhost:5000",
+			),
+		],
         display_name_en="My Plugin",
     )
 

@@ -141,7 +141,6 @@ class TestLLMCallerRetry:
 	async def test_post_llm_call_receives_delta_and_total_usage(self):
 		class UsagePlugin:
 			name = "usage"
-			fail_closed = False
 			def pre_llm_call(self, ctx, messages, tools):
 				return messages, tools
 			async def post_llm_call(self, ctx, messages, response, duration_ms):

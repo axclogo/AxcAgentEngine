@@ -199,14 +199,14 @@ async def test_mcp_large_result_externalize_failure_keeps_output():
     assert result.content == "x" * 200
 
 
-async def test_mcp_required_duplicate_server_does_not_keep_partial_tools():
+async def test_mcp_duplicate_server_does_not_keep_partial_tools():
     ctx = PluginContext()
     ctx.tool_registry = ToolRegistry()
     plugin = MCPPlugin()
     plugin.initialize({
         "servers": [
             {"name": "dup", "command": sys.executable, "args": ["-c", SERVER_CODE]},
-            {"name": "dup", "command": sys.executable, "args": ["-c", SERVER_CODE], "required": True},
+            {"name": "dup", "command": sys.executable, "args": ["-c", SERVER_CODE]},
         ],
     }, ctx)
     try:

@@ -3,7 +3,7 @@ import pytest
 
 from axc_agent_engine.engine import AgentModels, Engine
 from axc_agent_engine.llm.config import LLMConfig
-from axc_agent_engine.core.errors import ConfigError, SchemaError
+from axc_agent_engine.core.errors import ConfigError, PluginInitError, SchemaError
 from axc_agent_engine.agent import Agent
 from axc_agent_engine.plugins import PluginContext
 from axc_agent_engine.plugins.base import BasePlugin
@@ -90,8 +90,8 @@ class TestEngine:
 
 	def test_default_plugin_registry_is_empty(self, mock_llm, agent_yaml):
 		engine = Engine()
-		agent = engine.load_agent_template(agent_yaml).instantiate(models=AgentModels(default=mock_llm))
-		assert agent._plugins == []
+		with pytest.raises(PluginInitError, match="enabled but not registered"):
+			engine.load_agent_template(agent_yaml).instantiate(models=AgentModels(default=mock_llm))
 
 	def test_mock_provider_tool_name_mapping_falls_back_to_default(self, mock_llm, agent_yaml, compress_registry):
 		engine = Engine(plugin_registry=compress_registry)

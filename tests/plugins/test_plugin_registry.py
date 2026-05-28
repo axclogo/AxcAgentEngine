@@ -26,7 +26,8 @@ def test_available_builtin_plugins_are_not_registered_automatically():
 
 def test_load_plugins_uses_only_explicit_registry():
 	registry = PluginRegistry()
-	assert load_plugins({"safety": {"enabled": True}}, PluginContext(), registry) == []
+	with pytest.raises(PluginInitError, match="enabled but not registered"):
+		load_plugins({"safety": {"enabled": True}}, PluginContext(), registry)
 	registry.register(SafetyPlugin)
 	plugins = load_plugins({"safety": {"enabled": True}}, PluginContext(), registry)
 	assert [plugin.name for plugin in plugins] == ["safety"]
@@ -83,9 +84,9 @@ def test_list_plugin_config_schemas_adds_common_fields():
 	registry.register(SafetyPlugin)
 	schemas = registry.list_plugin_config_schemas()
 	field_names = [field.key for field in schemas["safety"].fields]
-	assert field_names[:2] == ["enabled", "required"]
+	assert field_names[0] == "enabled"
+	assert "required" not in field_names
 	assert schemas["safety"].fields[0].default is True
-	assert schemas["safety"].fields[1].default is False
 
 
 def test_get_plugin_config_schema_returns_builtin_schema():

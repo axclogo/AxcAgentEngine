@@ -90,9 +90,7 @@ class MCPDiscoveryService:
 					"latency_ms": int((time.time() - start) * 1000),
 					"error": str(e),
 				}
-				if server_config.get("required", False):
-					raise
-				logger.warning("[mcp] connection to %s failed: %s", name, e)
+				raise
 		plugin._initialized = True
 
 

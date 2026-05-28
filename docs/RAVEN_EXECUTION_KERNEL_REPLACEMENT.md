@@ -730,7 +730,6 @@ runtime:
 plugins:
   raven_tools:
     enabled: true
-    required: true
 ```
 
 8. load agent。

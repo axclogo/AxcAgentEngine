@@ -33,8 +33,7 @@ def test_schema_query_contains_common_fields():
 	fields = {field.key: field for field in schema.fields}
 	assert fields["enabled"].label == "启用"
 	assert fields["enabled"].default is True
-	assert fields["required"].label == "必须加载"
-	assert fields["required"].default is False
+	assert "required" not in fields
 
 
 def test_compress_schema_has_nested_summary_and_windows():
@@ -61,7 +60,7 @@ def test_mcp_schema_has_servers_array_object_fields():
 	assert servers.item_schema is not None
 	server_fields = {field.key: field for field in servers.item_schema.children}
 	assert server_fields["command"].type == "string"
-	assert server_fields["required"].default is False
+	assert "required" not in server_fields
 	assert server_fields["url"].default is None
 
 

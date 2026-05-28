@@ -45,15 +45,13 @@ class TestPluginDependsOn:
 		assert plugins[0].name == "a"
 		assert plugins[1].name == "b"
 
-	def test_validate_dependencies_missing_dep_warns(self, caplog):
-		import logging
+	def test_validate_dependencies_missing_dep_raises(self):
 		class PluginA(BasePlugin):
 			name = "a"
 			depends_on = ["nonexistent"]
 		plugins = [PluginA()]
-		with caplog.at_level(logging.WARNING):
+		with pytest.raises(PluginInitError, match="depends on nonexistent"):
 			_validate_dependencies(plugins)
-		assert "nonexistent" in caplog.text
 
 	def test_validate_dependencies_already_correct_order(self):
 		class PluginA(BasePlugin):
@@ -75,7 +73,7 @@ class TestPluginDependsOn:
 		result = load_plugins({}, ctx, PluginRegistry())
 		assert result == []
 
-	def test_load_plugins_required_not_found(self):
+	def test_load_plugins_enabled_not_found(self):
 		ctx = PluginContext()
 		with pytest.raises(PluginInitError):
-			load_plugins({"nonexistent": {"enabled": True, "required": True}}, ctx, PluginRegistry())
+			load_plugins({"nonexistent": {"enabled": True}}, ctx, PluginRegistry())

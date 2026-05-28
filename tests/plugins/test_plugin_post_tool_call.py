@@ -89,8 +89,8 @@ class TestPluginPostToolCallToolOutput:
 		assert results[0].output.metadata.get("p2") is True
 
 	@pytest.mark.asyncio
-	async def test_plugin_error_does_not_crash(self):
-		"""Plugin post_tool_call error is swallowed (fail_closed=False)."""
+	async def test_plugin_error_raises(self):
+		"""Plugin post_tool_call errors propagate."""
 		class BadPlugin(BasePlugin):
 			name = "bad"
 			async def post_tool_call(self, exec_ctx, tool_name, arguments, result, duration_ms):
@@ -104,16 +104,15 @@ class TestPluginPostToolCallToolOutput:
 			parameters={"type": "object", "properties": {}}))
 		ctx = ExecutionContext(config=ExecutionConfig(), state=ExecutionState())
 		pm = PluginManager([BadPlugin()])
-		results = await execute_tool_calls(
-			[{"name": "t", "arguments": {}, "id": "x"}], reg, pm.plugins, ctx)
-		assert results[0].success
+		with pytest.raises(RuntimeError, match="plugin crash"):
+			await execute_tool_calls(
+				[{"name": "t", "arguments": {}, "id": "x"}], reg, pm.plugins, ctx)
 
 	@pytest.mark.asyncio
-	async def test_fail_closed_plugin_raises(self):
-		"""Plugin with fail_closed=True propagates error."""
+	async def test_plugin_error_raises_without_extra_flag(self):
+		"""Plugin hook errors propagate without opt-in flags."""
 		class StrictPlugin(BasePlugin):
 			name = "strict"
-			fail_closed = True
 			async def post_tool_call(self, exec_ctx, tool_name, arguments, result, duration_ms):
 				raise RuntimeError("strict failure")
 

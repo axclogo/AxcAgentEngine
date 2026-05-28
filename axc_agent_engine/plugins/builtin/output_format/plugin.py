@@ -42,7 +42,6 @@ class OutputFormatPlugin(BasePlugin):
 		self._max_output_chars = int(config.get("max_output_chars", 0) or 0)
 		self._schema_id = str(config.get("schema_id") or config.get("contract_name") or "")
 		self._schema_version = str(config.get("schema_version") or "")
-		self.fail_closed = bool(self._strict)
 		self._plugin_ctx = plugin_ctx
 
 	def inject_context(self, exec_ctx: "ExecutionContext", topic: str = "") -> str:

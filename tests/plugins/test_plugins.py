@@ -67,15 +67,10 @@ class TestPluginLoader:
 		assert len(plugins) == 1
 		assert plugins[0].name == "compress"
 
-	def test_load_required_missing(self, plugin_ctx):
-		config = {"nonexistent": {"enabled": True, "required": True}}
-		with pytest.raises(Exception):
+	def test_load_enabled_missing_raises(self, plugin_ctx):
+		config = {"nonexistent": {"enabled": True}}
+		with pytest.raises(PluginInitError, match="enabled but not registered"):
 			load_plugins(config, plugin_ctx, PluginRegistry())
-
-	def test_load_optional_missing(self, plugin_ctx):
-		config = {"nonexistent": {"enabled": True, "required": False}}
-		plugins = load_plugins(config, plugin_ctx, PluginRegistry())
-		assert len(plugins) == 0
 
 	def test_phase_ordering(self, plugin_ctx):
 		from axc_agent_engine.plugins.builtin.compress.plugin import CompressPlugin
@@ -159,8 +154,8 @@ class TestPluginManager:
 			async def on_execution_start(self, ctx):
 				raise RuntimeError("boom")
 		pm = PluginManager([BadPlugin()])
-		# Should not raise
-		await pm.on_execution_start(ExecutionContext())
+		with pytest.raises(RuntimeError, match="boom"):
+			await pm.on_execution_start(ExecutionContext())
 
 	def test_collect_context(self):
 		class CtxPlugin(BasePlugin):

@@ -9,25 +9,14 @@ logger = logging.getLogger(__name__)
 
 
 class PluginHookRunner:
-	"""Executes plugin hooks with the engine fail-open/fail-closed policy.
+	"""Executes plugin hooks and propagates plugin errors.
 中文：此文档说明相关引擎组件的行为。"""
 
 	async def safe_call_async(self, plugin: BasePlugin, method: str, *args: Any) -> None:
-		try:
-			await getattr(plugin, method)(*args)
-		except Exception as e:
-			if getattr(plugin, "fail_closed", False):
-				raise
-			logger.warning(f"Plugin {plugin.name} {method} error: {e}")
+		await getattr(plugin, method)(*args)
 
 	def safe_call_sync(self, plugin: BasePlugin, method: str, *args: Any) -> Any:
-		try:
-			return getattr(plugin, method)(*args)
-		except Exception as e:
-			if getattr(plugin, "fail_closed", False):
-				raise
-			logger.warning(f"Plugin {plugin.name} {method} error: {e}")
-			return None
+		return getattr(plugin, method)(*args)
 
 	async def apply_pre_tool_call(
 		self,
@@ -37,14 +26,9 @@ class PluginHookRunner:
 		arguments: dict,
 	) -> tuple[bool, dict]:
 		for p in plugins:
-			try:
-				allowed, arguments = await p.pre_tool_call(ctx, tool_name, arguments)
-				if not allowed:
-					return False, arguments
-			except Exception as e:
-				logger.warning(f"Plugin {p.name} pre_tool_call error: {e}")
-				if getattr(p, "fail_closed", False):
-					return False, arguments
+			allowed, arguments = await p.pre_tool_call(ctx, tool_name, arguments)
+			if not allowed:
+				return False, arguments
 		return True, arguments
 
 	async def apply_post_tool_call(
@@ -57,12 +41,7 @@ class PluginHookRunner:
 		duration_ms: int,
 	) -> Any:
 		for p in plugins:
-			try:
-				output = await p.post_tool_call(ctx, tool_name, arguments, output, duration_ms)
-			except Exception as e:
-				logger.warning(f"Plugin {p.name} post_tool_call error: {e}")
-				if getattr(p, "fail_closed", False):
-					raise
+			output = await p.post_tool_call(ctx, tool_name, arguments, output, duration_ms)
 		return output
 
 
@@ -97,12 +76,7 @@ class PluginManager:
 		"""English: This documentation describes the related engine component behavior.
 中文：执行完成后的流水线，插件可修改最终结果。"""
 		for p in self._plugins:
-			try:
-				result = await p.on_execution_complete(ctx, result, trace)
-			except Exception as e:
-				if getattr(p, "fail_closed", False):
-					raise
-				logger.warning(f"Plugin {p.name} on_execution_complete error: {e}")
+			result = await p.on_execution_complete(ctx, result, trace)
 		return result
 
 	async def on_round_end(
@@ -177,12 +151,7 @@ class PluginManager:
 		"""English: This documentation describes the related engine component behavior.
 中文：通知工具调用失败；用于观测类插件补齐失败链路。"""
 		for p in self._plugins:
-			try:
-				await p.on_tool_call_failed(ctx, tool_name, arguments, error, duration_ms)
-			except Exception as e:
-				logger.warning(f"Plugin {p.name} on_tool_call_failed error: {e}")
-				if getattr(p, "fail_closed", False):
-					raise
+			await p.on_tool_call_failed(ctx, tool_name, arguments, error, duration_ms)
 
 	#English: Bilingual note. 中文：── 同步 hooks ──
 
@@ -235,12 +204,12 @@ class PluginManager:
 
 	def _safe_call_sync(self, plugin: BasePlugin, method: str, *args: Any) -> Any:
 		"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-安全调用同步插件方法；fail_closed 插件会继续抛出异常。"""
+	中文：以下为双语文档说明。
+	调用同步插件方法；插件异常直接抛出。"""
 		return self._hook_runner.safe_call_sync(plugin, method, *args)
 
 	async def _safe_call_async(self, plugin: BasePlugin, method: str, *args: Any) -> None:
 		"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-安全调用异步插件方法；fail_closed 插件会继续抛出异常。"""
+	中文：以下为双语文档说明。
+	调用异步插件方法；插件异常直接抛出。"""
 		await self._hook_runner.safe_call_async(plugin, method, *args)

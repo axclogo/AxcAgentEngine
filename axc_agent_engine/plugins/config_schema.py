@@ -180,13 +180,4 @@ def _with_common_fields(fields: list[PluginConfigField]) -> list[PluginConfigFie
 			label_en="Enabled",
 			default=True,
 		))
-	if "required" not in by_key:
-		common.append(config_field(
-			"required",
-			"必须加载",
-			"boolean",
-			"插件加载失败时是否让 Agent 加载失败",
-			label_en="Required",
-			default=False,
-		))
 	return common + list(fields)

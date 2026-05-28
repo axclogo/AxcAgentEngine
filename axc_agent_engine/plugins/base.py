@@ -37,7 +37,6 @@ class BasePlugin:
 	phase: str = "core"  # English: execution ordering phase, "pre" | "core" | "post". 中文：用于排序的执行阶段。
 	version: str = "0.1.0"
 	depends_on: list[str] = []  # English: explicit plugin dependency names. 中文：显式依赖声明。
-	fail_closed: bool = False  # English: fail hook errors closed. 中文：hook 失败时中止执行，而不是吞掉错误。
 	config_schema: PluginConfigSchema | dict | None = None
 
 	def initialize(self, config: dict, plugin_ctx: "PluginContext") -> None:

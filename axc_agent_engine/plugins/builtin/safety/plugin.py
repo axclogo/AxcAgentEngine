@@ -41,7 +41,6 @@ class SafetyPlugin(BasePlugin):
 	display_name = "安全防护"
 	priority = 10
 	version = "1.0.0"
-	fail_closed = True
 	config_schema = SAFETY_CONFIG_SCHEMA
 
 	def initialize(self, config: dict, plugin_ctx: Any = None) -> None:

@@ -23,7 +23,6 @@ class HumanInTheLoopPlugin(BasePlugin):
 	display_name = "人工审批"
 	priority = 8
 	version = "1.0.0"
-	fail_closed = True
 	config_schema = HUMAN_IN_THE_LOOP_CONFIG_SCHEMA
 
 	def initialize(self, config: dict, plugin_ctx: "PluginContext") -> None:

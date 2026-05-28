@@ -21,7 +21,6 @@ class RiskGuardPlugin(BasePlugin):
 	display_name = "风险分级"
 	priority = 7
 	version = "1.0.0"
-	fail_closed = True
 	config_schema = RISK_GUARD_CONFIG_SCHEMA
 
 	def initialize(self, config: dict, plugin_ctx: "PluginContext" = None) -> None:

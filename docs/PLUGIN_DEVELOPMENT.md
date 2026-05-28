@@ -75,12 +75,11 @@ class MyPlugin(BasePlugin):
                 "api_url",
                 "接口地址",
                 "string",
-                "插件调用的后端接口地址。",
-                label_en="API URL",
-                default="http://localhost:5000",
-                required=True,
-            ),
-        ],
+				"插件调用的后端接口地址。",
+				label_en="API URL",
+				default="http://localhost:5000",
+			),
+		],
         display_name_en="My plugin",
     )
 ```
@@ -96,8 +95,8 @@ schemas = registry.list_plugin_config_schemas()
 compress_schema = registry.get_plugin_config_schema("compress")
 ```
 
-注册表会自动补充通用字段 `enabled` 和 `required`。schema 不改变 `initialize(config, plugin_ctx)` 的执行语义；插件仍会收到 YAML 中的额外自定义 key。  
-The registry automatically adds the shared `enabled` and `required` fields. The schema does not change `initialize(config, plugin_ctx)` execution semantics; plugins still receive extra custom YAML keys.
+注册表会自动补充通用字段 `enabled`。启用的插件必须能注册、初始化并满足依赖，否则 Agent 加载直接失败；插件仍会收到 YAML 中的额外自定义 key。
+The registry automatically adds the shared `enabled` field. Enabled plugins must be registered, initialize successfully, and have all dependencies loaded; otherwise Agent loading fails. Plugins still receive extra custom YAML keys.
 
 ## Tool Definitions
 
@@ -110,13 +109,10 @@ Every tool should define `name`, `description`, JSON-schema-like `parameters`, `
 高风险工具必须使用非空 capability，让宿主可以显式允许或拒绝。  
 High-risk tools must use a non-empty capability so hosts can explicitly allow or deny them.
 
-## Fail Open vs Fail Closed
+## Failure Policy
 
-`BasePlugin.fail_closed = False` 表示 hook 失败会记录日志并尽量继续执行。  
-`BasePlugin.fail_closed = False` means hook failures are logged and execution continues where possible.
-
-`fail_closed = True` 表示 hook 失败会中止或拒绝受影响的操作，适合安全和策略插件。  
-`fail_closed = True` means hook failures abort or reject the affected operation. Use it for safety and policy plugins.
+插件加载、依赖和 hook 异常都会直接抛出。不要在插件层吞掉配置错误或致命运行错误；需要可选能力时，应让宿主显式禁用插件或不配置对应能力。
+Plugin load, dependency, and hook errors are propagated directly. Do not swallow configuration errors or fatal runtime errors in plugin infrastructure; hosts should explicitly disable optional plugins or omit optional capabilities.
 
 ## State
 
