@@ -46,6 +46,28 @@ def test_allowed_and_denied_skills_control_loaded_surface(tmp_path):
 	assert sorted(plugin._skills) == ["demo"]
 
 
+def test_skill_plugin_loads_mounted_catalog_resource():
+	from axc_agent_engine.plugins import PluginContext
+	from axc_agent_engine.plugins.builtin.skill.plugin import SkillPlugin
+
+	catalog = {
+		"skills": [
+			{
+				"name": "mounted",
+				"description": "Mounted skill",
+				"when_to_use": "runtime",
+				"content": "Use the mounted catalog.",
+				"trigger_keywords": ["runtime"],
+			}
+		]
+	}
+	plugin = SkillPlugin()
+	plugin.initialize({}, PluginContext(resources={"skill.catalog": catalog}))
+
+	assert sorted(plugin._skills) == ["mounted"]
+	assert plugin._skills["mounted"]["source"] == "skill.catalog"
+
+
 @pytest.mark.asyncio
 async def test_run_skill_script_can_be_disabled(tmp_path):
 	from axc_agent_engine.plugins.builtin.skill.plugin import SkillPlugin

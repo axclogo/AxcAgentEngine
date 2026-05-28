@@ -197,6 +197,7 @@ class SkillPlugin(BasePlugin):
 	def initialize(self, config: dict, plugin_ctx: "PluginContext") -> None:
 		self._plugin_ctx = plugin_ctx
 		self._paths = [str(path) for path in config.get("paths", [])]
+		self._catalog_resource = str(config.get("catalog") or "skill.catalog")
 		self._allowed_skills = {str(name) for name in config.get("allowed_skills", [])}
 		self._denied_skills = {str(name) for name in config.get("denied_skills", [])}
 		self._allow_scripts = bool(config.get("allow_scripts", True))
@@ -304,6 +305,7 @@ class SkillPlugin(BasePlugin):
 中文：扫描技能目录"""
 		self._skills.clear()
 		self._load_errors.clear()
+		self._load_catalog_skills()
 		for path in self._paths:
 			real_path = os.path.realpath(path)
 			if not os.path.isdir(real_path):
@@ -319,6 +321,64 @@ class SkillPlugin(BasePlugin):
 					continue
 				self._load_skill_dir(skill_dir, skill_md)
 		logger.info(f"[skill] Loaded {len(self._skills)} skills")
+
+	def _load_catalog_skills(self) -> None:
+		if not self._plugin_ctx or not self._catalog_resource:
+			return
+		catalog = self._plugin_ctx.resources.get(self._catalog_resource)
+		if not catalog:
+			return
+		try:
+			raw_skills = _catalog_skills(catalog)
+			for raw_skill in raw_skills:
+				self._load_catalog_skill(raw_skill)
+		except Exception as e:
+			self._load_errors.append({"resource": self._catalog_resource, "error": str(e)})
+			logger.warning("[skill] Failed to load skill catalog %s: %s", self._catalog_resource, e)
+
+	def _load_catalog_skill(self, raw_skill: Any) -> None:
+		if not isinstance(raw_skill, dict):
+			self._load_errors.append({"resource": self._catalog_resource, "error": "skill item is not an object"})
+			return
+		name = str(raw_skill.get("name", "")).strip()
+		if not name:
+			self._load_errors.append({"resource": self._catalog_resource, "error": "empty skill name"})
+			return
+		if self._allowed_skills and name not in self._allowed_skills:
+			return
+		if name in self._denied_skills:
+			return
+		if name in self._skills:
+			if self._duplicate_policy == "error":
+				self._load_errors.append({"resource": self._catalog_resource, "skill": name, "error": "duplicate skill"})
+				return
+			if self._duplicate_policy == "skip":
+				self._load_errors.append({"resource": self._catalog_resource, "skill": name, "error": "duplicate skill skipped"})
+				return
+		trigger_keywords = raw_skill.get("trigger_keywords", [])
+		if isinstance(trigger_keywords, str):
+			trigger_keywords = [trigger_keywords]
+		elif not isinstance(trigger_keywords, list):
+			trigger_keywords = []
+		content = str(raw_skill.get("content") or raw_skill.get("body") or "")
+		scripts_path = str(raw_skill.get("scripts_path") or "")
+		self._skills[name] = {
+			"name": name,
+			"description": str(raw_skill.get("description", "")),
+			"when_to_use": str(raw_skill.get("when_to_use", "")),
+			"trigger_keywords": [str(item) for item in trigger_keywords],
+			"content": content,
+			"content_length": len(content),
+			"content_hash": str(raw_skill.get("content_hash") or hashlib.sha256(content.encode("utf-8")).hexdigest()),
+			"version": str(raw_skill.get("version", "")),
+			"author": str(raw_skill.get("author", "")),
+			"source": str(raw_skill.get("source") or self._catalog_resource),
+			"trusted": bool(raw_skill.get("trusted", False)),
+			"skill_dir": str(raw_skill.get("skill_dir", "")),
+			"skill_md": str(raw_skill.get("skill_md", "")),
+			"scripts_path": scripts_path if scripts_path and os.path.isdir(scripts_path) else None,
+			"scripts": _list_scripts(scripts_path, self._allowed_extensions) if scripts_path and os.path.isdir(scripts_path) else [],
+		}
 
 	def _load_skill_dir(self, skill_dir: str, skill_md: str) -> None:
 		"""English: This documentation describes the related engine component behavior.
@@ -699,6 +759,23 @@ def _skill_public_metadata(skill: dict[str, Any]) -> dict[str, Any]:
 		"has_scripts": bool(skill.get("scripts_path")),
 		"scripts": skill.get("scripts", []),
 	}
+
+
+def _catalog_skills(catalog: Any) -> list[Any]:
+	if isinstance(catalog, dict):
+		skills = catalog.get("skills", catalog)
+		return list(skills.values()) if isinstance(skills, dict) else list(skills or [])
+	if isinstance(catalog, (list, tuple)):
+		return list(catalog)
+	list_skills = getattr(catalog, "list_skills", None)
+	if callable(list_skills):
+		return list(list_skills())
+	skills = getattr(catalog, "skills", None)
+	if isinstance(skills, dict):
+		return list(skills.values())
+	if isinstance(skills, (list, tuple)):
+		return list(skills)
+	return []
 
 
 def _list_scripts(scripts_path: str, allowed_extensions: set[str]) -> list[dict[str, Any]]:

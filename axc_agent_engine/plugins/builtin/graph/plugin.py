@@ -28,7 +28,9 @@ class GraphPlugin(BasePlugin):
 	def initialize(self, config: dict, plugin_ctx: "PluginContext") -> None:
 		super().initialize(config, plugin_ctx)
 		self._config = GraphConfig.from_dict(config)
-		self._service = GraphService(self._config, config.get("store"))
+		store_resource = str(config.get("store") or "graph.store")
+		store = plugin_ctx.resources.get(store_resource) if store_resource else None
+		self._service = GraphService(self._config, store)
 		self._presenter = GraphPresenter(self._config, plugin_ctx)
 		self._audit_recorder = GraphAuditRecorder(self._config)
 		self._handlers = GraphToolHandlers(self._service, self._presenter, self._audit_recorder)

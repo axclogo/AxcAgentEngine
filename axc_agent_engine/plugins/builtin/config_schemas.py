@@ -361,7 +361,7 @@ GRAPH_CONFIG_SCHEMA = config_schema(
 	[
 		array_field("sources", "图谱源", "图谱数据源路径列表。", _string_item(), label_en="Sources"),
 		config_field("namespace", "命名空间", "string", "图谱命名空间。", label_en="Namespace", default="default"),
-		config_field("store", "存储", "object", "图谱存储对象；由宿主或插件运行时决定。", label_en="Store", default=None, advanced=True),
+		config_field("store", "存储资源", "string", "图谱存储资源名。", label_en="Store resource", default="graph.store", advanced=True),
 		config_field("allow_writes", "允许写入", "boolean", "是否允许 upsert 实体和关系。", label_en="Allow writes", default=True),
 		config_field("allow_deletes", "允许删除", "boolean", "是否允许删除实体和关系。", label_en="Allow deletes", default=True),
 		array_field("allowed_entity_types", "允许实体类型", "允许写入的实体类型列表。", _string_item(), label_en="Allowed entity types"),
@@ -389,6 +389,7 @@ SKILL_CONFIG_SCHEMA = config_schema(
 	"技能目录加载、过滤和受控脚本执行配置。",
 	[
 		array_field("paths", "技能路径", "技能目录路径列表。", _string_item(), label_en="Paths"),
+		config_field("catalog", "技能目录资源", "string", "宿主注入的技能目录资源名。", label_en="Catalog resource", default="skill.catalog", advanced=True),
 		array_field("allowed_skills", "允许技能", "允许加载的技能名列表；为空表示不限制。", _string_item(), label_en="Allowed skills"),
 		array_field("denied_skills", "拒绝技能", "禁止加载的技能名列表。", _string_item(), label_en="Denied skills"),
 		config_field("allow_scripts", "允许脚本", "boolean", "是否允许运行技能脚本。", label_en="Allow scripts", default=True),

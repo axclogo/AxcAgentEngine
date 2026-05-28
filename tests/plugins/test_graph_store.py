@@ -62,6 +62,17 @@ async def test_graph_plugin_exposes_write_tools():
 	assert result.content["results"]
 
 
+def test_graph_plugin_uses_mounted_store_resource():
+	store = InMemoryGraphStore()
+	store.upsert_entity("Mounted", "concept")
+	plugin = GraphPlugin()
+	plugin.initialize({}, PluginContext(resources={"graph.store": store}))
+
+	assert plugin._store is store
+	result = plugin._store.search("Mounted")
+	assert result and result[0].entity["name"] == "Mounted"
+
+
 @pytest.mark.asyncio
 async def test_graph_plugin_can_disable_writes_and_deletes():
 	plugin = GraphPlugin()

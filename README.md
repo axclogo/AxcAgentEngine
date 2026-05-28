@@ -181,7 +181,8 @@ Notes:
 `AgentModels` accepts model provider objects. `OpenAIClient(LLMConfig(...))` is the built-in OpenAI-compatible provider; custom providers implement `LLMProvider` (`model`, `tool_name_mapping`, `chat`, `stream`, `ask`, `close`).
 
 ```python
-from axc_agent_engine import ConcurrencyConfig, Engine, LLMConfig
+from axc_agent_engine import AgentModels, ConcurrencyConfig, Engine, LLMConfig
+from axc_agent_engine.llm.client import OpenAIClient
 from axc_agent_engine.tools.name_mapping import ToolNameMappingConfig
 
 main_model_config = LLMConfig(
@@ -207,6 +208,37 @@ agent = engine.load_agent_template("./agents/my_agent.yaml").instantiate(
 ```
 
 Tool-name mapping is the provider's job. Internal tool names are encoded to model-safe function names before the LLM call and decoded before hooks and tool execution.
+
+## Runtime Binding
+
+Agent YAML describes stable behavior. Per-run objects are bound in code when the template is instantiated:
+
+```python
+agent = template.instantiate(
+    models=AgentModels(
+        default=gpt5_provider,
+        utility=fast_provider,
+        fallback=backup_provider,
+    ),
+    mounts={
+        "knowledge_vector": tenant_kb_vector_store,
+        "graph.store": tenant_graph_store,
+        "skill.catalog": tenant_skill_catalog,
+    },
+    metadata={
+        "tenant_id": "t_001",
+    },
+    overrides={
+        "plugins.knowledge.namespace": "tenant:t_001",
+        "plugins.skill.timeout": 30,
+    },
+)
+```
+
+- `models` binds provider objects for this Agent instance; the Engine does not own model configuration.
+- `mounts` injects host-owned resources for this instantiation and overrides Engine-level resources with the same name.
+- `metadata` attaches instance metadata; request metadata can still override it inside a single chat/stream call.
+- `overrides` patches validated Agent YAML fields before plugins are initialized.
 
 ## API
 

@@ -179,10 +179,11 @@ plugins:
 
 ## Provider 配置
 
-`Engine` 接收 `LLMConfig`，也接收实现完整 `LLMProvider` 协议的对象（`model`、`tool_name_mapping`、`chat`、`stream`、`ask`、`close`）。
+`AgentModels` 接收模型 provider 对象。`OpenAIClient(LLMConfig(...))` 是内置的 OpenAI 兼容 provider；自定义 provider 需要实现 `LLMProvider` 协议（`model`、`tool_name_mapping`、`chat`、`stream`、`ask`、`close`）。
 
 ```python
-from axc_agent_engine import ConcurrencyConfig, Engine, LLMConfig
+from axc_agent_engine import AgentModels, ConcurrencyConfig, Engine, LLMConfig
+from axc_agent_engine.llm.client import OpenAIClient
 from axc_agent_engine.tools.name_mapping import ToolNameMappingConfig
 
 main_model_config = LLMConfig(
@@ -208,6 +209,37 @@ agent = engine.load_agent_template("./agents/my_agent.yaml").instantiate(
 ```
 
 工具名映射属于 provider 职责。内部工具名在 LLM 调用前编码为模型安全 function name，在 hooks/工具执行前解码回来。
+
+## 运行时绑定
+
+Agent YAML 描述稳定行为。每次 Agent 运行需要绑定的对象，在模板实例化时由代码传入：
+
+```python
+agent = template.instantiate(
+    models=AgentModels(
+        default=gpt5_provider,
+        utility=fast_provider,
+        fallback=backup_provider,
+    ),
+    mounts={
+        "knowledge_vector": tenant_kb_vector_store,
+        "graph.store": tenant_graph_store,
+        "skill.catalog": tenant_skill_catalog,
+    },
+    metadata={
+        "tenant_id": "t_001",
+    },
+    overrides={
+        "plugins.knowledge.namespace": "tenant:t_001",
+        "plugins.skill.timeout": 30,
+    },
+)
+```
+
+- `models` 绑定这个 Agent 实例使用的模型 provider；Engine 不再持有模型配置。
+- `mounts` 注入宿主持有的运行时资源；同名资源会覆盖 Engine 级资源。
+- `metadata` 注入实例元数据；单次 chat/stream 请求的 metadata 仍可覆盖它。
+- `overrides` 在插件初始化前 patch 并重新校验 Agent YAML 字段。
 
 ## API
 
