@@ -13,10 +13,6 @@ from axc_agent_engine.plugins.builtin.memory.support.service import (
 	MemoryStore,
 	SimilarityDeduplicator,
 )
-from axc_agent_engine.plugins.builtin.memory.support.embedding import (
-	HashEmbeddingClient,
-	OpenAICompatibleEmbeddingClient,
-)
 from axc_agent_engine.plugins.builtin.memory.support.retrieval import (
 	BM25Index,
 	MemoryDocument,
@@ -39,7 +35,6 @@ __all__ = [
 	"GraphMemory",
 	"GraphMemoryStore",
 	"GraphRelation",
-	"HashEmbeddingClient",
 	"Deduplicator",
 	"FactExtractor",
 	"InMemoryMemoryStore",
@@ -51,7 +46,6 @@ __all__ = [
 	"MemoryRetriever",
 	"MemoryService",
 	"MemoryStore",
-	"OpenAICompatibleEmbeddingClient",
 	"RetrievalResult",
 	"SimilarityDeduplicator",
 	"rrf_merge",

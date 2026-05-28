@@ -7,7 +7,6 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, TYPE_CHECKING
 
 from axc_agent_engine.core.schema import ToolDefinition
-from axc_agent_engine.plugins.builtin.memory.support.embedding import HashEmbeddingClient, OpenAICompatibleEmbeddingClient
 from axc_agent_engine.plugins.builtin.memory.support.service import MemoryLayer, MemoryService, char_similarity, parse_facts_response
 from axc_agent_engine.plugins.base import BasePlugin
 from axc_agent_engine.plugins.builtin.common import bounded_int
@@ -109,105 +108,6 @@ class MemoryRepository:
 			item = by_id.get(mem_id)
 			if item:
 				await self.save_memory(scope, item)
-
-
-class MemoryVectorIndex:
-	def __init__(self, vector_store: Any, embedding_client: Any) -> None:
-		self.vector_store = vector_store
-		self.embedding_client = embedding_client
-
-	async def embed_texts(self, texts: list[str]) -> list[list[float]]:
-		if not self.embedding_client or not texts:
-			return []
-		try:
-			vectors = await self.embedding_client.embed(texts)
-		except Exception as e:
-			logger.warning(f"[memory] embedding failed: {e}")
-			return []
-		return vectors if len(vectors) == len(texts) else []
-
-	async def upsert(self, mem: dict, scope: str, service: MemoryService) -> dict:
-		if not self.vector_store or not self.embedding_client:
-			return mem
-		vector_id = str(mem.get("metadata", {}).get("vector_id") or "")
-		if vector_id:
-			try:
-				await self.vector_store.delete([vector_id])
-			except Exception as e:
-				logger.warning(f"[memory] vector delete failed before upsert: {e}")
-		vectors = await self.embed_texts([str(mem.get("content", ""))])
-		if not vectors:
-			return mem
-		metadata = {
-			"scope": scope,
-			"memory_id": mem["id"],
-			"layer": mem.get("layer", ""),
-			"fact_type": mem.get("fact_type", ""),
-			"source": mem.get("source", ""),
-		}
-		try:
-			ids = await self.vector_store.add([mem["content"]], vectors, [metadata])
-		except Exception as e:
-			logger.warning(f"[memory] vector upsert failed: {e}")
-			return mem
-		if ids:
-			mem.setdefault("metadata", {})["vector_id"] = ids[0]
-			item = service.store.get_item(mem["id"])
-			if item:
-				item.metadata["vector_id"] = ids[0]
-		return mem
-
-	async def delete(self, ids: list[str], memories: list[dict], repository: MemoryRepository,
-					 scope: str) -> None:
-		if not self.vector_store or not ids:
-			return
-		vector_ids: list[str] = []
-		by_id = {item.get("id"): item for item in memories}
-		for mem_id in ids:
-			item = by_id.get(mem_id) or await repository.get_memory(scope, mem_id)
-			vector_id = str((item or {}).get("metadata", {}).get("vector_id") or "")
-			if vector_id:
-				vector_ids.append(vector_id)
-		if not vector_ids:
-			return
-		try:
-			await self.vector_store.delete(vector_ids)
-		except Exception as e:
-			logger.warning(f"[memory] vector delete failed: {e}")
-
-	async def retrieve(self, query: str, layer: str | None, top_k: int, service: MemoryService,
-					   scope: str, lexical: list[Any]) -> list[Any]:
-		if not query or not self.vector_store or not self.embedding_client:
-			return lexical
-		vectors = await self.embed_texts([query])
-		if not vectors:
-			return lexical
-		vector_items = []
-		try:
-			raw_results = await self.vector_store.search(vectors[0], top_k=max(top_k * 3, top_k))
-		except Exception as e:
-			logger.warning(f"[memory] vector search failed: {e}")
-			return lexical
-		for row in raw_results:
-			metadata = dict(row.get("metadata") or {})
-			if metadata.get("scope") and metadata.get("scope") != scope:
-				continue
-			if layer and metadata.get("layer") != str(layer):
-				continue
-			mem_id = str(metadata.get("memory_id") or row.get("id") or "")
-			item = service.store.get_item(mem_id)
-			if item:
-				vector_items.append(service._touch(item))
-		merged = []
-		seen: set[str] = set()
-		for item in [*vector_items, *lexical]:
-			if item.id in seen:
-				continue
-			merged.append(item)
-			seen.add(item.id)
-			if len(merged) >= top_k:
-				break
-		return merged
 
 
 class MemoryExtractionService:
@@ -419,11 +319,6 @@ class MemoryPlugin(BasePlugin):
 		self._plugin_ctx = plugin_ctx
 		self._store = plugin_ctx.kv_store
 		self._repository = MemoryRepository(self._store, self._scope_resolver)
-		self._vector_resource = _resource_name(config.get("vector_store"), "memory_vector")
-		self._vector_store = plugin_ctx.resources.get(self._vector_resource) if self._vector_resource else None
-		self._embedding_config = dict(config.get("embedding") or {})
-		self._embedding_client = self._init_embedding_client()
-		self._vector_index = MemoryVectorIndex(self._vector_store, self._embedding_client)
 		self._extraction_service = MemoryExtractionService(self._min_content_length)
 		self._tool_handlers = MemoryToolHandlers(self)
 		self._memories: list[dict] = []
@@ -685,8 +580,6 @@ class MemoryPlugin(BasePlugin):
 		self._sync_memories_view()
 		removed_ids = self._enforce_capacity()
 		evicted = mem["id"] in set(removed_ids)
-		if not evicted:
-			mem = await self._upsert_vector(mem, exec_ctx)
 		if self._store:
 			if removed_ids:
 				await self._delete_memories(removed_ids, exec_ctx)
@@ -740,7 +633,6 @@ class MemoryPlugin(BasePlugin):
 	async def _delete_memories(self, ids: list[str], exec_ctx: "ExecutionContext | None" = None) -> None:
 		"""English: This documentation describes the related engine component behavior.
 中文：批量删除记忆"""
-		await self._delete_memory_vectors(ids, exec_ctx)
 		await self._repository.delete_memories(self._scope_resolver.scope_id(exec_ctx), ids)
 
 	async def _tool_memory_add(self, args: dict, context: dict):
@@ -808,35 +700,9 @@ class MemoryPlugin(BasePlugin):
 		self._sync_memories_view()
 		return list(remove_ids)
 
-	def _init_embedding_client(self) -> Any:
-		if not self._vector_store:
-			return None
-		mode = str(self._embedding_config.get("mode", "")).lower()
-		if self._embedding_config.get("base_url"):
-			return OpenAICompatibleEmbeddingClient(
-				str(self._embedding_config["base_url"]),
-				str(self._embedding_config.get("api_key", "")),
-				int(self._embedding_config.get("timeout", 30)),
-			)
-		if mode in ("", "hash"):
-			return HashEmbeddingClient(int(self._embedding_config.get("dimensions", 256)))
-		return None
-
-	async def _embed_texts(self, texts: list[str]) -> list[list[float]]:
-		return await self._vector_index.embed_texts(texts)
-
-	async def _upsert_vector(self, mem: dict, exec_ctx: "ExecutionContext | None" = None) -> dict:
-		mem = await self._vector_index.upsert(mem, self._scope_resolver.scope_id(exec_ctx), self._service)
-		self._sync_memories_view()
-		return mem
-
-	async def _delete_memory_vectors(self, ids: list[str], exec_ctx: "ExecutionContext | None" = None) -> None:
-		await self._vector_index.delete(ids, self._memories, self._repository, self._scope_resolver.scope_id(exec_ctx))
-
 	async def _retrieve_memories(self, query: str, layer: str | None, top_k: int,
 								 exec_ctx: "ExecutionContext | None" = None):
-		lexical = self._service.retrieve(query, layer=layer, top_k=top_k)
-		merged = await self._vector_index.retrieve(query, layer, top_k, self._service, self._scope_resolver.scope_id(exec_ctx), lexical)
+		merged = self._service.retrieve(query, layer=layer, top_k=top_k)
 		self._sync_memories_view()
 		return merged
 

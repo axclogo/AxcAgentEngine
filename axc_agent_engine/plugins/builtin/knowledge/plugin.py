@@ -1,34 +1,40 @@
-"""Knowledge 插件 — 文档切块、向量化和混合检索（BM25 索引缓存）。"""
-import asyncio
-import hashlib
+"""Knowledge plugin with host-injected retrieval resources.
+中文：知识库插件使用宿主注入资源执行混合检索。
+
+Official plugin boundary:
+- retrieval strategy lives here;
+- external clients, keys, endpoints, and stores are injected by the host;
+- resource failures are surfaced as tool errors.
+"""
+from __future__ import annotations
+
+import inspect
 import logging
 import math
-import os
 import re
-import time
 from collections import Counter
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from axc_agent_engine.core.schema import ToolDefinition
+from axc_agent_engine.plugins.base import BasePlugin
+from axc_agent_engine.plugins.builtin.config_schemas import KNOWLEDGE_CONFIG_SCHEMA
 from axc_agent_engine.plugins.builtin.knowledge.support import (
-	CascadeReranker,
-	ExternalReranker,
 	HybridRetriever,
 	InMemoryKnowledgeIndexStore,
-	KnowledgeFilter,
 	KnowledgeDocument,
+	KnowledgeFilter,
 	KnowledgeSearchRequest,
+	KnowledgeSearchResponse,
 	LLMQueryRewriter,
 	LLMReranker,
 	LocalFileIngestionPipeline,
 	NoopQueryRewriter,
-	OpenAICompatibleEmbeddingClient,
+	RetrievalResult,
+	RetrievalTrace,
 	ScoreReranker,
 	SemanticChunker,
+	rrf_merge,
 )
-from axc_agent_engine.plugins.base import BasePlugin
-from axc_agent_engine.plugins.builtin.config_schemas import KNOWLEDGE_CONFIG_SCHEMA
-from axc_agent_engine.utils.math_utils import cosine_similarity
 
 if TYPE_CHECKING:
 	from axc_agent_engine.core.context import ExecutionContext
@@ -36,304 +42,64 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-
-class KnowledgeResultFormatter:
-	def merge_results(self, chunks: list[dict], bm25_indices: list[int], vector_items: list[dict],
-					  top_k: int, query: str, min_score: float = 0.0) -> list[dict]:
-		k = 60
-		scores: dict[int, float] = {}
-		for rank, idx in enumerate(bm25_indices):
-			scores[idx] = scores.get(idx, 0) + 1.0 / (k + rank + 1)
-		for rank, item in enumerate(vector_items):
-			idx = item["chunk_id"]
-			if isinstance(idx, int):
-				scores[idx] = scores.get(idx, 0) + 1.0 / (k + rank + 1)
-		sorted_items = sorted(scores.items(), key=lambda x: x[1], reverse=True)
-		results: list[dict] = []
-		for idx, score in sorted_items[:top_k]:
-			if idx < len(chunks):
-				chunk = chunks[idx]
-				item = {
-					"text": chunk["text"],
-					"source": chunk.get("source", ""),
-					"chunk_id": idx,
-					"score": round(score, 4),
-					"retrieval": "hybrid",
-					"metadata": dict(chunk.get("metadata", {})),
-					"citation": self.citation_for_chunk(chunk, idx),
-					"highlights": self.highlights(query, chunk["text"]),
-				}
-				if item["score"] >= min_score:
-					results.append(item)
-		return results
-
-	def format_bm25_results(self, chunks: list[dict], indices: list[int], query: str = "") -> list[dict]:
-		results: list[dict] = []
-		for idx in indices:
-			if idx < len(chunks):
-				chunk = chunks[idx]
-				results.append({
-					"text": chunk["text"],
-					"source": chunk.get("source", ""),
-					"chunk_id": idx,
-					"score": round(1.0 / (len(results) + 1), 4),
-					"retrieval": "bm25",
-					"metadata": dict(chunk.get("metadata", {})),
-					"citation": self.citation_for_chunk(chunk, idx),
-					"highlights": self.highlights(query, chunk["text"]) if query else [],
-				})
-		return results
-
-	def citation_for_chunk(self, chunk: dict, chunk_id: int) -> dict:
-		metadata = dict(chunk.get("metadata", {}))
-		citation = {
-			"source": chunk.get("source", metadata.get("source", "")),
-			"chunk_id": metadata.get("chunk_id", chunk_id),
-		}
-		for key in ("document_id", "title", "url", "page", "start_line", "end_line", "heading_path", "version", "updated_at"):
-			if key in metadata and metadata[key] not in ("", None):
-				citation[key] = metadata[key]
-		return citation
-
-	def highlights(self, query: str, text: str, max_items: int = 3, window: int = 80) -> list[str]:
-		terms = [term for term in _tokenize(query) if len(term) > 1]
-		if not terms:
-			return []
-		lower = text.lower()
-		highlights: list[str] = []
-		for term in terms:
-			idx = lower.find(term.lower())
-			if idx < 0:
-				continue
-			start = max(0, idx - window // 2)
-			end = min(len(text), idx + len(term) + window // 2)
-			snippet = text[start:end].strip()
-			if snippet and snippet not in highlights:
-				highlights.append(snippet)
-			if len(highlights) >= max_items:
-				break
-		return highlights
-
-	def trace_dict(self, request: KnowledgeSearchRequest, candidate_count: int, returned_count: int, reranked: bool) -> dict | None:
-		if not request.include_trace:
-			return None
-		return {
-			"query": request.query,
-			"rewritten_queries": [request.query],
-			"candidate_count": candidate_count,
-			"returned_count": returned_count,
-			"filtered": request.filters != KnowledgeFilter(),
-			"reranked": reranked,
-		}
-
-
-class KnowledgeSearchService:
-	def __init__(self, plugin: "KnowledgePlugin", formatter: KnowledgeResultFormatter) -> None:
-		self.plugin = plugin
-		self.formatter = formatter
-
-	def hybrid_search(self, query: str, top_k: int = 5, filters: KnowledgeFilter | dict | None = None) -> list[dict]:
-		plugin = self.plugin
-		if not plugin._chunks:
-			return []
-		return self.formatter.format_bm25_results(plugin._chunks, plugin._bm25_search(query, top_k=top_k, filters=filters), query)
-
-	async def hybrid_search_async(
-		self,
-		query: str,
-		top_k: int = 5,
-		candidate_k: int | None = None,
-		filters: KnowledgeFilter | dict | None = None,
-		min_score: float = 0.0,
-		include_trace: bool | None = None,
-	) -> list[dict]:
-		return (await self.hybrid_search_payload(
-			query,
-			top_k=top_k,
-			candidate_k=candidate_k,
-			filters=filters,
-			min_score=min_score,
-			include_trace=include_trace,
-		)).get("results", [])
-
-	async def hybrid_search_payload(
-		self,
-		query: str,
-		top_k: int = 5,
-		candidate_k: int | None = None,
-		filters: KnowledgeFilter | dict | None = None,
-		min_score: float = 0.0,
-		include_trace: bool | None = None,
-	) -> dict:
-		plugin = self.plugin
-		if not plugin._chunks:
-			return {"results": [], "trace": None}
-		include_trace = plugin._include_trace_default if include_trace is None else include_trace
-		request = KnowledgeSearchRequest(
-			query=query,
-			top_k=top_k,
-			candidate_k=candidate_k or plugin._default_candidate_k,
-			filters=_merge_filters(plugin._default_filter, filters),
-			min_score=min_score,
-			include_trace=bool(include_trace),
-		)
-		if plugin._index_store and not plugin._vector_store:
-			response = await plugin._index_store.search_with_trace(request)
-			if response.results:
-				return response.to_dict()
-		bm25_results = plugin._bm25_search(query, top_k=request.candidate_k, filters=request.filters)
-		vector_items: list[dict] = []
-		if plugin._vector_store and plugin._embedding_client:
-			try:
-				query_embeddings = await plugin._embed_texts([query])
-				if query_embeddings:
-					raw_results = await plugin._vector_store.search(query_embeddings[0], top_k=request.candidate_k)
-					vector_items = self.normalize_vector_results(raw_results)
-			except Exception as e:
-				logger.warning(f"[knowledge] vector_store.search failed, falling back: {e}")
-			if not vector_items and plugin._embeddings:
-				vector_items = plugin._local_vector_items(query, top_k=request.candidate_k)
-		if vector_items:
-			results = self.formatter.merge_results(plugin._chunks, bm25_results, vector_items, request.top_k, query, request.min_score)
-			return {"results": results, "trace": self.formatter.trace_dict(request, len(bm25_results) + len(vector_items), len(results), reranked=False)}
-		results = self.formatter.format_bm25_results(plugin._chunks, bm25_results, query)[:request.top_k]
-		if request.min_score:
-			results = [item for item in results if item.get("score", 0.0) >= request.min_score]
-		return {"results": results, "trace": self.formatter.trace_dict(request, len(bm25_results), len(results), reranked=False)}
-
-	def normalize_vector_results(self, raw_results: list[dict]) -> list[dict]:
-		items: list[dict] = []
-		for r in raw_results:
-			chunk_id = r.get("metadata", {}).get("chunk_id", r.get("id", 0))
-			items.append({"chunk_id": chunk_id, "score": r.get("score", 0.0)})
-		return items
-
-
-class KnowledgeEmbeddingIndexer:
-	def __init__(self, plugin: "KnowledgePlugin") -> None:
-		self.plugin = plugin
-
-	async def build_incremental(self) -> None:
-		plugin = self.plugin
-		if not plugin._chunks:
-			return
-		source_chunks: dict[str, list[tuple[int, dict]]] = {}
-		for i, chunk in enumerate(plugin._chunks):
-			src = chunk.get("source", "unknown")
-			source_chunks.setdefault(src, []).append((i, chunk))
-		if plugin._kv_store:
-			keys = await plugin._kv_store.list_keys("knowledge:index:")
-			for key in keys:
-				manifest = await plugin._kv_store.get(key)
-				if manifest:
-					plugin._manifests[manifest.get("fingerprint", "")] = manifest
-		if plugin._embeddings is None:
-			plugin._embeddings = [[] for _ in plugin._chunks]
-		for src, indexed_chunks in source_chunks.items():
-			content_hash = hashlib.sha256("".join(c["text"] for _, c in indexed_chunks).encode()).hexdigest()[:16]
-			fingerprint = f"{src}:{content_hash}:{plugin._index_version}"
-			if fingerprint in plugin._manifests:
-				continue
-			src_real = os.path.realpath(src)
-			old_manifest = next((m for m in plugin._manifests.values() if os.path.realpath(m.get("source", "")) == src_real), None)
-			if old_manifest and plugin._vector_store:
-				old_ids = old_manifest.get("chunk_ids", [])
-				if old_ids:
-					await plugin._vector_store.delete(old_ids)
-				old_fp = old_manifest.get("fingerprint", "")
-				plugin._manifests.pop(old_fp, None)
-				if plugin._kv_store:
-					await plugin._kv_store.delete(f"knowledge:index:{old_fp}")
-			texts = [c["text"] for _, c in indexed_chunks]
-			indices = [i for i, _ in indexed_chunks]
-			metadata = [dict(c.get("metadata", {"source": src, "chunk_id": i})) for i, c in indexed_chunks]
-			embeddings = await plugin._embed_texts(texts)
-			if not embeddings:
-				continue
-			for idx, emb in zip(indices, embeddings):
-				if idx < len(plugin._embeddings):
-					plugin._embeddings[idx] = emb
-					plugin._index_store.set_document_embedding(str(idx), emb)
-			chunk_ids: list[str] = []
-			if plugin._vector_store:
-				chunk_ids = await plugin._vector_store.add(texts, embeddings, metadata)
-			manifest = {
-				"source": src,
-				"fingerprint": fingerprint,
-				"chunk_ids": chunk_ids,
-				"index_version": plugin._index_version,
-				"updated_at": time.time(),
-			}
-			plugin._manifests[fingerprint] = manifest
-			if plugin._kv_store:
-				await plugin._kv_store.set(f"knowledge:index:{fingerprint}", manifest)
-		logger.info(f"[knowledge] Embedding build complete, {len(plugin._chunks)} chunks indexed")
+_INDEX_RESOURCE = "knowledge.index"
+_DOCUMENTS_RESOURCE = "knowledge.documents"
+_EMBEDDING_RESOURCE = "knowledge.embedding"
+_VECTOR_STORE_RESOURCE = "knowledge.vector_store"
+_RERANKER_RESOURCE = "knowledge.reranker"
 
 
 class KnowledgePlugin(BasePlugin):
 	name = "knowledge"
 	display_name = "知识库"
 	priority = 20
-	version = "1.0.0"
+	version = "2.0.0"
 	config_schema = KNOWLEDGE_CONFIG_SCHEMA
 
 	def initialize(self, config: dict, plugin_ctx: "PluginContext") -> None:
 		super().initialize(config, plugin_ctx)
-		self._sources = config.get("sources", [])
-		self._chunk_size = config.get("chunk_size", 512)
-		self._chunk_overlap = config.get("chunk_overlap", 50)
-		self._embedding_config = config.get("embedding", {})
-		self._embedding_batch_size = max(1, int(self._embedding_config.get("batch_size", 64)))
-		self._embedding_retries = max(0, int(self._embedding_config.get("retries", 2)))
-		self._embedding_retry_delay = max(0.0, float(self._embedding_config.get("retry_delay", 0.5)))
-		self._rerank_config = config.get("rerank", {})
-		self._query_rewrite_config = config.get("query_rewrite", {})
+		self._sources = [str(item) for item in config.get("sources", [])]
+		self._chunk_size = int(config.get("chunk_size", 512))
+		self._chunk_overlap = int(config.get("chunk_overlap", 50))
 		self._namespace = str(config.get("namespace", ""))
 		self._default_filter = _filter_from_config(config.get("filters", {}), namespace=self._namespace)
 		self._default_candidate_k = int(config.get("candidate_k", 30))
 		self._include_trace_default = bool(config.get("include_trace", False))
-		self._vector_resource = _resource_name(config.get("vector_store"), "knowledge_vector")
-		self._documents: list[KnowledgeDocument] = []
-		self._chunks: list[dict] = []
-		self._embeddings: list[list[float]] | None = None
-		self._embedding_client: dict | None = None
-		self._vector_store = plugin_ctx.resources.get(self._vector_resource) if self._vector_resource else None
-		self._kv_store = plugin_ctx.kv_store
+		self._metadata = dict(config.get("metadata", {}) or {})
+		self._query_rewrite_config = dict(config.get("query_rewrite", {}) or {})
+		self._rerank_config = dict(config.get("rerank", {}) or {})
 		self._workspace = plugin_ctx.workspace or ""
-		self._embedding_ready = False
-		self._embedding_lock: asyncio.Lock | None = None
-		self._index_version = f"{self._chunk_size}:{self._chunk_overlap}"
-		self._manifests: dict[str, dict] = {}  # English: source_hash maps to manifest. 中文：source_hash 映射到 manifest。
-		# English: BM25 cache. 中文：BM25 缓存。
+		self._resources = plugin_ctx.resources
+		self._mounted_index = self._resources.get(_INDEX_RESOURCE)
+		self._mounted_documents = self._resources.get(_DOCUMENTS_RESOURCE)
+		self._embedding = self._resources.get(_EMBEDDING_RESOURCE)
+		self._vector_store = self._resources.get(_VECTOR_STORE_RESOURCE)
+		self._mounted_reranker = self._resources.get(_RERANKER_RESOURCE)
+		self._documents: list[KnowledgeDocument] = []
+		self._chunks: list[dict[str, Any]] = []
 		self._doc_terms: list[Counter] = []
 		self._doc_freq: Counter = Counter()
-		self._avg_dl: float = 0.0
-		self._vocab: dict[str, int] = {}
-		self._vocab_sorted: list[str] = []
+		self._avg_dl = 1.0
+		self._retriever: HybridRetriever | None = None
+		self._local_index: InMemoryKnowledgeIndexStore | None = None
+		self._local_index_ready = False
+		self._local_index_lock = None
 		self._chunker = SemanticChunker(max_chunk_size=self._chunk_size, chunk_overlap=self._chunk_overlap)
-		self._formatter = KnowledgeResultFormatter()
-		self._search_service = KnowledgeSearchService(self, self._formatter)
-		self._embedding_indexer = KnowledgeEmbeddingIndexer(self)
 		self._ingestion_pipeline = LocalFileIngestionPipeline(
 			chunker=self._chunker,
 			workspace=self._workspace,
 			namespace=self._namespace,
-			default_metadata=config.get("metadata", {}),
+			default_metadata=self._metadata,
 		)
-		self._retriever: HybridRetriever | None = None
 		self._reranker = self._build_reranker()
 		self._query_rewriter = self._build_query_rewriter()
-		self._index_store = InMemoryKnowledgeIndexStore(reranker=self._reranker, query_rewriter=self._query_rewriter)
-		if self._embedding_config.get("base_url"):
-			self._init_embedding_client()
 		self._load_sources()
 		self._build_bm25_index()
-		self._build_retriever()
 
 	def inject_context(self, exec_ctx: "ExecutionContext", topic: str = "") -> str:
 		if not self._chunks or not topic:
 			return ""
-		results = self._hybrid_search(topic, top_k=5, filters=self._default_filter)
+		results = self._format_bm25_results(self._bm25_search(topic, top_k=5, filters=self._default_filter), topic)
 		if not results:
 			return ""
 		lines = ["[相关知识]"]
@@ -342,30 +108,11 @@ class KnowledgePlugin(BasePlugin):
 		return "\n".join(lines)
 
 	async def on_execution_start(self, exec_ctx: "ExecutionContext") -> None:
-		"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-首次执行时异步构建 embeddings，带锁并支持增量更新。"""
-		if self._embedding_ready or not self._embedding_client:
-			return
-		if self._embedding_lock is None:
-			self._embedding_lock = asyncio.Lock()
-		async with self._embedding_lock:
-			if self._embedding_ready:
-				return
-			await self._build_embeddings_incremental()
-			self._embedding_ready = True
-
-	async def _build_embeddings_incremental(self) -> None:
-		"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-基于 fingerprint 增量构建 embeddings，每个 source 独立 manifest。"""
-		await self._embedding_indexer.build_incremental()
+		if self._documents or self._mounted_documents:
+			await self._ensure_local_index()
 
 	def get_tools(self) -> list[ToolDefinition]:
-		"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-提供 knowledge_search 工具"""
-		if not self._chunks:
+		if not self._has_retrieval_source():
 			return []
 		return [
 			ToolDefinition(
@@ -386,73 +133,236 @@ class KnowledgePlugin(BasePlugin):
 					"required": ["query"],
 				},
 				is_read_only=True,
+				capability="knowledge_read",
+				risk_level="safe",
 				execute=self._tool_knowledge_search,
 			)
 		]
 
+	async def _tool_knowledge_search(self, args: dict, context: dict):
+		from axc_agent_engine.tools.tool_output import ToolOutput
+
+		query = str(args.get("query", "")).strip()
+		if not query:
+			return ToolOutput.error("query 不能为空")
+		try:
+			payload = await self._hybrid_search_payload(
+				query,
+				top_k=int(args.get("top_k", 5)),
+				candidate_k=int(args.get("candidate_k", self._default_candidate_k)),
+				filters=_tool_filters(args),
+				min_score=float(args.get("min_score", 0.0) or 0.0),
+				include_trace=bool(args.get("include_trace", self._include_trace_default)),
+			)
+		except Exception as exc:
+			logger.exception("[knowledge] search failed")
+			return ToolOutput.error(f"knowledge_search failed: {exc}")
+		return ToolOutput.json_output(
+			payload,
+			summary=f"knowledge_search：为 '{query[:50]}' 找到 {len(payload.get('results', []))} 条结果",
+		)
+
+	async def _hybrid_search_async(
+		self,
+		query: str,
+		top_k: int = 5,
+		candidate_k: int | None = None,
+		filters: KnowledgeFilter | dict | None = None,
+		min_score: float = 0.0,
+		include_trace: bool | None = None,
+	) -> list[dict]:
+		return (await self._hybrid_search_payload(
+			query,
+			top_k=top_k,
+			candidate_k=candidate_k,
+			filters=filters,
+			min_score=min_score,
+			include_trace=include_trace,
+		)).get("results", [])
+
+	async def _hybrid_search_payload(
+		self,
+		query: str,
+		top_k: int = 5,
+		candidate_k: int | None = None,
+		filters: KnowledgeFilter | dict | None = None,
+		min_score: float = 0.0,
+		include_trace: bool | None = None,
+	) -> dict:
+		if not self._has_retrieval_source():
+			raise RuntimeError("knowledge plugin has no retrieval source; configure sources or mount knowledge resources")
+		if self._vector_store and not self._embedding:
+			raise RuntimeError("knowledge.vector_store requires mounted knowledge.embedding")
+		include_trace = self._include_trace_default if include_trace is None else include_trace
+		request = KnowledgeSearchRequest(
+			query=query,
+			top_k=max(1, int(top_k)),
+			candidate_k=max(1, int(candidate_k or self._default_candidate_k)),
+			filters=_merge_filters(self._default_filter, filters),
+			min_score=float(min_score or 0.0),
+			include_trace=bool(include_trace),
+		)
+		result_sets: list[list[RetrievalResult]] = []
+		trace_sources: list[dict[str, Any]] = []
+
+		if self._mounted_index:
+			response = await self._search_mounted_index(request)
+			result_sets.append(response.results)
+			if response.trace:
+				trace_sources.append({"source": _INDEX_RESOURCE, **response.trace.to_dict()})
+
+		if self._documents or self._mounted_documents:
+			await self._ensure_local_index()
+			if self._local_index:
+				response = await self._local_index.search_with_trace(request)
+				result_sets.append(response.results)
+				if response.trace:
+					trace_sources.append({"source": "local", **response.trace.to_dict()})
+
+		if self._vector_store:
+			vector_results = await self._search_vector_store(request)
+			result_sets.append(vector_results)
+			trace_sources.append({
+				"source": _VECTOR_STORE_RESOURCE,
+				"query": request.query,
+				"candidate_count": len(vector_results),
+				"returned_count": min(len(vector_results), request.top_k),
+				"filtered": request.filters != KnowledgeFilter(),
+				"reranked": False,
+				"rewritten_queries": [request.query],
+			})
+
+		merged = self._merge_result_sets(result_sets, request)
+		trace = None
+		if request.include_trace:
+			trace = {
+				"query": request.query,
+				"rewritten_queries": [request.query],
+				"candidate_count": sum(len(items) for items in result_sets),
+				"returned_count": len(merged),
+				"filtered": request.filters != KnowledgeFilter(),
+				"reranked": bool(self._reranker),
+				"sources": trace_sources,
+			}
+		return {"results": [result.to_dict() for result in merged], "trace": trace}
+
+	def _hybrid_search(self, query: str, top_k: int = 5, filters: KnowledgeFilter | dict | None = None) -> list[dict]:
+		return self._format_bm25_results(self._bm25_search(query, top_k=top_k, filters=filters), query)
+
+	def _has_retrieval_source(self) -> bool:
+		return bool(self._mounted_index or self._mounted_documents or self._documents or self._vector_store)
+
+	def _load_sources(self) -> None:
+		result = self._ingestion_pipeline.ingest(self._sources)
+		self._documents = list(result.documents)
+		self._chunks = [
+			{
+				"text": doc.text,
+				"source": doc.source,
+				"metadata": dict(doc.metadata),
+			}
+			for doc in self._documents
+		]
+		for error in result.errors:
+			logger.warning("[knowledge] %s", error)
+		logger.info("[knowledge] loaded %s local document chunks", len(self._chunks))
+
 	def _build_bm25_index(self) -> None:
-		"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-构建 BM25 索引缓存（_load_sources 后调用一次）"""
 		self._doc_terms = []
 		self._doc_freq = Counter()
-		self._vocab = {}
 		total_dl = 0.0
 		for chunk in self._chunks:
 			terms = _tokenize(chunk["text"])
-			term_counter = Counter(terms)
-			self._doc_terms.append(term_counter)
+			counter = Counter(terms)
+			self._doc_terms.append(counter)
 			total_dl += len(terms)
-			for t in set(terms):
-				self._doc_freq[t] += 1
-				if t not in self._vocab:
-					self._vocab[t] = 0
-				self._vocab[t] += 1
-		n_docs = len(self._chunks)
-		self._avg_dl = total_dl / n_docs if n_docs > 0 else 1.0
-		self._vocab_sorted = sorted(self._vocab.keys())
-		self._build_retriever()
+			for term in set(terms):
+				self._doc_freq[term] += 1
+		self._avg_dl = total_dl / len(self._chunks) if self._chunks else 1.0
+		self._retriever = HybridRetriever(self._documents)
+		self._local_index_ready = False
 
-	def _build_retriever(self) -> None:
-		documents = list(self._documents)
-		self._retriever = HybridRetriever(documents)
-		self._index_store = InMemoryKnowledgeIndexStore(
-			embedding_client=self._index_store.embedding_client,
-			reranker=self._reranker,
-			query_rewriter=self._query_rewriter,
-		)
-		self._index_store.set_documents(documents)
+	async def _ensure_local_index(self) -> None:
+		if self._local_index_ready:
+			return
+		if self._local_index_lock is None:
+			import asyncio
+			self._local_index_lock = asyncio.Lock()
+		async with self._local_index_lock:
+			if self._local_index_ready:
+				return
+			documents = list(self._documents)
+			if self._mounted_documents:
+				documents.extend(await self._load_mounted_documents())
+			self._local_index = InMemoryKnowledgeIndexStore(
+				embedding_client=self._embedding,
+				reranker=self._reranker,
+				query_rewriter=self._query_rewriter,
+			)
+			if self._embedding:
+				await self._local_index.upsert_documents(documents)
+			else:
+				self._local_index.set_documents(documents)
+			self._local_index_ready = True
+
+	async def _load_mounted_documents(self) -> list[KnowledgeDocument]:
+		resource = self._mounted_documents
+		if resource is None:
+			return []
+		if isinstance(resource, list | tuple):
+			raw_docs = list(resource)
+		else:
+			list_documents = getattr(resource, "list_documents", None)
+			if not callable(list_documents):
+				raise RuntimeError("knowledge.documents must be a sequence or expose list_documents()")
+			raw_docs = await _maybe_await(list_documents())
+		return [_normalize_document(item, index) for index, item in enumerate(raw_docs or [])]
+
+	async def _search_mounted_index(self, request: KnowledgeSearchRequest) -> KnowledgeSearchResponse:
+		index = self._mounted_index
+		search_with_trace = getattr(index, "search_with_trace", None)
+		if callable(search_with_trace):
+			raw = await _maybe_await(search_with_trace(request))
+			return _normalize_response(raw, request, _INDEX_RESOURCE)
+		search = getattr(index, "search", None)
+		if callable(search):
+			raw = await _call_search(search, request)
+			return _normalize_response(raw, request, _INDEX_RESOURCE)
+		raise RuntimeError("knowledge.index must expose search_with_trace(request) or search(...)")
+
+	async def _search_vector_store(self, request: KnowledgeSearchRequest) -> list[RetrievalResult]:
+		vectors = await _maybe_await(self._embedding.embed([request.query]))
+		if not vectors:
+			return []
+		raw = await _maybe_await(self._vector_store.search(vectors[0], top_k=request.candidate_k))
+		return [_normalize_result(item, f"{_VECTOR_STORE_RESOURCE}:{idx}") for idx, item in enumerate(raw or [])]
+
+	def _merge_result_sets(self, result_sets: list[list[RetrievalResult]], request: KnowledgeSearchRequest) -> list[RetrievalResult]:
+		non_empty = [[item for item in items if item.score >= request.min_score] for items in result_sets if items]
+		if not non_empty:
+			return []
+		if len(non_empty) == 1:
+			results = sorted(non_empty[0], key=lambda item: item.score, reverse=True)[:request.top_k]
+		else:
+			results = rrf_merge(*non_empty, top_k=max(request.candidate_k, request.top_k))[:request.top_k]
+		return results
 
 	def _build_reranker(self):
 		mode = str(self._rerank_config.get("mode", "score")).lower()
-		rerankers = []
-		endpoint = self._rerank_config.get("endpoint", "")
-		if endpoint and mode in {"model", "external", "cascade"}:
-			rerankers.append(ExternalReranker(
-				endpoint=endpoint,
-				api_key=self._rerank_config.get("api_key", ""),
-				timeout=float(self._rerank_config.get("timeout", 30)),
-			))
-		if mode in {"llm", "cascade"} and self._plugin_ctx.utility_model:
-			rerankers.append(LLMReranker(self._plugin_ctx.utility_model))
-		rerankers.append(ScoreReranker())
-		if len(rerankers) == 1:
-			return rerankers[0]
-		return CascadeReranker(rerankers)
+		if self._mounted_reranker:
+			return self._mounted_reranker
+		if mode == "llm" and self._plugin_ctx.utility_model:
+			return LLMReranker(self._plugin_ctx.utility_model)
+		if mode in {"", "score"}:
+			return ScoreReranker()
+		raise RuntimeError(f"unsupported knowledge rerank mode: {mode}")
 
 	def _build_query_rewriter(self):
 		if not self._query_rewrite_config.get("enabled", False):
 			return NoopQueryRewriter()
 		return LLMQueryRewriter(self._plugin_ctx.utility_model)
 
-	def _hybrid_search(self, query: str, top_k: int = 5, filters: KnowledgeFilter | dict | None = None) -> list[dict]:
-		"""English: This documentation describes the related engine component behavior.
-中文：同步快速检索路径，仅用于上下文注入。"""
-		return self._search_service.hybrid_search(query, top_k=top_k, filters=filters)
-
 	def _bm25_search(self, query: str, top_k: int = 30, filters: KnowledgeFilter | dict | None = None) -> list[int]:
-		"""English: This documentation describes the related engine component behavior.
-中文：BM25 检索（使用缓存索引）"""
 		if self._retriever:
 			results = self._retriever.bm25.search(query, top_k=top_k, filters=filters)
 			indices: list[int] = []
@@ -467,218 +377,169 @@ class KnowledgePlugin(BasePlugin):
 		if not query_terms:
 			return []
 		n_docs = len(self._chunks)
-		k1, b = 1.5, 0.75
 		scores: list[tuple[float, int]] = []
 		for i, term_counter in enumerate(self._doc_terms):
 			if i < len(self._documents) and not knowledge_filter.matches(self._documents[i]):
 				continue
 			score = 0.0
-			dl = sum(term_counter.values())
+			dl = sum(term_counter.values()) or 1
 			for qt in query_terms:
-				if qt not in self._doc_freq:
+				df = self._doc_freq.get(qt, 0)
+				if not df:
 					continue
-				df = self._doc_freq[qt]
 				idf = math.log((n_docs - df + 0.5) / (df + 0.5) + 1.0)
 				tf = term_counter.get(qt, 0)
-				tf_norm = (tf * (k1 + 1)) / (tf + k1 * (1 - b + b * dl / self._avg_dl))
-				score += idf * tf_norm
+				score += idf * ((tf * 2.5) / (tf + 1.5 * (1 - 0.75 + 0.75 * dl / self._avg_dl)))
 			if score > 0:
 				scores.append((score, i))
 		scores.sort(reverse=True)
 		return [idx for _, idx in scores[:top_k]]
 
-	def _local_vector_items(self, query: str, top_k: int = 30) -> list[dict]:
-		"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-本地向量 fallback；只在 query 和 chunk 向量维度一致时启用。"""
-		if not self._embeddings:
-			return []
-		query_terms = _tokenize(query)
-		query_vec = self._text_to_sparse_vec(query_terms)
-		if not query_vec:
-			return []
-		scores: list[tuple[float, int]] = []
-		for i, emb in enumerate(self._embeddings):
-			if len(query_vec) != len(emb):
-				continue
-			sim = cosine_similarity(query_vec, emb)
-			if sim > 0:
-				scores.append((sim, i))
-		scores.sort(reverse=True)
-		return [{"chunk_id": idx, "score": score} for score, idx in scores[:top_k]]
-
-	def _text_to_sparse_vec(self, terms: list[str]) -> list[float]:
-		"""TF-IDF 稀疏向量（使用缓存词汇表）"""
-		if not self._chunks or not self._vocab_sorted:
-			return []
-		n_docs = len(self._chunks)
-		term_counts = Counter(terms)
-		vec = []
-		for t in self._vocab_sorted:
-			tf = term_counts.get(t, 0)
-			df = self._vocab.get(t, 0)
-			idf = math.log((n_docs + 1) / (df + 1)) + 1
-			vec.append(tf * idf)
-		return vec
-
-	def _init_embedding_client(self) -> None:
-		"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-初始化 embedding API 客户端"""
-		try:
-			self._embedding_client = {
-				"base_url": self._embedding_config["base_url"].rstrip("/"),
-				"api_key": self._embedding_config.get("api_key", ""),
-			}
-			self._index_store.embedding_client = OpenAICompatibleEmbeddingClient(
-				self._embedding_client["base_url"],
-				self._embedding_client["api_key"],
-			)
-			logger.info("[knowledge] Embedding API configured")
-		except Exception as e:
-			logger.warning(f"[knowledge] Embedding client init failed: {e}")
-
-	async def _embed_texts(self, texts: list[str]) -> list[list[float]]:
-		"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-调用 embedding API 获取向量"""
-		if not self._embedding_client:
-			return []
-		output: list[list[float]] = []
-		for start in range(0, len(texts), self._embedding_batch_size):
-			batch = texts[start:start + self._embedding_batch_size]
-			vectors = await self._embed_batch(batch)
-			if len(vectors) != len(batch):
-				logger.warning("[knowledge] Embedding batch returned %s vectors for %s texts", len(vectors), len(batch))
-				return output
-			output.extend(vectors)
-		return output
-
-	async def _embed_batch(self, texts: list[str]) -> list[list[float]]:
-		if not texts:
-			return []
-		import httpx
-		last_error: Exception | None = None
-		for attempt in range(self._embedding_retries + 1):
-			try:
-				async with httpx.AsyncClient(timeout=float(self._embedding_config.get("timeout", 30))) as client:
-					resp = await client.post(
-						f"{self._embedding_client['base_url']}/embeddings",
-						headers={"Authorization": f"Bearer {self._embedding_client['api_key']}",
-								 "Content-Type": "application/json"},
-						json={"input": texts})
-					resp.raise_for_status()
-					data = resp.json()
-					return [item["embedding"] for item in data.get("data", [])]
-			except Exception as e:
-				last_error = e
-				if attempt < self._embedding_retries and self._embedding_retry_delay:
-					await asyncio.sleep(self._embedding_retry_delay * (attempt + 1))
-		logger.warning(f"[knowledge] Embedding API call failed: {last_error}")
-		return []
-
-	def _load_sources(self) -> None:
-		"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-加载知识源文件，并按 workspace 解析相对路径。"""
-		result = self._ingestion_pipeline.ingest(self._sources)
-		self._documents = list(result.documents)
-		self._chunks = [
-			{
-				"text": doc.text,
-				"source": doc.source,
-				"metadata": dict(doc.metadata),
-				"embedding": None,
-			}
-			for doc in self._documents
-		]
-		for error in result.errors:
-			logger.warning("[knowledge] %s", error)
-		logger.info(f"[knowledge] Loaded {len(self._chunks)} document chunks")
-
-	async def _hybrid_search_async(
-		self,
-		query: str,
-		top_k: int = 5,
-		candidate_k: int | None = None,
-		filters: KnowledgeFilter | dict | None = None,
-		min_score: float = 0.0,
-		include_trace: bool | None = None,
-	) -> list[dict]:
-		return await self._search_service.hybrid_search_async(
-			query,
-			top_k=top_k,
-			candidate_k=candidate_k,
-			filters=filters,
-			min_score=min_score,
-			include_trace=include_trace,
-		)
-
-	async def _hybrid_search_payload(
-		self,
-		query: str,
-		top_k: int = 5,
-		candidate_k: int | None = None,
-		filters: KnowledgeFilter | dict | None = None,
-		min_score: float = 0.0,
-		include_trace: bool | None = None,
-	) -> dict:
-		"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-异步混合检索：vector_store.search → 本地 cosine → BM25 fallback。"""
-		return await self._search_service.hybrid_search_payload(
-			query,
-			top_k=top_k,
-			candidate_k=candidate_k,
-			filters=filters,
-			min_score=min_score,
-			include_trace=include_trace,
-		)
-
-	def _normalize_vector_results(self, raw_results: list[dict]) -> list[dict]:
-		"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-把 vector_store.search 结果标准化为内部格式。"""
-		return self._search_service.normalize_vector_results(raw_results)
-
-	def _merge_results(self, bm25_indices: list[int], vector_items: list[dict], top_k: int, query: str, min_score: float = 0.0) -> list[dict]:
-		"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-用 RRF 融合 BM25 索引和向量结果。"""
-		return self._formatter.merge_results(self._chunks, bm25_indices, vector_items, top_k, query, min_score)
-
 	def _format_bm25_results(self, indices: list[int], query: str = "") -> list[dict]:
-		"""English: This documentation describes the related engine component behavior.
-中文：格式化纯 BM25 结果。"""
-		return self._formatter.format_bm25_results(self._chunks, indices, query)
+		results: list[dict] = []
+		for idx in indices:
+			if idx >= len(self._chunks):
+				continue
+			chunk = self._chunks[idx]
+			results.append({
+				"id": str(idx),
+				"text": chunk["text"],
+				"source": chunk.get("source", ""),
+				"chunk_id": idx,
+				"score": round(1.0 / (len(results) + 1), 4),
+				"retrieval": "bm25",
+				"metadata": dict(chunk.get("metadata", {})),
+				"citation": _citation_for_chunk(chunk, idx),
+				"highlights": _highlights(query, chunk["text"]) if query else [],
+			})
+		return results
 
-	async def _tool_knowledge_search(self, args: dict, context: dict):
-		"""knowledge_search 工具，支持 vector_store 的异步混合检索。"""
-		from axc_agent_engine.tools.tool_output import ToolOutput
-		query = args.get("query", "")
-		top_k = int(args.get("top_k", 5))
-		if not query:
-			return ToolOutput.error("query 不能为空")
-		payload = await self._hybrid_search_payload(
-			query,
-			top_k=top_k,
-			candidate_k=int(args.get("candidate_k", self._default_candidate_k)),
-			filters=_tool_filters(args),
-			min_score=float(args.get("min_score", 0.0) or 0.0),
-			include_trace=bool(args.get("include_trace", self._include_trace_default)),
+
+async def _call_search(search: Any, request: KnowledgeSearchRequest) -> Any:
+	try:
+		return await _maybe_await(search(request))
+	except TypeError:
+		return await _maybe_await(search(request.query, top_k=request.top_k, candidate_k=request.candidate_k))
+
+
+async def _maybe_await(value: Any) -> Any:
+	if inspect.isawaitable(value):
+		return await value
+	return value
+
+
+def _normalize_response(raw: Any, request: KnowledgeSearchRequest, retrieval: str) -> KnowledgeSearchResponse:
+	if isinstance(raw, KnowledgeSearchResponse):
+		return raw
+	if isinstance(raw, dict):
+		raw_results = raw.get("results", raw.get("data", []))
+		trace = raw.get("trace")
+		results = [_normalize_result(item, f"{retrieval}:{idx}") for idx, item in enumerate(raw_results or [])]
+		return KnowledgeSearchResponse(results=results, trace=_normalize_trace(trace, request, len(results)))
+	if isinstance(raw, list | tuple):
+		results = [_normalize_result(item, f"{retrieval}:{idx}") for idx, item in enumerate(raw)]
+		return KnowledgeSearchResponse(
+			results=results,
+			trace=RetrievalTrace(query=request.query, candidate_count=len(results), returned_count=min(len(results), request.top_k)) if request.include_trace else None,
 		)
-		return ToolOutput.json_output(
-			payload,
-			summary=f"knowledge_search：为 '{query[:50]}' 找到 {len(payload.get('results', []))} 条结果"
+	if raw is None:
+		return KnowledgeSearchResponse(results=[])
+	raise RuntimeError(f"unsupported knowledge search response: {type(raw).__name__}")
+
+
+def _normalize_result(raw: Any, fallback_id: str) -> RetrievalResult:
+	if isinstance(raw, RetrievalResult):
+		return raw
+	if isinstance(raw, KnowledgeDocument):
+		return RetrievalResult(id=raw.id, text=raw.text, score=1.0, retrieval="document", source=raw.source, metadata=raw.metadata)
+	if not isinstance(raw, dict):
+		return RetrievalResult(id=fallback_id, text=str(raw), score=0.0, retrieval="unknown")
+	metadata = dict(raw.get("metadata") or {})
+	score = float(raw.get("score", raw.get("relevance", 0.0)) or 0.0)
+	text = str(raw.get("text") or raw.get("content") or metadata.get("text") or "")
+	source = str(raw.get("source") or metadata.get("source") or "")
+	return RetrievalResult(
+		id=str(raw.get("id") or metadata.get("id") or fallback_id),
+		text=text,
+		score=score,
+		retrieval=str(raw.get("retrieval") or raw.get("type") or "vector"),
+		source=source,
+		metadata=metadata,
+		citation=dict(raw.get("citation") or {}),
+		highlights=[str(item) for item in raw.get("highlights", [])],
+	)
+
+
+def _normalize_document(raw: Any, index: int) -> KnowledgeDocument:
+	if isinstance(raw, KnowledgeDocument):
+		return raw
+	if not isinstance(raw, dict):
+		return KnowledgeDocument(id=str(index), text=str(raw), metadata={"chunk_id": index})
+	metadata = dict(raw.get("metadata") or {})
+	metadata.setdefault("chunk_id", index)
+	if raw.get("namespace") and "namespace" not in metadata:
+		metadata["namespace"] = raw["namespace"]
+	return KnowledgeDocument(
+		id=str(raw.get("id") or index),
+		text=str(raw.get("text") or raw.get("content") or ""),
+		source=str(raw.get("source") or metadata.get("source") or ""),
+		metadata=metadata,
+	)
+
+
+def _normalize_trace(raw: Any, request: KnowledgeSearchRequest, count: int) -> RetrievalTrace | None:
+	if not request.include_trace:
+		return None
+	if isinstance(raw, RetrievalTrace):
+		return raw
+	if isinstance(raw, dict):
+		return RetrievalTrace(
+			query=str(raw.get("query") or request.query),
+			rewritten_queries=[str(item) for item in raw.get("rewritten_queries", [request.query])],
+			candidate_count=int(raw.get("candidate_count", count) or 0),
+			returned_count=int(raw.get("returned_count", count) or 0),
+			filtered=bool(raw.get("filtered", request.filters != KnowledgeFilter())),
+			reranked=bool(raw.get("reranked", False)),
 		)
+	return RetrievalTrace(query=request.query, candidate_count=count, returned_count=min(count, request.top_k))
+
+
+def _citation_for_chunk(chunk: dict, chunk_id: int) -> dict:
+	metadata = dict(chunk.get("metadata", {}))
+	citation = {
+		"source": chunk.get("source", metadata.get("source", "")),
+		"chunk_id": metadata.get("chunk_id", chunk_id),
+	}
+	for key in ("document_id", "title", "url", "page", "start_line", "end_line", "heading_path", "version", "updated_at"):
+		if key in metadata and metadata[key] not in ("", None):
+			citation[key] = metadata[key]
+	return citation
+
+
+def _highlights(query: str, text: str, max_items: int = 3, window: int = 80) -> list[str]:
+	terms = [term for term in _tokenize(query) if len(term) > 1]
+	if not terms:
+		return []
+	lower = text.lower()
+	highlights: list[str] = []
+	for term in terms:
+		idx = lower.find(term.lower())
+		if idx < 0:
+			continue
+		start = max(0, idx - window // 2)
+		end = min(len(text), idx + len(term) + window // 2)
+		snippet = text[start:end].strip()
+		if snippet and snippet not in highlights:
+			highlights.append(snippet)
+		if len(highlights) >= max_items:
+			break
+	return highlights
 
 
 def _tokenize(text: str) -> list[str]:
-	"""English: This documentation describes the related engine component behavior.
-中文：简单分词，支持中英文混合文本。"""
 	text = text.lower()
-	words = re.findall(r'[a-z0-9]+', text)
-	chinese = re.findall(r'[\u4e00-\u9fff]', text)
+	words = re.findall(r"[a-z0-9_]+", text)
+	chinese = re.findall(r"[\u4e00-\u9fff]", text)
 	bigrams = [chinese[i] + chinese[i + 1] for i in range(len(chinese) - 1)]
 	return words + chinese + bigrams
 
@@ -686,8 +547,6 @@ def _tokenize(text: str) -> list[str]:
 def _resource_name(value: object, default: str) -> str:
 	if isinstance(value, str):
 		return value
-	if isinstance(value, dict):
-		return str(value.get("resource", default))
 	return default
 
 

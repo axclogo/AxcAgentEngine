@@ -7,14 +7,15 @@ from axc_agent_engine.plugins.builtin.common import bounded_int
 from axc_agent_engine.plugins.builtin.graph.config import GraphConfig
 from axc_agent_engine.plugins.builtin.graph.policy import GraphPolicy
 from axc_agent_engine.plugins.builtin.graph.source_loader import GraphSourceLoader
-from axc_agent_engine.plugins.builtin.graph.support import InMemoryGraphStore
 from axc_agent_engine.plugins.builtin.graph.utils import clean_text, filter_metadata, metadata
 
 
 class GraphService:
 	def __init__(self, config: GraphConfig, store: Any | None = None) -> None:
 		self.config = config
-		self.store = store or InMemoryGraphStore()
+		if store is None:
+			raise ValueError("graph.store resource is required")
+		self.store = store
 		self.load_errors: list[dict[str, Any]] = []
 		self.source_stats: dict[str, Any] = {"entities": 0, "relations": 0, "sources": len(config.sources)}
 		self.policy = GraphPolicy(
@@ -96,8 +97,7 @@ class GraphService:
 
 	def reload_sources(self, clear_existing: bool = False) -> None:
 		if clear_existing:
-			self.store = InMemoryGraphStore()
-			self._source_loader = self._build_source_loader()
+			raise ValueError("graph reload cannot replace mounted graph.store")
 		self.load_sources()
 
 	def export_payload(self) -> dict[str, Any]:

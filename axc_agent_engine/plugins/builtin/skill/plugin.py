@@ -197,7 +197,7 @@ class SkillPlugin(BasePlugin):
 	def initialize(self, config: dict, plugin_ctx: "PluginContext") -> None:
 		self._plugin_ctx = plugin_ctx
 		self._paths = [str(path) for path in config.get("paths", [])]
-		self._catalog_resource = str(config.get("catalog") or "skill.catalog")
+		self._catalog_resource = "skill.catalog"
 		self._allowed_skills = {str(name) for name in config.get("allowed_skills", [])}
 		self._denied_skills = {str(name) for name in config.get("denied_skills", [])}
 		self._allow_scripts = bool(config.get("allow_scripts", True))

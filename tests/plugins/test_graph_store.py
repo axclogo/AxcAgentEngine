@@ -46,7 +46,7 @@ def test_graph_entity_resolution_is_type_aware_and_alias_based():
 @pytest.mark.asyncio
 async def test_graph_plugin_exposes_write_tools():
 	plugin = GraphPlugin()
-	plugin.initialize({}, PluginContext())
+	plugin.initialize({}, PluginContext(resources={"graph.store": InMemoryGraphStore()}))
 	tools = {tool.name: tool for tool in plugin.get_tools()}
 	assert "graph_upsert_entity" in tools
 	assert "graph_upsert_relation" in tools
@@ -76,7 +76,7 @@ def test_graph_plugin_uses_mounted_store_resource():
 @pytest.mark.asyncio
 async def test_graph_plugin_can_disable_writes_and_deletes():
 	plugin = GraphPlugin()
-	plugin.initialize({"allow_writes": False, "allow_deletes": False}, PluginContext())
+	plugin.initialize({"allow_writes": False, "allow_deletes": False}, PluginContext(resources={"graph.store": InMemoryGraphStore()}))
 
 	write_result = await plugin._tool_upsert_entity({"name": "Alice"}, {})
 	delete_result = await plugin._tool_delete_entity({"entity_id": "entity:1"}, {})
@@ -90,7 +90,7 @@ async def test_graph_plugin_can_disable_writes_and_deletes():
 @pytest.mark.asyncio
 async def test_graph_plugin_enforces_type_allowlists():
 	plugin = GraphPlugin()
-	plugin.initialize({"allowed_entity_types": ["person"], "allowed_relation_types": ["WORKS_AT"]}, PluginContext())
+	plugin.initialize({"allowed_entity_types": ["person"], "allowed_relation_types": ["WORKS_AT"]}, PluginContext(resources={"graph.store": InMemoryGraphStore()}))
 
 	entity_result = await plugin._tool_upsert_entity({"name": "Acme", "entity_type": "company"}, {})
 	relation_result = await plugin._tool_upsert_relation({"source": "Alice", "target": "Acme", "relation_type": "FOUNDED"}, {})
@@ -112,21 +112,21 @@ async def test_graph_plugin_status_reload_and_source_errors(tmp_path):
 		encoding="utf-8",
 	)
 	plugin = GraphPlugin()
-	plugin.initialize({"sources": [str(missing), str(source)]}, PluginContext())
+	plugin.initialize({"sources": [str(missing), str(source)]}, PluginContext(resources={"graph.store": InMemoryGraphStore()}))
 
 	status = await plugin._tool_status({}, {})
 	reloaded = await plugin._tool_reload_sources({"clear_existing": True}, {})
 
 	assert status.content["entities"] >= 1
 	assert status.content["load_errors"]
-	assert reloaded.content["entities"] >= 1
-	assert reloaded.content["source_stats"]["sources"] == 2
+	assert reloaded.is_error
+	assert "mounted graph.store" in reloaded.content
 
 
 @pytest.mark.asyncio
 async def test_graph_plugin_audits_writes_and_syncs_metadata():
 	plugin = GraphPlugin()
-	plugin.initialize({}, PluginContext())
+	plugin.initialize({}, PluginContext(resources={"graph.store": InMemoryGraphStore()}))
 	audit = InMemoryAuditSink()
 	ctx = ExecutionContext(services=ExecutionServices(audit_sink=audit))
 	ctx.state.metadata.update({"agent_name": "agent-a", "session_id": "sess-1"})
@@ -147,7 +147,7 @@ async def test_graph_plugin_audits_writes_and_syncs_metadata():
 async def test_graph_plugin_externalizes_large_export():
 	store = InMemoryResultStore()
 	plugin = GraphPlugin()
-	plugin.initialize({"max_result_bytes": 64}, PluginContext())
+	plugin.initialize({"max_result_bytes": 64}, PluginContext(resources={"graph.store": InMemoryGraphStore()}))
 	await plugin._tool_upsert_relation({"source": "Alice", "target": "Acme", "description": "x" * 200}, {})
 
 	result = await plugin._tool_export({}, {"result_store": store})
@@ -161,7 +161,7 @@ async def test_graph_plugin_externalizes_large_export():
 @pytest.mark.asyncio
 async def test_graph_plugin_limits_search_depth_and_limit():
 	plugin = GraphPlugin()
-	plugin.initialize({"max_depth": 1, "max_limit": 1}, PluginContext())
+	plugin.initialize({"max_depth": 1, "max_limit": 1}, PluginContext(resources={"graph.store": InMemoryGraphStore()}))
 	await plugin._tool_upsert_relation({"source": "Alice", "target": "Acme"}, {})
 	await plugin._tool_upsert_relation({"source": "Bob", "target": "Beta"}, {})
 
@@ -181,7 +181,7 @@ def test_graph_service_read_source_and_payload_branches(tmp_path):
 		encoding="utf-8",
 	)
 	config = GraphConfig.from_dict({"sources": [], "include_metadata": False, "namespace": "ns", "max_limit": 2})
-	service = GraphService(config)
+	service = GraphService(config, InMemoryGraphStore())
 	entities, relations = service.read_source(str(source))
 	assert len(entities) == 1
 	assert len(relations) == 1
@@ -200,14 +200,15 @@ def test_graph_service_read_source_and_payload_branches(tmp_path):
 	exported = service.export_payload()
 	assert exported["namespace"] == "ns"
 	assert service.status_payload()["config"]["max_limit"] == 2
-	service.reload_sources(clear_existing=True)
+	with pytest.raises(ValueError):
+		service.reload_sources(clear_existing=True)
 	assert service.metadata_payload("x")["last_action"] == "x"
 
 
 @pytest.mark.asyncio
 async def test_graph_tool_handlers_error_and_crud_paths():
 	config = GraphConfig.from_dict({"max_entities": 1, "max_relations": 1, "allow_deletes": True})
-	service = GraphService(config)
+	service = GraphService(config, InMemoryGraphStore())
 	handlers = GraphToolHandlers(service, GraphPresenter(config, PluginContext()), GraphAuditRecorder(config))
 	ctx = ExecutionContext()
 	context = {"exec_ctx": ctx}
@@ -244,7 +245,7 @@ async def test_graph_tool_handlers_policy_rejections_and_reload():
 		"denied_entity_types": ["secret"],
 		"denied_relation_types": ["BLOCKED"],
 	})
-	service = GraphService(config)
+	service = GraphService(config, InMemoryGraphStore())
 	handlers = GraphToolHandlers(service, GraphPresenter(config, PluginContext()), GraphAuditRecorder(config))
 	context = {"exec_ctx": ExecutionContext()}
 	assert (await handlers.upsert_entity({"name": "Alice"}, context)).is_error
@@ -254,8 +255,8 @@ async def test_graph_tool_handlers_policy_rejections_and_reload():
 	assert (await handlers.reload_sources({}, context)).is_error
 
 	write_config = GraphConfig.from_dict({"denied_entity_types": ["secret"], "denied_relation_types": ["BLOCKED"]})
-	write_service = GraphService(write_config)
+	write_service = GraphService(write_config, InMemoryGraphStore())
 	write_handlers = GraphToolHandlers(write_service, GraphPresenter(write_config, PluginContext()), GraphAuditRecorder(write_config))
 	assert (await write_handlers.upsert_entity({"name": "Alice", "entity_type": "secret"}, context)).is_error
 	assert (await write_handlers.upsert_relation({"source": "Alice", "target": "Bob", "relation_type": "BLOCKED"}, context)).is_error
-	assert not (await write_handlers.reload_sources({"clear_existing": True}, context)).is_error
+	assert (await write_handlers.reload_sources({"clear_existing": True}, context)).is_error

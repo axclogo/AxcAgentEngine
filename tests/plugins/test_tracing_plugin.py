@@ -293,11 +293,10 @@ async def test_tracing_exporter_callback_schedule_and_audit_branches():
 		"include_arguments": True,
 		"include_result": True,
 		"audit_mode": True,
-		"exporter": exporter,
 	}
 	from axc_agent_engine.plugins.builtin.tracing.plugin import TracingPlugin
 	p = TracingPlugin()
-	p.initialize(config, PluginContext(kv_store=kv))
+	p.initialize(config, PluginContext(kv_store=kv, resources={"tracing.exporter": exporter}))
 	p.set_callback(bad_callback)
 	ctx = ExecutionContext()
 	await p.on_execution_start(ctx)

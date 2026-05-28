@@ -1,6 +1,3 @@
-import sys
-import types
-
 import pytest
 
 from axc_agent_engine.core.context import ExecutionContext, ExecutionServices
@@ -11,7 +8,6 @@ from axc_agent_engine.plugins.builtin.memory.plugin import (
 	MemoryPrivacyPolicy,
 	MemoryRepository,
 	MemoryScopeResolver,
-	MemoryVectorIndex,
 	_access_snapshot,
 	_changed_access_ids,
 	_is_negative_fact,
@@ -20,36 +16,8 @@ from axc_agent_engine.plugins.builtin.memory.plugin import (
 	_public_memory,
 	_resource_name,
 )
-from axc_agent_engine.plugins.builtin.memory.support.embedding import HashEmbeddingClient, OpenAICompatibleEmbeddingClient, _hash_embedding
 from axc_agent_engine.plugins.builtin.memory.support.graph import DefaultEntityResolver, GraphMemory
 from axc_agent_engine.plugins.builtin.memory.support.service import MemoryLayer, MemoryService
-
-
-async def test_hash_embedding_and_openai_embedding(monkeypatch):
-	assert len(_hash_embedding("hello world", 4)) == 4
-	assert _hash_embedding("", 8) == [0.0] * 8
-	client = HashEmbeddingClient(dimensions=2)
-	vectors = await client.embed(["hello", "world"])
-	assert len(vectors[0]) == 8
-
-	with pytest.raises(ValueError):
-		OpenAICompatibleEmbeddingClient("")
-
-	class Response:
-		def raise_for_status(self): return None
-		def json(self): return {"data": [{"embedding": [1, 2]}]}
-	class AsyncClient:
-		def __init__(self, timeout): pass
-		async def __aenter__(self): return self
-		async def __aexit__(self, *args): return False
-		async def post(self, url, headers, json):
-			self.last = (url, headers, json)
-			return Response()
-	Httpx = types.SimpleNamespace(AsyncClient=AsyncClient)
-	monkeypatch.setitem(sys.modules, "httpx", Httpx)
-	emb = OpenAICompatibleEmbeddingClient("http://base/", api_key="k")
-	assert await emb.embed([]) == []
-	assert await emb.embed(["x"]) == [[1, 2]]
 
 
 def test_graph_memory_entities_relations_and_search():
@@ -120,61 +88,6 @@ async def test_memory_repository_scope_privacy_and_helpers():
 	assert _resource_name(None, "d") == "d"
 	assert _resource_name(False, "d") == ""
 	assert _resource_name("x", "d") == "x"
-
-
-async def test_memory_vector_index_success_and_failure_paths():
-	class Embedding:
-		def __init__(self, fail=False, mismatch=False):
-			self.fail = fail
-			self.mismatch = mismatch
-		async def embed(self, texts):
-			if self.fail:
-				raise RuntimeError("embed failed")
-			return [[1.0, 0.0]] if not self.mismatch else []
-
-	class VectorStore:
-		def __init__(self, fail_add=False, fail_delete=False, fail_search=False):
-			self.fail_add = fail_add
-			self.fail_delete = fail_delete
-			self.fail_search = fail_search
-			self.deleted = []
-		async def add(self, texts, embeddings, metadata):
-			if self.fail_add:
-				raise RuntimeError("add failed")
-			return ["vec1"]
-		async def delete(self, ids):
-			if self.fail_delete:
-				raise RuntimeError("delete failed")
-			self.deleted.extend(ids)
-		async def search(self, embedding, top_k):
-			if self.fail_search:
-				raise RuntimeError("search failed")
-			memory_id = getattr(self, "memory_id", "m1")
-			return [
-				{"metadata": {"scope": "scope", "memory_id": memory_id, "layer": "semantic"}},
-				{"metadata": {"scope": "other", "memory_id": "m2", "layer": "semantic"}},
-			]
-
-	service = MemoryService()
-	item = service.add("alpha memory", layer=MemoryLayer.SEMANTIC)
-	mem = item.to_dict()
-	vector_store = VectorStore()
-	vector_store.memory_id = item.id
-	index = MemoryVectorIndex(vector_store, Embedding())
-	updated = await index.upsert(mem, "scope", service)
-	assert updated["metadata"]["vector_id"] == "vec1"
-	assert service.store.get_item(item.id).metadata["vector_id"] == "vec1"
-	updated["metadata"]["vector_id"] = "old"
-	again = await index.upsert(updated, "scope", service)
-	assert again["metadata"]["vector_id"] == "vec1"
-	assert await index.retrieve("alpha", None, 1, service, "scope", []) == [service.store.get_item(item.id)]
-
-	assert await MemoryVectorIndex(None, None).embed_texts(["x"]) == []
-	assert await MemoryVectorIndex(VectorStore(), Embedding(fail=True)).embed_texts(["x"]) == []
-	assert await MemoryVectorIndex(VectorStore(), Embedding(mismatch=True)).embed_texts(["x"]) == []
-	assert await MemoryVectorIndex(VectorStore(fail_add=True), Embedding()).upsert(mem, "scope", service) == mem
-	await MemoryVectorIndex(VectorStore(fail_delete=True), Embedding()).delete([item.id], [{"id": item.id, "metadata": {"vector_id": "v"}}], MemoryRepository(None, MemoryScopeResolver("n", [], False)), "scope")
-	assert await MemoryVectorIndex(VectorStore(fail_search=True), Embedding()).retrieve("alpha", None, 1, service, "scope", [item]) == [item]
 
 
 async def test_memory_plugin_loading_capacity_audit_and_extraction_paths():

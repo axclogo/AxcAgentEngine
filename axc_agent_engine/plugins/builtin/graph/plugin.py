@@ -28,15 +28,16 @@ class GraphPlugin(BasePlugin):
 	def initialize(self, config: dict, plugin_ctx: "PluginContext") -> None:
 		super().initialize(config, plugin_ctx)
 		self._config = GraphConfig.from_dict(config)
-		store_resource = str(config.get("store") or "graph.store")
-		store = plugin_ctx.resources.get(store_resource) if store_resource else None
+		store_resource = "graph.store"
+		store = plugin_ctx.resources.get(store_resource)
+		if store is None:
+			raise ValueError("graph plugin requires mounts['graph.store']")
 		self._service = GraphService(self._config, store)
 		self._presenter = GraphPresenter(self._config, plugin_ctx)
 		self._audit_recorder = GraphAuditRecorder(self._config)
 		self._handlers = GraphToolHandlers(self._service, self._presenter, self._audit_recorder)
 		self._tool_factory = GraphToolFactory(self._config, self._handlers.tools())
 
-		#English: Compatibility attributes for existing direct tests and first-version callers. 中文：源码说明。
 		self._store = self._service.store
 		self._load_errors = self._service.load_errors
 		self._source_stats = self._service.source_stats

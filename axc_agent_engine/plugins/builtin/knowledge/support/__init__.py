@@ -13,7 +13,6 @@ from axc_agent_engine.plugins.builtin.knowledge.support.retrieval import (
 	BM25Index,
 	CascadeReranker,
 	EmbeddingClient,
-	ExternalReranker,
 	HashEmbeddingClient,
 	HybridRetriever,
 	InMemoryKnowledgeIndexStore,
@@ -25,12 +24,12 @@ from axc_agent_engine.plugins.builtin.knowledge.support.retrieval import (
 	LLMQueryRewriter,
 	LLMReranker,
 	NoopQueryRewriter,
-	OpenAICompatibleEmbeddingClient,
 	QueryRewriter,
 	Reranker,
 	RetrievalResult,
 	RetrievalTrace,
 	ScoreReranker,
+	rrf_merge,
 )
 
 __all__ = [
@@ -39,7 +38,6 @@ __all__ = [
 	"Chunk",
 	"DocumentParser",
 	"EmbeddingClient",
-	"ExternalReranker",
 	"HashEmbeddingClient",
 	"HybridRetriever",
 	"IngestionResult",
@@ -53,7 +51,6 @@ __all__ = [
 	"LLMReranker",
 	"LocalFileIngestionPipeline",
 	"NoopQueryRewriter",
-	"OpenAICompatibleEmbeddingClient",
 	"PdfDocumentParser",
 	"QueryRewriter",
 	"Reranker",
@@ -63,4 +60,5 @@ __all__ = [
 	"SemanticChunker",
 	"SourceDocument",
 	"TextDocumentParser",
+	"rrf_merge",
 ]

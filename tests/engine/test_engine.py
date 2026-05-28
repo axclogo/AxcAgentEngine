@@ -212,6 +212,16 @@ plugins:
 				models=AgentModels(default=mock_llm),
 				overrides={"runtime.max_rounds": 0},
 			)
+		with pytest.raises(SchemaError, match="mounts"):
+			template.instantiate(
+				models=AgentModels(default=mock_llm),
+				overrides={"plugins.graph.store": "graph.store"},
+			)
+		with pytest.raises(SchemaError, match="YAML-serializable"):
+			template.instantiate(
+				models=AgentModels(default=mock_llm),
+				overrides={"plugins.capture.value": object()},
+			)
 
 	@pytest.mark.asyncio
 	async def test_unload_agent(self, mock_llm, agent_yaml, compress_registry):

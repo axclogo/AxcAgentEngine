@@ -138,7 +138,10 @@ class GraphToolHandlers:
 		started = time.time()
 		if not self._service.config.allow_writes:
 			return await self.error("graph writes disabled", context, "graph_reload_sources", "graph_write", "moderate", started, "graph.write_disabled")
-		self._service.reload_sources(clear_existing=bool(args.get("clear_existing", False)))
+		try:
+			self._service.reload_sources(clear_existing=bool(args.get("clear_existing", False)))
+		except Exception as e:
+			return await self.error(str(e), context, "graph_reload_sources", "graph_write", "moderate", started, "graph.reload_failed")
 		self.sync_metadata(exec_ctx_from_tool_context(context), "reload_sources")
 		await self.audit(exec_ctx_from_tool_context(context), "graph_sources_reloaded", "graph_reload_sources", "graph_write", "moderate", started, True, self._service.source_stats)
 		return ToolOutput.json_output(self._service.status_payload(), summary=f"已重新加载 {self._service.source_stats['sources']} 个 graph source")

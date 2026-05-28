@@ -1,11 +1,7 @@
 import pytest
-import sys
-import types
-
 from axc_agent_engine.plugins.builtin.knowledge.support.ingestion import PdfDocumentParser, SourceDocument, TextDocumentParser
 from axc_agent_engine.plugins.builtin.knowledge.support import (
 	CascadeReranker,
-	ExternalReranker,
 	LLMQueryRewriter,
 	LLMReranker,
 	HashEmbeddingClient,
@@ -221,35 +217,7 @@ async def test_retrieval_filter_vector_hybrid_and_helpers():
 	assert _cosine([0], [0]) == 0.0
 
 
-@pytest.mark.asyncio
-async def test_external_reranker_and_parse_helpers(monkeypatch):
-	with pytest.raises(ValueError):
-		ExternalReranker("")
-	assert await ExternalReranker("http://rerank").rerank("q", [], 2) == []
-
-	class Response:
-		def raise_for_status(self):
-			return None
-		def json(self):
-			return {"results": [{"index": 1, "score": 0.8}, {"document_index": 0, "relevance_score": "0.2"}]}
-	class Client:
-		def __init__(self, timeout):
-			self.timeout = timeout
-		async def __aenter__(self):
-			return self
-		async def __aexit__(self, *args):
-			return False
-		async def post(self, endpoint, headers, json):
-			assert headers["Authorization"] == "Bearer k"
-			return Response()
-	monkeypatch.setitem(sys.modules, "httpx", types.SimpleNamespace(AsyncClient=Client))
-	results = [
-		RetrievalResult(id="a", text="alpha", score=0.1, retrieval="bm25"),
-		RetrievalResult(id="b", text="beta", score=0.2, retrieval="bm25"),
-	]
-	reranked = await ExternalReranker("http://rerank", api_key="k").rerank("q", results, 2)
-	assert [item.id for item in reranked] == ["b", "a"]
-
+def test_parse_helpers():
 	assert _parse_rerank_scores([0.1, 0.2], 2) == [(0, 0.1), (1, 0.2)]
 	assert _parse_rerank_scores({"scores": [1]}, 2) == [(0, 1.0)]
 	assert _parse_rerank_scores("bad", 2) == []
@@ -266,7 +234,7 @@ async def test_query_rewriters_and_knowledge_plugin_helpers(tmp_path):
 	assert await NoopQueryRewriter().rewrite("") == []
 	assert await LLMQueryRewriter(None).rewrite("query", max_queries=1) == ["query"]
 	assert await LLMQueryRewriter(FakeLLM("not-json")).rewrite("query", max_queries=3) == ["query"]
-	assert _resource_name({"resource": "r"}, "d") == "r"
+	assert _resource_name({"resource": "r"}, "d") == "d"
 	assert _resource_name(12, "d") == "d"
 	base = _filter_from_config(KnowledgeFilter(metadata={"a": 1}), namespace="n")
 	assert base.namespace == "n"

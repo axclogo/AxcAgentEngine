@@ -101,8 +101,8 @@ async for event in agent.stream("Build a REST API for user management"):
 | Tool output | enforced `ToolOutput` |
 | Tool name mapping | provider-side model-safe mapping |
 | Context compression | built-in `compress` plugin |
-| Memory | four layers + KV fallback + dedup + decay + graph hooks |
-| Knowledge | semantic chunking + embeddings + BM25/vector + optional rerank |
+| Memory | four layers + KV persistence + dedup + decay |
+| Knowledge | plugin-owned hybrid retrieval over local sources and mounted resources |
 | MCP | stdio / JSON-RPC HTTP / official SDK |
 | Human approval | approval queue + `ask_human` |
 | Sidecar | multi-agent / simulation / eval / cost / failure mining / distillation |
@@ -149,10 +149,6 @@ plugins:
     enabled: true
     sources: ["./docs"]
     namespace: "default"
-    embedding:
-      base_url: "https://api.openai.com/v1"
-      api_key: "sk-xxx"
-      model: "text-embedding-3-small"
 
   memory:
     enabled: true
@@ -175,6 +171,7 @@ Notes:
 - Tools with a non-empty capability are denied by default; list them in `runtime.allowed_capabilities`.
 - File and command tools require `runtime.workspace` by default.
 - LLM configuration is provided in code, not in Agent YAML.
+- Official builtin plugins do not configure external endpoints, API keys, or client objects in YAML. External resources are mounted in code.
 
 ## Provider Configuration
 
@@ -221,7 +218,9 @@ agent = template.instantiate(
         fallback=backup_provider,
     ),
     mounts={
-        "knowledge_vector": tenant_kb_vector_store,
+        "knowledge.embedding": tenant_embedding_provider,
+        "knowledge.vector_store": tenant_kb_vector_store,
+        "knowledge.documents": tenant_document_store,
         "graph.store": tenant_graph_store,
         "skill.catalog": tenant_skill_catalog,
     },
@@ -236,9 +235,11 @@ agent = template.instantiate(
 ```
 
 - `models` binds provider objects for this Agent instance; the Engine does not own model configuration.
-- `mounts` injects host-owned resources for this instantiation and overrides Engine-level resources with the same name.
+- `mounts` injects host-owned runtime resources for this instantiation and overrides Engine-level resources with the same name.
 - `metadata` attaches instance metadata; request metadata can still override it inside a single chat/stream call.
-- `overrides` patches validated Agent YAML fields before plugins are initialized.
+- `overrides` patches validated Agent YAML fields before plugins are initialized. It only accepts YAML-serializable values and cannot bind runtime resources.
+
+Official resource slots include `knowledge.embedding`, `knowledge.vector_store`, `knowledge.documents`, `knowledge.index`, `knowledge.reranker`, `graph.store`, `skill.catalog`, and `tracing.exporter`. Do not set these through `overrides`; bind them with `mounts`.
 
 ## API
 

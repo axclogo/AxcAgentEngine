@@ -179,7 +179,7 @@ class TracingPlugin(BasePlugin):
 		self._queue_limit = _bounded_int(config.get("queue_limit", 1000), 1, 100_000)
 		self._redact_keys = {str(k).lower() for k in config.get("redact_keys", [])} | _DEFAULT_REDACT_KEYS
 		self._audit_mode = bool(config.get("audit_mode", False))
-		self._exporter: Callable[[dict], Any] | None = config.get("exporter")
+		self._exporter: Callable[[dict], Any] | None = plugin_ctx.resources.get("tracing.exporter")
 		self._callback: Callable[[dict], None] | None = None
 		self._span_store = getattr(plugin_ctx, "span_store", None)
 		self._kv_store = getattr(plugin_ctx, "kv_store", None)
@@ -679,6 +679,14 @@ def _bounded_float(value: Any, minimum: float, maximum: float) -> float:
 	except (TypeError, ValueError):
 		return maximum
 	return max(minimum, min(maximum, parsed))
+
+
+def _resource_name(value: Any, default: str) -> str:
+	if value is None or value is True:
+		return default
+	if value is False:
+		return ""
+	return str(value)
 
 
 def _log_span(span: dict[str, Any]) -> None:

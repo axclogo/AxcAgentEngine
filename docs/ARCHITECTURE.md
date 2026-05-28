@@ -55,6 +55,27 @@ Agent.chat/stream(message, session_id, llm_options)
   → save session (auto-persist)
 ```
 
+## Builtin Plugin Boundary
+
+Official builtin plugins keep agent behavior in the plugin and external resource
+ownership in the host:
+
+- Plugin logic may choose retrieval, memory, graph, tracing, or skill strategies.
+- YAML config only describes stable behavior and policy.
+- Runtime objects are bound through `mounts` at `AgentTemplate.instantiate()`.
+- `overrides` only patches YAML-serializable config fields. It cannot inject
+  client/store/provider objects or change official resource slots.
+- Builtin plugins must not create external network clients from plugin YAML
+  endpoint/API-key fields.
+- Missing required resources and resource call failures are explicit errors, not
+  silent fallback paths.
+
+Knowledge uses plugin-owned retrieval strategy over local `sources` plus mounted
+resources such as `knowledge.embedding`, `knowledge.vector_store`,
+`knowledge.documents`, `knowledge.index`, and `knowledge.reranker`. The plugin
+decides how to combine BM25, vector search, fusion, filtering, tracing, and
+reranking; the host owns any external client lifecycle.
+
 ## POR (Plan-Observe-Replan)
 
 POR is selected by TransactionRouter based on runtime routing policy:

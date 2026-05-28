@@ -102,8 +102,8 @@ async for event in agent.stream("Build a REST API for user management"):
 | 工具输出 | 强制 `ToolOutput` |
 | 工具名映射 | Provider 负责模型安全映射 |
 | 上下文压缩 | 内置 `compress` 插件 |
-| 记忆 | 四层 + KV fallback + 去重 + 衰减 + 图 hook |
-| 知识库 | 语义分块 + embedding + BM25/向量 + 可选 rerank |
+| 记忆 | 四层 + KV 持久化 + 去重 + 衰减 |
+| 知识库 | 插件自管混合检索，支持本地 sources 和运行时注入资源 |
 | MCP | stdio / JSON-RPC HTTP / 官方 SDK |
 | 人工审批 | 审批队列 + `ask_human` |
 | Sidecar | 多 Agent / 仿真 / 评测 / 成本 / 失败挖掘 / 蒸馏 |
@@ -150,10 +150,6 @@ plugins:
     enabled: true
     sources: ["./docs"]
     namespace: "default"
-    embedding:
-      base_url: "https://api.openai.com/v1"
-      api_key: "sk-xxx"
-      model: "text-embedding-3-small"
 
   memory:
     enabled: true
@@ -176,6 +172,7 @@ plugins:
 - 带非空 capability 的工具默认拒绝，必须写入 `runtime.allowed_capabilities`。
 - 文件和命令类工具默认要求配置 `runtime.workspace`。
 - LLM 配置由代码提供，不写在 Agent YAML。
+- 官方内置插件不在 YAML 里配置外部 endpoint、API key 或 client 对象；外部资源必须在代码里通过 `mounts` 注入。
 
 ## Provider 配置
 
@@ -222,7 +219,9 @@ agent = template.instantiate(
         fallback=backup_provider,
     ),
     mounts={
-        "knowledge_vector": tenant_kb_vector_store,
+        "knowledge.embedding": tenant_embedding_provider,
+        "knowledge.vector_store": tenant_kb_vector_store,
+        "knowledge.documents": tenant_document_store,
         "graph.store": tenant_graph_store,
         "skill.catalog": tenant_skill_catalog,
     },
@@ -239,7 +238,9 @@ agent = template.instantiate(
 - `models` 绑定这个 Agent 实例使用的模型 provider；Engine 不再持有模型配置。
 - `mounts` 注入宿主持有的运行时资源；同名资源会覆盖 Engine 级资源。
 - `metadata` 注入实例元数据；单次 chat/stream 请求的 metadata 仍可覆盖它。
-- `overrides` 在插件初始化前 patch 并重新校验 Agent YAML 字段。
+- `overrides` 在插件初始化前 patch 并重新校验 Agent YAML 字段。它只接受 YAML 可序列化值，不能绑定运行时资源。
+
+官方资源槽位包括 `knowledge.embedding`、`knowledge.vector_store`、`knowledge.documents`、`knowledge.index`、`knowledge.reranker`、`graph.store`、`skill.catalog`、`tracing.exporter`。不要通过 `overrides` 设置这些槽位，运行时对象统一使用 `mounts`。
 
 ## API
 

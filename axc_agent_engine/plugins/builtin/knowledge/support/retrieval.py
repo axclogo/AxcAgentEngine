@@ -192,35 +192,6 @@ class HashEmbeddingClient:
 		return [_hash_embedding(text, self.dimensions) for text in texts]
 
 
-class OpenAICompatibleEmbeddingClient:
-	"""Small embedding HTTP client used when configured by plugins.
-中文：此文档说明相关引擎组件的行为。"""
-
-	def __init__(self, base_url: str, api_key: str = "", timeout: int = 30) -> None:
-		if not base_url:
-			raise ValueError("base_url is required")
-		self.base_url = base_url.rstrip("/")
-		self.api_key = api_key
-		self.timeout = timeout
-
-	async def embed(self, texts: list[str]) -> list[list[float]]:
-		if not texts:
-			return []
-		import httpx
-		headers = {"Content-Type": "application/json"}
-		if self.api_key:
-			headers["Authorization"] = f"Bearer {self.api_key}"
-		async with httpx.AsyncClient(timeout=self.timeout) as client:
-			response = await client.post(
-				f"{self.base_url}/embeddings",
-				headers=headers,
-				json={"input": texts},
-			)
-			response.raise_for_status()
-			data = response.json()
-			return [item["embedding"] for item in data.get("data", [])]
-
-
 class ScoreReranker:
 	"""Lexical reranker that keeps the engine usable without a model dependency.
 中文：此文档说明相关引擎组件的行为。"""
@@ -244,56 +215,6 @@ class ScoreReranker:
 			))
 		reranked.sort(key=lambda item: item.score, reverse=True)
 		return reranked[:top_k]
-
-
-class ExternalReranker:
-	"""HTTP reranker endpoint adapter.
-
-	The endpoint is expected to accept query and documents, then return
-	either `results: [{index, score}]`, `data: [{index, score}]`, or a score list.
-	
-中文：此文档说明相关引擎组件的行为。"""
-
-	def __init__(self, endpoint: str, api_key: str = "", timeout: float = 30.0) -> None:
-		if not endpoint:
-			raise ValueError("endpoint is required")
-		self.endpoint = endpoint
-		self.api_key = api_key
-		self.timeout = timeout
-
-	async def rerank(self, query: str, results: list[RetrievalResult], top_k: int) -> list[RetrievalResult]:
-		if not results:
-			return []
-		import httpx
-		headers = {"Content-Type": "application/json"}
-		if self.api_key:
-			headers["Authorization"] = f"Bearer {self.api_key}"
-		payload = {
-			"query": query,
-			"documents": [result.text for result in results],
-		}
-		async with httpx.AsyncClient(timeout=self.timeout) as client:
-			response = await client.post(self.endpoint, headers=headers, json=payload)
-			response.raise_for_status()
-		scores = _parse_rerank_scores(response.json(), len(results))
-		if not scores:
-			return []
-		scored = []
-		for idx, score in scores:
-			if 0 <= idx < len(results):
-				result = results[idx]
-				scored.append(RetrievalResult(
-					id=result.id,
-					text=result.text,
-					score=float(score),
-					retrieval=f"{result.retrieval}+model_rerank",
-					source=result.source,
-					metadata=result.metadata,
-					citation=result.citation,
-					highlights=result.highlights,
-				))
-		scored.sort(key=lambda item: item.score, reverse=True)
-		return scored[:top_k]
 
 
 class LLMReranker:

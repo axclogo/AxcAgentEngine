@@ -8,27 +8,6 @@ from axc_agent_engine.core.context import ExecutionContext
 from axc_agent_engine.observability.audit import InMemoryAuditSink
 from axc_agent_engine.storage.in_memory import InMemoryKVStore
 from axc_agent_engine.plugins import PluginContext
-from axc_agent_engine.runtime.resources import ResourceRegistry
-
-
-class MockVectorStore:
-	def __init__(self):
-		self.added_texts: list[str] = []
-		self.added_metadata: list[dict] = []
-		self.search_results: list[dict] = []
-		self.deleted_ids: list[str] = []
-
-	async def add(self, texts: list[str], embeddings: list[list[float]], metadata: list[dict]) -> list[str]:
-		self.added_texts.extend(texts)
-		self.added_metadata.extend(metadata)
-		start = len(self.added_texts) - len(texts)
-		return [f"vec_{start + index}" for index in range(len(texts))]
-
-	async def search(self, embedding: list[float], top_k: int = 5) -> list[dict]:
-		return self.search_results[:top_k]
-
-	async def delete(self, ids: list[str]) -> None:
-		self.deleted_ids.extend(ids)
 
 
 @pytest.fixture
@@ -276,30 +255,20 @@ class TestMemoryPlugin:
 		assert record["access_count"] > 0
 
 	@pytest.mark.asyncio
-	async def test_vector_store_upsert_search_and_delete(self):
+	async def test_memory_search_and_delete_use_kv_lexical_store(self):
 		store = InMemoryKVStore()
-		vector_store = MockVectorStore()
-		resources = ResourceRegistry({"memory_vector": vector_store})
 		p = MemoryPlugin()
-		p.initialize({"min_content_length": 3, "vector_store": "memory_vector"}, PluginContext(kv_store=store, resources=resources))
+		p.initialize({"min_content_length": 3}, PluginContext(kv_store=store))
 		ctx = ExecutionContext()
 		ctx.state.metadata.update({"tenant_id": "t1"})
 		await p.on_execution_start(ctx)
-		await p._add_memory("Vector backed enterprise memory", 0.9, exec_ctx=ctx)
+		await p._add_memory("Enterprise memory for lexical search", 0.9, exec_ctx=ctx)
 		mem = p._memories[0]
-		vector_id = mem["metadata"]["vector_id"]
-		vector_store.search_results = [{
-			"id": vector_id,
-			"text": mem["content"],
-			"score": 0.99,
-			"metadata": vector_store.added_metadata[0],
-		}]
 		search = await p._tool_memory_search({"query": "enterprise memory", "top_k": 1}, {"exec_ctx": ctx})
-		assert vector_store.added_texts == ["Vector backed enterprise memory"]
 		assert search.content["memories"][0]["id"] == mem["id"]
 		deleted = await p._tool_memory_delete({"id": mem["id"]}, {"exec_ctx": ctx})
 		assert deleted.content["deleted"] is True
-		assert vector_id in vector_store.deleted_ids
+		assert await store.get(f"memory:{p._scope_resolver.scope_id(ctx)}:{mem['id']}") is None
 
 	@pytest.mark.asyncio
 	async def test_memory_write_and_delete_audit_events(self):

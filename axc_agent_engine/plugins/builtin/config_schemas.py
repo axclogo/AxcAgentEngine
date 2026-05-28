@@ -87,7 +87,7 @@ COMPRESS_CONFIG_SCHEMA = config_schema(
 MEMORY_CONFIG_SCHEMA = config_schema(
 	"memory",
 	"记忆系统",
-	"控制记忆提取、存储、召回、隐私和向量索引。",
+	"控制记忆提取、存储、召回和隐私。",
 	[
 		config_field("context_budget", "上下文预算", "integer", "注入记忆上下文的字符预算。", label_en="Context budget", default=2000),
 		config_field("decay_half_life", "衰减半衰期", "integer", "记忆重要性衰减半衰期天数。", label_en="Decay half life", default=7),
@@ -101,14 +101,6 @@ MEMORY_CONFIG_SCHEMA = config_schema(
 		config_field("max_memories", "最大记忆数", "integer", "内存缓存中保留的最大记忆数量。", label_en="Max memories", default=10000),
 		config_field("ttl_days", "TTL 天数", "integer", "记忆过期天数，0 表示不过期。", label_en="TTL days", default=0),
 		config_field("auto_extract", "自动提取", "boolean", "是否在轮次结束时自动提取记忆。", label_en="Auto extract", default=True),
-		config_field("vector_store", "向量资源", "string", "向量存储资源名。", label_en="Vector store", default="memory_vector"),
-		object_field("embedding", "Embedding", "记忆向量化配置。", [
-			config_field("mode", "模式", "string", "embedding 模式；为空时按 base_url/model 或 hash 回退决定。", label_en="Mode", default=""),
-			config_field("base_url", "接口地址", "string", "OpenAI 兼容 embedding 服务地址；由宿主或插件运行时决定。", label_en="Base URL", default=None),
-			config_field("api_key", "API Key", "string", "embedding API Key；由宿主或插件运行时决定。", label_en="API key", default=None, advanced=True),
-			config_field("timeout", "超时", "integer", "embedding 请求超时秒数。", label_en="Timeout", default=30),
-			config_field("dimensions", "维度", "integer", "hash embedding 的维度。", label_en="Dimensions", default=256),
-		], label_en="Embedding"),
 	],
 	display_name_en="Memory",
 )
@@ -117,7 +109,7 @@ MEMORY_CONFIG_SCHEMA = config_schema(
 KNOWLEDGE_CONFIG_SCHEMA = config_schema(
 	"knowledge",
 	"知识库",
-	"控制知识源加载、切块、检索、重排和 query rewrite。",
+	"控制知识源加载、混合检索、过滤、重排和 query rewrite；外部资源通过 mounts 注入。",
 	[
 		array_field("sources", "知识源", "本地知识源路径列表。", _string_item(), label_en="Sources"),
 		config_field("chunk_size", "切块大小", "integer", "知识文档切块最大字符数。", label_en="Chunk size", default=512),
@@ -126,21 +118,9 @@ KNOWLEDGE_CONFIG_SCHEMA = config_schema(
 		config_field("filters", "默认过滤器", "object", "默认检索过滤器。", label_en="Filters", default={}),
 		config_field("candidate_k", "候选数量", "integer", "混合检索候选数量。", label_en="Candidate K", default=30),
 		config_field("include_trace", "包含追踪", "boolean", "检索结果是否默认包含 trace 信息。", label_en="Include trace", default=False),
-		config_field("vector_store", "向量资源", "string", "向量存储资源名。", label_en="Vector store", default="knowledge_vector"),
 		config_field("metadata", "默认元数据", "object", "导入知识源时附加的默认 metadata。", label_en="Metadata", default={}),
-		object_field("embedding", "Embedding", "知识库 embedding 配置。", [
-			config_field("base_url", "接口地址", "string", "OpenAI 兼容 embedding 服务地址；由宿主或插件运行时决定。", label_en="Base URL", default=None),
-			config_field("api_key", "API Key", "string", "embedding API Key；由宿主或插件运行时决定。", label_en="API key", default=None, advanced=True),
-			config_field("batch_size", "批大小", "integer", "embedding 批量大小。", label_en="Batch size", default=64),
-			config_field("retries", "重试次数", "integer", "embedding 请求重试次数。", label_en="Retries", default=2),
-			config_field("retry_delay", "重试间隔", "number", "embedding 重试等待秒数。", label_en="Retry delay", default=0.5),
-			config_field("timeout", "超时", "number", "embedding 请求超时秒数。", label_en="Timeout", default=30),
-		], label_en="Embedding"),
 		object_field("rerank", "重排", "检索结果重排配置。", [
-			config_field("mode", "模式", "string", "重排模式。", label_en="Mode", default="score", enum=["score", "model", "external", "llm", "cascade"]),
-			config_field("endpoint", "接口地址", "string", "外部 rerank endpoint；为空时不启用外部 rerank。", label_en="Endpoint", default=""),
-			config_field("api_key", "API Key", "string", "外部 rerank API Key。", label_en="API key", default="", advanced=True),
-			config_field("timeout", "超时", "number", "外部 rerank 请求超时秒数。", label_en="Timeout", default=30),
+			config_field("mode", "模式", "string", "重排模式。外部 reranker 只能通过 mounts['knowledge.reranker'] 注入。", label_en="Mode", default="score", enum=["score", "llm"]),
 		], label_en="Rerank"),
 		object_field("query_rewrite", "查询改写", "查询改写配置。", [
 			config_field("enabled", "启用查询改写", "boolean", "是否使用 utility LLM 做查询改写。", label_en="Enabled", default=False),
@@ -264,7 +244,6 @@ TRACING_CONFIG_SCHEMA = config_schema(
 		config_field("queue_limit", "队列上限", "integer", "异步导出队列上限。", label_en="Queue limit", default=1000),
 		array_field("redact_keys", "脱敏键", "额外脱敏字段名；会与内置敏感键合并。", _string_item(), label_en="Redact keys"),
 		config_field("audit_mode", "审计模式", "boolean", "是否以审计模式记录 trace。", label_en="Audit mode", default=False),
-		config_field("exporter", "导出器", "object", "可调用 exporter；由宿主或插件运行时决定。", label_en="Exporter", default=None, advanced=True),
 	],
 	display_name_en="Tracing",
 )
@@ -361,7 +340,6 @@ GRAPH_CONFIG_SCHEMA = config_schema(
 	[
 		array_field("sources", "图谱源", "图谱数据源路径列表。", _string_item(), label_en="Sources"),
 		config_field("namespace", "命名空间", "string", "图谱命名空间。", label_en="Namespace", default="default"),
-		config_field("store", "存储资源", "string", "图谱存储资源名。", label_en="Store resource", default="graph.store", advanced=True),
 		config_field("allow_writes", "允许写入", "boolean", "是否允许 upsert 实体和关系。", label_en="Allow writes", default=True),
 		config_field("allow_deletes", "允许删除", "boolean", "是否允许删除实体和关系。", label_en="Allow deletes", default=True),
 		array_field("allowed_entity_types", "允许实体类型", "允许写入的实体类型列表。", _string_item(), label_en="Allowed entity types"),
@@ -389,7 +367,6 @@ SKILL_CONFIG_SCHEMA = config_schema(
 	"技能目录加载、过滤和受控脚本执行配置。",
 	[
 		array_field("paths", "技能路径", "技能目录路径列表。", _string_item(), label_en="Paths"),
-		config_field("catalog", "技能目录资源", "string", "宿主注入的技能目录资源名。", label_en="Catalog resource", default="skill.catalog", advanced=True),
 		array_field("allowed_skills", "允许技能", "允许加载的技能名列表；为空表示不限制。", _string_item(), label_en="Allowed skills"),
 		array_field("denied_skills", "拒绝技能", "禁止加载的技能名列表。", _string_item(), label_en="Denied skills"),
 		config_field("allow_scripts", "允许脚本", "boolean", "是否允许运行技能脚本。", label_en="Allow scripts", default=True),

@@ -43,6 +43,17 @@ from axc_agent_engine.tools.registry import ToolRegistry
 
 logger = logging.getLogger(__name__)
 
+_RESOURCE_OVERRIDE_PATHS = {
+	"plugins.knowledge.index",
+	"plugins.knowledge.documents",
+	"plugins.knowledge.embedding",
+	"plugins.knowledge.vector_store",
+	"plugins.knowledge.reranker",
+	"plugins.graph.store",
+	"plugins.skill.catalog",
+	"plugins.tracing.exporter",
+}
+
 
 @dataclass(frozen=True)
 class AgentModels:
@@ -314,6 +325,11 @@ class AgentTemplate:
 
 def _apply_overrides(raw: dict[str, Any], overrides: dict[str, Any]) -> None:
 	for path, value in overrides.items():
+		path = str(path)
+		if path in _RESOURCE_OVERRIDE_PATHS:
+			raise SchemaError(f"{path} is a runtime resource; bind it with mounts, not overrides")
+		if not _is_yaml_value(value):
+			raise SchemaError("Agent overrides only accept YAML-serializable values; bind runtime objects with mounts")
 		parts = str(path).split(".")
 		if not parts or any(not part for part in parts):
 			raise SchemaError(f"Invalid override path: {path}")
@@ -327,3 +343,13 @@ def _apply_overrides(raw: dict[str, Any], overrides: dict[str, Any]) -> None:
 				raise SchemaError(f"Override path is not an object: {path}")
 			target = next_target
 		target[parts[-1]] = value
+
+
+def _is_yaml_value(value: Any) -> bool:
+	if value is None or isinstance(value, (str, int, float, bool)):
+		return True
+	if isinstance(value, list):
+		return all(_is_yaml_value(item) for item in value)
+	if isinstance(value, dict):
+		return all(isinstance(key, str) and _is_yaml_value(item) for key, item in value.items())
+	return False
