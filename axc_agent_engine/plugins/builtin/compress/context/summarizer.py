@@ -7,7 +7,7 @@ from axc_agent_engine.plugins.builtin.compress.prompts import SUMMARY_PROMPT
 
 
 class SessionSummarizer:
-	"""Circuit-broken summary generator using utility_llm.
+	"""Circuit-broken summary generator using utility_model.
 中文：此文档说明相关引擎组件的行为。"""
 
 	def __init__(self, max_tokens: int = 800, max_failures: int = 3) -> None:
@@ -15,12 +15,12 @@ class SessionSummarizer:
 		self.max_tokens = max_tokens
 		self.max_failures = max_failures
 
-	async def generate(self, utility_llm, conversation: list[str]) -> str:
-		if self.state.broken or not utility_llm or not conversation:
+	async def generate(self, utility_model, conversation: list[str]) -> str:
+		if self.state.broken or not utility_model or not conversation:
 			return self.state.content
 		prompt = SUMMARY_PROMPT.format(conversation="\n".join(conversation), max_length=self.max_tokens)
 		try:
-			self.state.content = await utility_llm.ask(prompt)
+			self.state.content = await utility_model.ask(prompt)
 			self.state.failures = 0
 		except Exception:
 			self.state.failures += 1

@@ -188,7 +188,7 @@ async def test_memory_plugin_loading_capacity_audit_and_extraction_paths():
 
 	audit = InMemoryAuditSink()
 	plugin = MemoryPlugin()
-	plugin.initialize({"min_content_length": 3, "max_memories": 1, "auto_extract": True}, PluginContext(kv_store=None, utility_llm=None))
+	plugin.initialize({"min_content_length": 3, "max_memories": 1, "auto_extract": True}, PluginContext(kv_store=None, utility_model=None))
 	ctx = ExecutionContext(services=ExecutionServices(audit_sink=audit))
 	ctx.state.metadata["agent_name"] = "agent"
 	await plugin.on_execution_start(ctx)
@@ -205,12 +205,12 @@ async def test_memory_plugin_loading_capacity_audit_and_extraction_paths():
 	await plugin._flush_background_tasks()
 
 	with_llm = MemoryPlugin()
-	with_llm.initialize({"min_content_length": 3}, PluginContext(kv_store=None, utility_llm=LLM('[{"content":"json fact","importance":0.9,"type":"episodic"}]')))
+	with_llm.initialize({"min_content_length": 3}, PluginContext(kv_store=None, utility_model=LLM('[{"content":"json fact","importance":0.9,"type":"episodic"}]')))
 	await with_llm.on_round_end(ExecutionContext(), "hello", "world", [])
 	assert with_llm._memories[0]["layer"] == MemoryLayer.EPISODIC
 
 	failing = MemoryPlugin()
-	failing.initialize({"min_content_length": 3}, PluginContext(kv_store=None, utility_llm=LLM(RuntimeError("down"))))
+	failing.initialize({"min_content_length": 3}, PluginContext(kv_store=None, utility_model=LLM(RuntimeError("down"))))
 	fail_ctx = ExecutionContext()
 	await failing.on_round_end(fail_ctx, "hello", "world", [])
 	assert fail_ctx.state.metadata["memory"]["stats"]["extraction_failures"] == 1

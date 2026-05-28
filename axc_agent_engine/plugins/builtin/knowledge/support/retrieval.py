@@ -300,15 +300,15 @@ class LLMReranker:
 	"""LLM scoring fallback for retrieval candidates.
 中文：此文档说明相关引擎组件的行为。"""
 
-	def __init__(self, utility_llm: Any, max_chars_per_doc: int = 700) -> None:
-		self.utility_llm = utility_llm
+	def __init__(self, utility_model: Any, max_chars_per_doc: int = 700) -> None:
+		self.utility_model = utility_model
 		self.max_chars_per_doc = max_chars_per_doc
 
 	async def rerank(self, query: str, results: list[RetrievalResult], top_k: int) -> list[RetrievalResult]:
-		if not self.utility_llm or not results:
+		if not self.utility_model or not results:
 			return []
 		prompt = _rerank_prompt(query, results, self.max_chars_per_doc)
-		content = await self.utility_llm.ask(prompt)
+		content = await self.utility_model.ask(prompt)
 		scores = _parse_llm_scores(content, len(results))
 		if not scores:
 			return []
@@ -360,13 +360,13 @@ class LLMQueryRewriter:
 	"""LLM-based query expansion for better recall.
 中文：此文档说明相关引擎组件的行为。"""
 
-	def __init__(self, utility_llm: Any) -> None:
-		self.utility_llm = utility_llm
+	def __init__(self, utility_model: Any) -> None:
+		self.utility_model = utility_model
 
 	async def rewrite(self, query: str, max_queries: int = 4) -> list[str]:
 		if not query:
 			return []
-		if not self.utility_llm or max_queries <= 1:
+		if not self.utility_model or max_queries <= 1:
 			return [query]
 		prompt = (
 			"请将检索问题改写为简洁的搜索查询。"
@@ -375,7 +375,7 @@ class LLMQueryRewriter:
 			f"原始问题：{query}"
 		)
 		try:
-			content = await self.utility_llm.ask(prompt)
+			content = await self.utility_model.ask(prompt)
 			items = _parse_query_array(content)
 		except Exception as exc:
 			logger.warning("[knowledge] query rewrite failed: %s", exc)

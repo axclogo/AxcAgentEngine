@@ -3,16 +3,19 @@
 ## Data Flow
 
 ```
-Engine.__init__(default_llm, message_bus, audit_sink, checkpoint_store, ...)
+Engine.__init__(message_bus, audit_sink, checkpoint_store, plugin_registry, ...)
   → create AgentMessageDispatcher(message_bus) if bus provided
-  → create ProviderRegistry
   → receive explicit PluginRegistry (empty by default)
   → create ExecutionServices(result_store, message_bus, dispatcher,
       audit_sink, checkpoint_store, command_executor, policy_evaluator)
 
-Engine.load_agent(yaml, llm="coder", fallback_llm="fast")
+Engine.load_agent_template(yaml)
   → parse YAML → AgentConfig
-  → resolve per-agent LLM via ProviderRegistry or direct config
+  → return AgentTemplate
+
+AgentTemplate.instantiate(models=AgentModels(...), mounts=..., metadata=..., overrides=...)
+  → materialize AgentConfig with overrides
+  → bind Agent-level model objects
   → create PluginContext (agent-level LLM, stores, dispatcher)
   → load_plugins() from Engine PluginRegistry → topological sort → initialize()
   → create ToolRegistry → freeze()
@@ -73,7 +76,7 @@ PORRunner receives a Plan object directly from TransactionRouter:
 All cross-agent communication goes through MessageBus + AgentMessageDispatcher:
 
 ```
-Engine creates dispatcher → load_agent starts consumer per agent
+Engine creates dispatcher → instantiate starts consumer per agent
 
 Caller (collaboration/swarm/session)
   → dispatcher.request(envelope)

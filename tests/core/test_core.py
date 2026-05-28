@@ -15,7 +15,7 @@ from axc_agent_engine.core.events import EventType
 from axc_agent_engine.core.errors import ProviderError, CancelledError
 from axc_agent_engine.core.constants import PLUGIN_CONTEXT_TAG
 from axc_agent_engine.core.schema import LLMMessage, LLMResponse, LLMUsage
-from axc_agent_engine.plugins import model_info_from_providers
+from axc_agent_engine.plugins import model_info_from_models
 
 
 class TestMessageStore:
@@ -187,7 +187,7 @@ class TestLLMCaller:
 		pm = PluginManager([])
 		caller = LLMCaller(primary=primary, fallback=mock_llm, plugin_manager=pm)
 		ctx = ExecutionContext(config=ExecutionConfig(stream=False))
-		ctx.runtime.model_info = model_info_from_providers(primary, mock_llm)
+		ctx.runtime.model_info = model_info_from_models(primary, mock_llm)
 		ctx.state.metadata["model"] = ctx.runtime.model_info.to_dict()
 		message, events = await caller.call(ctx, [{"role": "user", "content": "hi"}], None)
 		assert message["content"] == "hello"

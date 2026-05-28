@@ -94,11 +94,11 @@ class OrchestrationWorker:
 	Runs one orchestration task through MultiAgentSession.
 	"""
 
-	def __init__(self, agent_getter: Any, agent_lister: Any, dispatcher: Any, utility_llm: Any = None) -> None:
+	def __init__(self, agent_getter: Any, agent_lister: Any, dispatcher: Any, utility_model: Any = None) -> None:
 		self._agent_getter = agent_getter
 		self._agent_lister = agent_lister
 		self._dispatcher = dispatcher
-		self._utility_llm = utility_llm
+		self._utility_model = utility_model
 		self._presenter = OrchestrationEventPresenter()
 
 	async def run(self, task: OrchestrationTask, max_rounds: int, supervisor_name: str, persona: dict[str, dict]) -> None:
@@ -124,7 +124,7 @@ class OrchestrationWorker:
 				max_rounds=max(1, min(int(max_rounds), 50)),
 				supervisor=supervisor,
 				persona=persona,
-				utility_llm=self._utility_llm,
+				utility_model=self._utility_model,
 			)
 			done_reason = ""
 			async for event in session.stream():
@@ -148,14 +148,14 @@ class OrchestrationTaskService:
 	Create and track multi-agent orchestration tasks outside Agent execution.
 	"""
 
-	def __init__(self, agent_getter: Any, agent_lister: Any, dispatcher: Any, utility_llm: Any = None) -> None:
+	def __init__(self, agent_getter: Any, agent_lister: Any, dispatcher: Any, utility_model: Any = None) -> None:
 		self._agent_getter = agent_getter
 		self._agent_lister = agent_lister
 		self._dispatcher = dispatcher
-		self._utility_llm = utility_llm
+		self._utility_model = utility_model
 		self._repository = OrchestrationTaskRepository()
 		self._workers: dict[str, asyncio.Task] = {}
-		self._runner = OrchestrationWorker(agent_getter, agent_lister, dispatcher, utility_llm)
+		self._runner = OrchestrationWorker(agent_getter, agent_lister, dispatcher, utility_model)
 
 	async def create_task(
 		self,

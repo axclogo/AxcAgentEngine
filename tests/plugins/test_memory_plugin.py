@@ -35,7 +35,7 @@ class MockVectorStore:
 def memory_plugin():
 	llm = AsyncMock()
 	llm.ask = AsyncMock(return_value="0.8|Important fact about the user")
-	ctx = PluginContext(utility_llm=llm, kv_store=InMemoryKVStore())
+	ctx = PluginContext(utility_model=llm, kv_store=InMemoryKVStore())
 	p = MemoryPlugin()
 	p.initialize({"min_content_length": 10}, ctx)
 	return p

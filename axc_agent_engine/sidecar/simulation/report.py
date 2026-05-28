@@ -46,16 +46,16 @@ class LLMSimulationReportGenerator:
 	Generate structured narrative report fields with a utility LLM.
 	"""
 
-	def __init__(self, utility_llm: Any, max_timeline_steps: int = 20) -> None:
-		self.utility_llm = utility_llm
+	def __init__(self, utility_model: Any, max_timeline_steps: int = 20) -> None:
+		self.utility_model = utility_model
 		self.max_timeline_steps = max_timeline_steps
 
 	async def generate(self, report: SimulationReport) -> GeneratedSimulationReport:
-		if not self.utility_llm:
+		if not self.utility_model:
 			return GeneratedSimulationReport(summary=report.summary)
 		prompt = _build_prompt(report, self.max_timeline_steps)
 		try:
-			content = await self.utility_llm.ask(prompt)
+			content = await self.utility_model.ask(prompt)
 			return _parse_generated_report(content, fallback=report.summary)
 		except Exception as exc:
 			logger.warning("[simulation] report generation failed: %s", exc)

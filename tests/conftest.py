@@ -61,8 +61,8 @@ def mock_llm():
 @pytest.fixture
 def plugin_ctx(mock_llm):
 	return PluginContext(
-		default_llm=mock_llm,
-		utility_llm=mock_llm,
+		default_model=mock_llm,
+		utility_model=mock_llm,
 		kv_store=InMemoryKVStore(),
 		message_persistence=InMemoryMessagePersistence(),
 		span_store=InMemorySpanStore(),

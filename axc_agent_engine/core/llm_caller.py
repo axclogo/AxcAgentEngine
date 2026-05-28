@@ -16,7 +16,7 @@ from axc_agent_engine.core.errors import (
 	RetryableProviderError,
 )
 from axc_agent_engine.core.events import Event, EventType
-from axc_agent_engine.plugins import model_info_from_providers
+from axc_agent_engine.plugins import model_info_from_models
 from axc_agent_engine.core.schema import LLMResponse
 
 if TYPE_CHECKING:
@@ -280,7 +280,7 @@ class LLMCaller:
 	def _mark_fallback(self, ctx: ExecutionContext, reason: str) -> None:
 		ctx.state.fallback_triggered = True
 		ctx.state.fallback_reason = reason
-		model_info = model_info_from_providers(
-			self._primary, self._fallback, getattr(ctx, "utility_llm", None), self._fallback)
+		model_info = model_info_from_models(
+			self._primary, self._fallback, getattr(ctx, "utility_model", None), self._fallback)
 		ctx.runtime.model_info = model_info
 		ctx.state.metadata["model"] = model_info.to_dict()

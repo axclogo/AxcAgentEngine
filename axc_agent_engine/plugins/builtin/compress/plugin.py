@@ -130,7 +130,7 @@ class ToolSummaryCoordinator:
 		if not plugin._tool_summary_enabled or not plugin._pending_tool_observations:
 			plugin._pending_tool_observations.clear()
 			return
-		summary = await plugin._tool_summary_service.summarize(plugin._plugin_ctx.utility_llm, plugin._pending_tool_observations)
+		summary = await plugin._tool_summary_service.summarize(plugin._plugin_ctx.utility_model, plugin._pending_tool_observations)
 		plugin._pending_tool_observations.clear()
 		if not summary:
 			return
@@ -273,7 +273,7 @@ class CompressPlugin(BasePlugin):
 	async def _maybe_summarize(self) -> None:
 		if not self._summary_enabled or self._round_count < self._summary_after or self._summary:
 			return
-		self._summary = await self._summarizer.generate(self._plugin_ctx.utility_llm, self._conversation_buffer)
+		self._summary = await self._summarizer.generate(self._plugin_ctx.utility_model, self._conversation_buffer)
 		self._compact_failures = self._summarizer.state.failures
 		self._compact_broken = self._summarizer.state.broken
 		if self._summary:

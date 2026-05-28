@@ -37,21 +37,21 @@ class ToolObservation:
 
 
 class ToolSummaryService:
-	"""Summarizes completed tools with utility_llm, with deterministic fallback.
+	"""Summarizes completed tools with utility_model, with deterministic fallback.
 中文：此文档说明相关引擎组件的行为。"""
 
 	def __init__(self, max_chars: int = 1200, max_observations: int = 20) -> None:
 		self.max_chars = max(200, int(max_chars))
 		self.max_observations = max(1, int(max_observations))
 
-	async def summarize(self, utility_llm: Any, observations: list[ToolObservation]) -> str:
+	async def summarize(self, utility_model: Any, observations: list[ToolObservation]) -> str:
 		items = observations[-self.max_observations:]
 		if not items:
 			return ""
 		activity = "\n".join(item.compact() for item in items)
-		if utility_llm:
+		if utility_model:
 			try:
-				summary = await utility_llm.ask(TOOL_SUMMARY_PROMPT.format(activity=activity, max_chars=self.max_chars))
+				summary = await utility_model.ask(TOOL_SUMMARY_PROMPT.format(activity=activity, max_chars=self.max_chars))
 				return _truncate(str(summary).strip(), self.max_chars)
 			except Exception:
 				pass

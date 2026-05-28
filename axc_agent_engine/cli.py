@@ -8,7 +8,9 @@ import os
 import sys
 
 from axc_agent_engine.llm.config import LLMConfig
-from axc_agent_engine.engine import Engine
+from axc_agent_engine.engine import AgentModels, Engine
+from axc_agent_engine.llm.client import OpenAIClient
+from axc_agent_engine.llm.rate_limited import RateLimitedProvider
 from axc_agent_engine.core.events import EventType
 from axc_agent_engine.observability.logging import setup_logging
 from axc_agent_engine.plugins.builtin import AVAILABLE_BUILTIN_PLUGINS
@@ -54,8 +56,10 @@ async def _chat(agent_path: str) -> None:
 	if not llm_config.base_url or not llm_config.api_key:
 		print("错误: 请设置 AXC_LLM_BASE_URL 和 AXC_LLM_API_KEY 环境变量")
 		sys.exit(1)
-	engine = Engine(default_llm=llm_config, plugin_registry=_cli_plugin_registry())
-	agent = engine.load_agent(agent_path)
+	provider = _provider_from_config(llm_config)
+	engine = Engine(plugin_registry=_cli_plugin_registry())
+	template = engine.load_agent_template(agent_path)
+	agent = template.instantiate(models=AgentModels(default=provider))
 	print(f"已加载 Agent: {agent.name}")
 	print("输入 /quit 退出\n")
 	try:
@@ -108,10 +112,12 @@ def _serve(agent_path: str, port: int, agents_dir: str = "") -> None:
 	if not llm_config.base_url or not llm_config.api_key:
 		print("错误: 请设置 AXC_LLM_BASE_URL 和 AXC_LLM_API_KEY 环境变量")
 		sys.exit(1)
-	engine = Engine(default_llm=llm_config, plugin_registry=_cli_plugin_registry())
+	provider = _provider_from_config(llm_config)
+	engine = Engine(plugin_registry=_cli_plugin_registry())
 	#English: Bilingual note. 中文：预加载指定的 Agent
-	engine.load_agent(agent_path)
-	app = create_app(engine, agents_dir=agents_dir or os.path.dirname(agent_path))
+	models = AgentModels(default=provider)
+	engine.load_agent_template(agent_path).instantiate(models=models)
+	app = create_app(engine, models=models, agents_dir=agents_dir or os.path.dirname(agent_path))
 	print(f"API 服务启动: http://0.0.0.0:{port}")
 	print(f"Agent: {agent_path}")
 	uvicorn.run(app, host="0.0.0.0", port=port, log_level="info")
@@ -124,6 +130,18 @@ def _cli_plugin_registry() -> PluginRegistry:
 	registry = PluginRegistry()
 	registry.register_many(AVAILABLE_BUILTIN_PLUGINS.values())
 	return registry
+
+
+def _provider_from_config(config: LLMConfig):
+	provider = OpenAIClient(config)
+	if config.max_concurrent_requests > 0 or config.requests_per_minute > 0:
+		return RateLimitedProvider(
+			provider,
+			max_concurrent=config.max_concurrent_requests,
+			requests_per_minute=config.requests_per_minute,
+			queue_timeout=config.rate_limit_queue_timeout,
+		)
+	return provider
 
 
 if __name__ == "__main__":

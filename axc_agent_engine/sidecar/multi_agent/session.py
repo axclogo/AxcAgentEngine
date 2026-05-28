@@ -134,7 +134,7 @@ class MultiAgentSession:
 		persona: dict[str, dict] | None = None,
 		scheduler: "Scheduler | None" = None,
 		stop_condition: "StopCondition | None" = None,
-		utility_llm: Any = None,
+		utility_model: Any = None,
 	) -> None:
 		self._agents = agents
 		self._dispatcher = dispatcher
@@ -144,7 +144,7 @@ class MultiAgentSession:
 		self._supervisor = supervisor
 		self._persona = persona or {}
 		self._stopped = False
-		self._utility_llm = utility_llm
+		self._utility_model = utility_model
 		self._total_speaks = 0
 		self._agent_speaks: dict[str, int] = {}
 		self._scheduler = scheduler or self._default_scheduler()
@@ -160,12 +160,12 @@ class MultiAgentSession:
 		self._stopped = True
 
 	async def _ensure_persona_generated(self) -> None:
-		if not self._persona or not self._utility_llm:
+		if not self._persona or not self._utility_model:
 			return
 		from axc_agent_engine.sidecar.multi_agent.persona import generate_persona
 		for agent_name, persona_data in list(self._persona.items()):
 			if isinstance(persona_data, str):
-				self._persona[agent_name] = await generate_persona(self._topic, persona_data, self._utility_llm)
+				self._persona[agent_name] = await generate_persona(self._topic, persona_data, self._utility_model)
 
 	async def run(self) -> str:
 		"""English: Bilingual documentation follows.
@@ -293,7 +293,7 @@ class MultiAgentSession:
 			supervisor=self._supervisor,
 			persona=self._persona,
 			max_rounds=self._max_rounds,
-			utility_llm=self._utility_llm,
+			utility_model=self._utility_model,
 		)
 
 	def _update_social_feed(self, round_num: int) -> None:

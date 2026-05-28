@@ -200,23 +200,23 @@ class RepairPromptBuilder:
 
 
 class OutputRepairer:
-	def __init__(self, format_type: str, utility_llm: Any, prompt_builder: RepairPromptBuilder, repair_timeout: float) -> None:
+	def __init__(self, format_type: str, utility_model: Any, prompt_builder: RepairPromptBuilder, repair_timeout: float) -> None:
 		self.format_type = format_type
-		self.utility_llm = utility_llm
+		self.utility_model = utility_model
 		self.prompt_builder = prompt_builder
 		self.repair_timeout = repair_timeout
 
 	async def repair(self, content: str) -> str:
-		if not self.utility_llm:
+		if not self.utility_model:
 			return self.local_repair(content)
 		prompt = self.prompt_builder.build(content)
 		if not prompt:
 			return self.local_repair(content)
 		if self.repair_timeout:
 			import asyncio
-			result = await asyncio.wait_for(self.utility_llm.ask(prompt), timeout=self.repair_timeout)
+			result = await asyncio.wait_for(self.utility_model.ask(prompt), timeout=self.repair_timeout)
 		else:
-			result = await self.utility_llm.ask(prompt)
+			result = await self.utility_model.ask(prompt)
 		return strip_code_fence(result.strip()) if result else self.local_repair(content)
 
 	def local_repair(self, content: str) -> str:
@@ -230,17 +230,17 @@ class OutputFormatService:
 中文：此文档说明相关引擎组件的行为。"""
 
 	def __init__(self, format_type: str = "", config: dict[str, Any] | None = None,
-				 utility_llm: Any = None, max_repair_chars: int = 3000,
+				 utility_model: Any = None, max_repair_chars: int = 3000,
 				 repair_timeout: float = 30.0, max_output_chars: int = 0) -> None:
 		self.format_type = format_type
 		self.config = config or {}
-		self.utility_llm = utility_llm
+		self.utility_model = utility_model
 		self.max_repair_chars = max_repair_chars
 		self.repair_timeout = max(0.0, float(repair_timeout))
 		self.max_output_chars = max(0, int(max_output_chars or 0))
 		self._validator = OutputValidator(self.format_type, self.config, self.max_output_chars)
 		self._prompt_builder = RepairPromptBuilder(self.format_type, self.config, self.max_repair_chars)
-		self._repairer = OutputRepairer(self.format_type, self.utility_llm, self._prompt_builder, self.repair_timeout)
+		self._repairer = OutputRepairer(self.format_type, self.utility_model, self._prompt_builder, self.repair_timeout)
 
 	def validate(self, content: str) -> ValidationResult:
 		return self._validator.validate(content)
@@ -278,7 +278,7 @@ class OutputFormatService:
 			result = self.validate(current)
 			if result.valid and result.content:
 				current = result.content
-			elif current == content and not self.utility_llm:
+			elif current == content and not self.utility_model:
 				break
 		return RepairResult(
 			content=current,

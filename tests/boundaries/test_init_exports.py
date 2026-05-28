@@ -6,7 +6,7 @@ import axc_agent_engine
 
 class TestMinimalExports:
 	def test_all_list_minimal(self):
-		expected = {"Engine", "LLMConfig", "Agent", "Event", "EventType", "BasePlugin", "ToolDefinition", "tool",
+		expected = {"Engine", "AgentModels", "AgentTemplate", "LLMConfig", "Agent", "Event", "EventType", "BasePlugin", "ToolDefinition", "tool",
 					"ConcurrencyConfig", "ExecutionLimiter", "RateLimiter", "SessionExecutionGate",
 				"LLMMessage", "LLMUsage", "LLMResponse", "LLMStreamChunk", "Capability",
 				"ToolOutput", "ArtifactRef", "ResultStore",

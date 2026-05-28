@@ -135,7 +135,7 @@ class OutputFormatPlugin(BasePlugin):
 		return OutputFormatService(
 			self._type,
 			config,
-			utility_llm=getattr(self._plugin_ctx, "utility_llm", None),
+			utility_model=getattr(self._plugin_ctx, "utility_model", None),
 			max_repair_chars=self._max_repair_chars,
 			repair_timeout=self._repair_timeout,
 			max_output_chars=self._max_output_chars,

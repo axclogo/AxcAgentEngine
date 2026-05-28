@@ -1,26 +1,28 @@
-"""Engine — Agent 生命周期管理。
+"""Engine — Agent template loading and runtime infrastructure.
+中文：Agent 模板加载与运行基础设施。
 
-English: Owns Agent lifecycle, shared services, provider resolution, and plugin initialization.
+English: Owns shared services and plugin registry; Agent instances receive
+their own model objects during template instantiation.
+中文：Engine 持有共享服务和插件注册表，Agent 实例在模板实例化时接收自己的模型对象。
 """
 from __future__ import annotations
 
+import copy
 import logging
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import yaml
 
 from axc_agent_engine.agent import Agent
 from axc_agent_engine.runtime.concurrency import ConcurrencyConfig, ExecutionLimiter
-from axc_agent_engine.llm.config import LLMConfig
 from axc_agent_engine.core.context import ExecutionServices
 from axc_agent_engine.core.session_manager import SessionManager
 from axc_agent_engine.core.errors import ConfigError, SchemaError
 from axc_agent_engine.runtime.input import InputProvider, PassthroughInputProvider
-from axc_agent_engine.llm.client import OpenAIClient
 from axc_agent_engine.llm.provider import LLMProvider
-from axc_agent_engine.llm.rate_limited import RateLimitedProvider
-from axc_agent_engine.llm.registry import ProviderRegistry
-from axc_agent_engine.plugins import PluginContext, agent_info_from_runtime, model_info_from_providers
+from axc_agent_engine.plugins import PluginContext, agent_info_from_runtime, model_info_from_models
 from axc_agent_engine.plugins.loader import load_plugins
 from axc_agent_engine.plugins.registry import PluginRegistry
 from axc_agent_engine.runtime.policy import PolicyEvaluator
@@ -40,6 +42,23 @@ from axc_agent_engine.tools.name_mapping import ToolNameMappingConfig
 from axc_agent_engine.tools.registry import ToolRegistry
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class AgentModels:
+	"""Model objects bound to one Agent instance.
+中文：绑定到单个 Agent 实例的模型对象。"""
+	default: LLMProvider
+	utility: LLMProvider | None = None
+	fallback: LLMProvider | None = None
+
+	def __post_init__(self) -> None:
+		if self.default is None:
+			raise ConfigError("AgentModels.default is required")
+
+	@property
+	def utility_or_default(self) -> LLMProvider:
+		return self.utility or self.default
 
 
 class AgentConfigLoader:
@@ -65,38 +84,6 @@ class AgentConfigLoader:
 		return path, config, system_prompt
 
 
-class ProviderResolver:
-	def __init__(self, registry: ProviderRegistry) -> None:
-		self.registry = registry
-
-	def make_client(self, llm: LLMConfig | LLMProvider | None) -> LLMProvider | None:
-		if llm is None:
-			return None
-		if isinstance(llm, LLMProvider):
-			return llm
-		if not isinstance(llm, LLMConfig):
-			raise ConfigError(f"Unsupported LLM provider type: {type(llm).__name__}")
-		client: LLMProvider = OpenAIClient(llm)
-		if llm.max_concurrent_requests > 0 or llm.requests_per_minute > 0:
-			client = RateLimitedProvider(
-				client,
-				max_concurrent=llm.max_concurrent_requests,
-				requests_per_minute=llm.requests_per_minute,
-				queue_timeout=llm.rate_limit_queue_timeout,
-			)
-		return client
-
-	def resolve(self, ref) -> LLMProvider | None:
-		if ref is None:
-			return None
-		if isinstance(ref, str):
-			provider = self.registry.get(ref)
-			if provider is None:
-				raise ConfigError(f"Provider '{ref}' not found in registry")
-			return provider
-		return self.make_client(ref)
-
-
 class Engine:
 	"""Agent 执行引擎。
 
@@ -105,9 +92,6 @@ class Engine:
 
 	def __init__(
 		self,
-		default_llm: LLMConfig | LLMProvider,
-		fallback_llm: LLMConfig | LLMProvider | None = None,
-		utility_llm: LLMConfig | LLMProvider | None = None,
 		kv_store: KVStore | None = None,
 		message_persistence: MessagePersistence | None = None,
 		span_store: SpanStore | None = None,
@@ -123,12 +107,7 @@ class Engine:
 		plugin_registry: PluginRegistry | None = None,
 	) -> None:
 		from axc_agent_engine.core.dispatcher import AgentMessageDispatcher
-		self._provider_registry = ProviderRegistry()
-		self._provider_resolver = ProviderResolver(self._provider_registry)
 		self._config_loader = AgentConfigLoader()
-		self._default_client = self._make_client(default_llm)
-		self._fallback_client = self._make_client(fallback_llm) if fallback_llm else None
-		self._utility_client = self._make_client(utility_llm) if utility_llm else None
 		self._kv_store = kv_store
 		self._message_persistence = message_persistence
 		self._span_store = span_store
@@ -163,16 +142,6 @@ class Engine:
 		self._session_manager = SessionManager(persistence=message_persistence)
 
 	@property
-	def provider_registry(self) -> ProviderRegistry:
-		"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-访问命名 provider 注册表，用于 per-agent LLM 配置。
-
-		English: Access the named provider registry used by per-agent LLM configuration.
-		"""
-		return self._provider_registry
-
-	@property
 	def resources(self) -> ResourceRegistry:
 		"""English: Bilingual documentation follows.
 中文：以下为双语文档说明。
@@ -191,45 +160,40 @@ class Engine:
 		"""
 		return self._plugin_registry
 
-	def load_agent(self, yaml_path: str,
-				 default_llm: "LLMConfig | LLMProvider | str | None" = None,
-				 fallback_llm: "LLMConfig | LLMProvider | str | None" = None,
-				 utility_llm: "LLMConfig | LLMProvider | str | None" = None) -> Agent:
-		"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-加载 Agent YAML 并初始化插件。
-
-		LLM 参数可以是 LLMConfig、LLMProvider 实例，或 ProviderRegistry 中的
-		命名 provider 字符串。
-
-		English: Load an Agent YAML file, resolve its LLM providers, initialize plugins,
-		and register the resulting Agent with the engine.
-		"""
+	def load_agent_template(self, yaml_path: str) -> "AgentTemplate":
+		"""Load Agent YAML as a reusable template without binding models or plugins.
+中文：加载 Agent YAML 为可复用模板，不绑定模型或插件。"""
 		path, config, system_prompt = self._config_loader.load(yaml_path)
-		# per-agent LLM 解析优先级：显式参数 > engine 默认 provider。
-		#English: English: Per-agent LLM resolution prefers explicit arguments over engine defaults. 中文：源码说明。
-		#English: Bilingual note. 中文：支持通过 ProviderRegistry 解析字符串名称。
-		#English: English: String references are resolved through ProviderRegistry. 中文：源码说明。
-		agent_default = self._resolve_provider(default_llm) or self._default_client
-		agent_fallback = self._resolve_provider(fallback_llm) or self._fallback_client
-		agent_utility = self._resolve_provider(utility_llm) or self._utility_client or agent_default
-		# PluginContext 使用 Agent 级 provider，不使用 engine 全局 provider。
-		#English: English: PluginContext receives agent-level providers, not global engine providers. 中文：源码说明。
+		return AgentTemplate(self, path, config, system_prompt)
+
+	def _instantiate_agent(
+		self,
+		template: "AgentTemplate",
+		models: AgentModels,
+		mounts: dict[str, object] | ResourceRegistry | None = None,
+		metadata: dict[str, Any] | None = None,
+		overrides: dict[str, Any] | None = None,
+	) -> Agent:
+		config, system_prompt = template._materialize(overrides)
+		resources = self._build_instance_resources(mounts)
+		agent_default = models.default
+		agent_fallback = models.fallback
+		agent_utility = models.utility_or_default
 		plugin_ctx = PluginContext(
-			default_llm=agent_default,
-			fallback_llm=agent_fallback,
-			utility_llm=agent_utility,
+			default_model=agent_default,
+			fallback_model=agent_fallback,
+			utility_model=agent_utility,
 			kv_store=self._kv_store,
 			message_persistence=self._message_persistence,
 			span_store=self._span_store,
 			message_bus=self._message_bus,
 			result_store=self._result_store,
-			resources=self._resources,
+			resources=resources,
 			dispatcher=self._dispatcher,
 			workspace=config.runtime.workspace,
 			agent_getter=self.get_agent,
 			agent_lister=self.list_agents,
-			model_info=model_info_from_providers(agent_default, agent_fallback, agent_utility),
+			model_info=model_info_from_models(agent_default, agent_fallback, agent_utility),
 			agent_info=agent_info_from_runtime(
 				name=config.name,
 				description=config.description,
@@ -249,14 +213,15 @@ class Engine:
 			system_prompt=system_prompt,
 			runtime=config.runtime,
 			plugins=active_plugins,
-			default_client=agent_default,
-			fallback_client=agent_fallback,
-			utility_llm=agent_utility,
+			default_model=agent_default,
+			fallback_model=agent_fallback,
+			utility_model=agent_utility,
 			session_manager=self._session_manager,
 			registry=registry,
 			services=self._execution_services,
 			input_provider=self._input_provider,
 			engine_limiter=self._engine_limiter,
+			metadata=metadata or {},
 		)
 		self._agents[config.name] = agent
 		if self._dispatcher:
@@ -284,24 +249,81 @@ class Engine:
 		for agent in self._agents.values():
 			await agent.close()
 		self._agents.clear()
-		await self._default_client.close()
-		if self._fallback_client:
-			await self._fallback_client.close()
-		if self._utility_client:
-			await self._utility_client.close()
-		await self._provider_registry.close_all()
-
-	@staticmethod
-	def _make_client(llm: LLMConfig | LLMProvider | None) -> LLMProvider | None:
-		return ProviderResolver(ProviderRegistry()).make_client(llm)
-
-	def _resolve_provider(self, ref) -> LLMProvider | None:
-		"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-从字符串名称、LLMConfig、LLMProvider 或 None 解析 provider。"""
-		return self._provider_resolver.resolve(ref)
 
 	@staticmethod
 	def _provider_tool_name_mapping(provider: LLMProvider) -> ToolNameMappingConfig | None:
 		config = getattr(provider, "tool_name_mapping", None)
 		return config if isinstance(config, ToolNameMappingConfig) else None
+
+	def _build_instance_resources(self, mounts: dict[str, object] | ResourceRegistry | None) -> ResourceRegistry:
+		resources = self._resources.as_dict()
+		if isinstance(mounts, ResourceRegistry):
+			resources.update(mounts.as_dict())
+		elif mounts:
+			resources.update(mounts)
+		return ResourceRegistry(resources)
+
+
+class AgentTemplate:
+	"""Reusable Agent YAML template.
+中文：可复用的 Agent YAML 模板。
+
+	Plugins and model objects are bound only when instantiate() is called.
+中文：插件和模型对象只在 instantiate() 调用时绑定。
+	"""
+
+	def __init__(self, engine: Engine, path: Path, config: AgentConfig, system_prompt: str) -> None:
+		self._engine = engine
+		self.path = path
+		self.config = config
+		self.system_prompt = system_prompt
+
+	def instantiate(
+		self,
+		*,
+		models: AgentModels,
+		mounts: dict[str, object] | ResourceRegistry | None = None,
+		metadata: dict[str, Any] | None = None,
+		overrides: dict[str, Any] | None = None,
+	) -> Agent:
+		return self._engine._instantiate_agent(
+			self,
+			models=models,
+			mounts=mounts,
+			metadata=metadata,
+			overrides=overrides,
+		)
+
+	def _materialize(self, overrides: dict[str, Any] | None = None) -> tuple[AgentConfig, str]:
+		raw = copy.deepcopy(self.config.model_dump())
+		if overrides:
+			_apply_overrides(raw, overrides)
+		try:
+			config = AgentConfig(**raw)
+		except Exception as e:
+			raise SchemaError(f"Agent overrides 校验失败: {e}") from e
+		system_prompt = config.system_prompt
+		if not system_prompt and config.system_prompt_file:
+			prompt_path = self.path.parent / config.system_prompt_file
+			if prompt_path.exists():
+				system_prompt = prompt_path.read_text(encoding="utf-8")
+			else:
+				raise ConfigError(f"system_prompt_file 不存在: {prompt_path}")
+		return config, system_prompt
+
+
+def _apply_overrides(raw: dict[str, Any], overrides: dict[str, Any]) -> None:
+	for path, value in overrides.items():
+		parts = str(path).split(".")
+		if not parts or any(not part for part in parts):
+			raise SchemaError(f"Invalid override path: {path}")
+		target: dict[str, Any] = raw
+		for part in parts[:-1]:
+			next_target = target.get(part)
+			if next_target is None:
+				next_target = {}
+				target[part] = next_target
+			if not isinstance(next_target, dict):
+				raise SchemaError(f"Override path is not an object: {path}")
+			target = next_target
+		target[parts[-1]] = value

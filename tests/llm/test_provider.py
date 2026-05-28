@@ -6,7 +6,6 @@ from axc_agent_engine.llm.provider import LLMProvider, EmbeddingProvider
 from axc_agent_engine.llm.client import OpenAIClient, OpenAIErrorMapper, OpenAIResponseParser
 from axc_agent_engine.llm.config import LLMConfig
 from axc_agent_engine.llm.rate_limited import RateLimitedProvider
-from axc_agent_engine.llm.registry import ProviderRegistry
 from axc_agent_engine.core.errors import LLMTimeoutError, ProviderAuthError, ProviderBadRequestError, RetryableProviderError
 from axc_agent_engine.core.schema import LLMMessage, LLMResponse, LLMStreamChunk
 from axc_agent_engine.tools.name_mapping import ToolNameMappingConfig
@@ -288,28 +287,7 @@ class TestOpenAIClient:
 		assert chunk.content_delta == ""
 
 
-class TestProviderRegistryAndRateLimit:
-	@pytest.mark.asyncio
-	async def test_provider_registry_lifecycle(self):
-		class Provider:
-			model = "m"
-			async def close(self):
-				self.closed = True
-		p = Provider()
-		reg = ProviderRegistry()
-		reg.register("a", p)
-		reg.register_llm("b", p)
-		assert reg.get("a") is p
-		assert reg.get_llm("b") is p
-		assert reg.resolve("a") is p
-		assert reg.resolve(p) is p
-		assert reg.resolve(None) is None
-		assert set(reg.list_names()) == {"a", "b"}
-		assert reg.count == 2
-		await reg.close_all()
-		assert p.closed is True
-		assert reg.count == 0
-
+class TestRateLimitedProvider:
 	@pytest.mark.asyncio
 	async def test_rate_limited_provider_delegates(self):
 		class Inner:

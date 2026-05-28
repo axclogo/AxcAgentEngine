@@ -21,8 +21,8 @@ class AskLLM:
 
 class PluginCtx:
 	def __init__(self, llm):
-		self.utility_llm = llm
-		self.default_llm = llm
+		self.utility_model = llm
+		self.default_model = llm
 
 
 async def test_post_process_appends_stats_when_enabled():

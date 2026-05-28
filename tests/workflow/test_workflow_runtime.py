@@ -88,8 +88,8 @@ async def test_agent_resume_stream_delegates_to_workflow_runtime():
 		system_prompt="",
 		runtime=RuntimeConfig(max_rounds=5),
 		plugins=[],
-		default_client=_recording_provider([{"content": "done"}], captured_messages),
-		fallback_client=None,
+		default_model=_recording_provider([{"content": "done"}], captured_messages),
+		fallback_model=None,
 		services=ExecutionServices(checkpoint_store=store),
 		workflow_runtime=workflow,
 	)

@@ -1,6 +1,6 @@
 """Tests for #24 PluginContext workspace field."""
 from axc_agent_engine.plugins import PluginContext
-from axc_agent_engine.plugins import agent_info_from_runtime, model_info_from_providers
+from axc_agent_engine.plugins import agent_info_from_runtime, model_info_from_models
 
 
 class TestPluginContextWorkspace:
@@ -15,9 +15,9 @@ class TestPluginContextWorkspace:
 	def test_workspace_with_other_fields(self):
 		from unittest.mock import MagicMock
 		llm = MagicMock()
-		ctx = PluginContext(default_llm=llm, workspace="/ws")
+		ctx = PluginContext(default_model=llm, workspace="/ws")
 		assert ctx.workspace == "/ws"
-		assert ctx.default_llm is llm
+		assert ctx.default_model is llm
 
 	def test_get_agent_without_getter(self):
 		ctx = PluginContext()
@@ -33,10 +33,10 @@ class TestPluginContextWorkspace:
 		assert ctx.get_agent("x") is agent
 		assert ctx.get_agent("y") is None
 
-	def test_model_info_from_providers(self):
+	def test_model_info_from_models(self):
 		class Provider:
 			model = "gpt-test"
-		ctx = PluginContext(model_info=model_info_from_providers(Provider()))
+		ctx = PluginContext(model_info=model_info_from_models(Provider()))
 		assert ctx.model_name == "gpt-test"
 		assert ctx.model_info.to_dict()["active"] == "gpt-test"
 

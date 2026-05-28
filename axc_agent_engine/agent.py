@@ -22,7 +22,7 @@ from axc_agent_engine.core.events import Event, EventType
 from axc_agent_engine.runtime.input import InputProvider, InputProviderResult, PassthroughInputProvider
 from axc_agent_engine.llm.provider import LLMProvider
 from axc_agent_engine.plugins.base import BasePlugin
-from axc_agent_engine.plugins import agent_info_from_runtime, model_info_from_providers
+from axc_agent_engine.plugins import agent_info_from_runtime, model_info_from_models
 from axc_agent_engine.core.schema import RuntimeConfig
 from axc_agent_engine.tools.registry import ToolRegistry
 from axc_agent_engine.workflow import WorkflowResumePlan, WorkflowResumeRequest, WorkflowRuntime, create_workflow_runtime
@@ -53,8 +53,8 @@ class ExecutionContextFactory:
 			allowed_capabilities=frozenset(agent._runtime.allowed_capabilities),
 		)
 		services = replace(agent._services)
-		ctx = ExecutionContext(config=config, services=services, utility_llm=agent._utility_llm)
-		model_info = model_info_from_providers(agent._default_client, agent._fallback_client, agent._utility_llm)
+		ctx = ExecutionContext(config=config, services=services, utility_model=agent._utility_model)
+		model_info = model_info_from_models(agent._default_model, agent._fallback_model, agent._utility_model)
 		routing_mode = agent._runtime.routing.mode if agent._runtime.routing else "auto"
 		agent_info = agent_info_from_runtime(
 			name=agent.name,
@@ -67,6 +67,8 @@ class ExecutionContextFactory:
 		ctx.runtime.agent_info = agent_info
 		ctx.state.metadata["model"] = model_info.to_dict()
 		ctx.state.metadata["agent"] = agent_info.to_dict()
+		if agent._metadata:
+			ctx.state.metadata.update(agent._metadata)
 		if request.metadata:
 			ctx.state.metadata.update(request.metadata)
 			try:
@@ -95,7 +97,7 @@ class ExecutorFactory:
 		agent = self.agent
 		ctx = self.context_factory.create(request)
 		pm = PluginManager(agent._plugins)
-		llm_caller = LLMCaller(primary=agent._default_client, fallback=agent._fallback_client, plugin_manager=pm)
+		llm_caller = LLMCaller(primary=agent._default_model, fallback=agent._fallback_model, plugin_manager=pm)
 		routing_mode = agent._runtime.routing.mode if agent._runtime.routing else "auto"
 		return Executor(
 			llm_caller=llm_caller,
@@ -119,9 +121,9 @@ class RunCoordinator:
 
 
 class Agent:
-	"""Agent 实例 — 由 Engine.load_agent() 创建。
+	"""Agent 实例 — 由 AgentTemplate.instantiate() 创建。
 
-	English: Runtime Agent instance created by Engine.load_agent().
+	English: Runtime Agent instance created by AgentTemplate.instantiate().
 	"""
 
 	def __init__(
@@ -131,9 +133,9 @@ class Agent:
 		system_prompt: str,
 		runtime: RuntimeConfig,
 		plugins: list[BasePlugin],
-		default_client: LLMProvider,
-		fallback_client: LLMProvider | None,
-		utility_llm: LLMProvider | None = None,
+		default_model: LLMProvider,
+		fallback_model: LLMProvider | None,
+		utility_model: LLMProvider | None = None,
 		session_manager: SessionManager | None = None,
 		registry: ToolRegistry | None = None,
 		result_store: "object | None" = None,
@@ -141,20 +143,22 @@ class Agent:
 		input_provider: InputProvider | None = None,
 		engine_limiter: ExecutionLimiter | None = None,
 		workflow_runtime: WorkflowRuntime | None = None,
+		metadata: dict[str, Any] | None = None,
 	) -> None:
 		self.name = name
 		self.description = description
 		self._system_prompt = system_prompt
 		self._runtime = runtime
 		self._plugins = plugins
-		self._default_client = default_client
-		self._fallback_client = fallback_client
-		self._utility_llm = utility_llm
+		self._default_model = default_model
+		self._fallback_model = fallback_model
+		self._utility_model = utility_model
 		self._session_manager = session_manager or SessionManager()
 		self._registry = registry or ToolRegistry()
 		self._services = services or ExecutionServices(result_store=result_store)
 		self._input_provider = input_provider or PassthroughInputProvider()
 		self._workflow_runtime = workflow_runtime or create_workflow_runtime()
+		self._metadata = dict(metadata or {})
 		queue_timeout = self._runtime.concurrency.queue_timeout
 		self._engine_limiter = engine_limiter or ExecutionLimiter()
 		self._agent_limiter = ExecutionLimiter(

@@ -603,7 +603,7 @@ class MemoryPlugin(BasePlugin):
 						   assistant_message: str, tool_calls: list[dict]) -> None:
 		"""English: Bilingual documentation follows.
 中文：以下为双语文档说明。
-调 utility_llm 从对话中提取事实"""
+调 utility_model 从对话中提取事实"""
 		if not self._auto_extract or (not user_message and not assistant_message):
 			return
 		conversation = ""
@@ -611,10 +611,10 @@ class MemoryPlugin(BasePlugin):
 			conversation += f"用户: {user_message}\n"
 		if assistant_message:
 			conversation += f"助手: {assistant_message}\n"
-		utility_llm = self._plugin_ctx.utility_llm if self._plugin_ctx else None
+		utility_model = self._plugin_ctx.utility_model if self._plugin_ctx else None
 		async with self._lock:
-			if utility_llm:
-				await self._extract_with_llm(conversation, utility_llm, exec_ctx)
+			if utility_model:
+				await self._extract_with_llm(conversation, utility_model, exec_ctx)
 			else:
 				if user_message and len(user_message) >= self._min_content_length:
 					await self._add_memory(user_message, 0.5, exec_ctx=exec_ctx)

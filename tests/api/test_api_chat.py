@@ -200,9 +200,13 @@ class FakeAPIEngine:
 		self.agent = agent or FakeAPIAgent()
 		self.loaded = []
 
-	def load_agent(self, yaml_path):
+	def load_agent_template(self, yaml_path):
 		self.loaded.append(yaml_path)
-		return self.agent
+		agent = self.agent
+		class Template:
+			def instantiate(self, *, models, mounts=None, metadata=None, overrides=None):
+				return agent
+		return Template()
 
 
 async def test_sync_response_collects_done_and_usage():
@@ -241,7 +245,7 @@ async def test_stream_response_emits_content_tool_usage_and_done():
 def test_engine_state_loads_lists_and_resolves_yaml(tmp_path):
 	agent_file = tmp_path / "demo.yaml"
 	agent_file.write_text("name: demo\n", encoding="utf-8")
-	state = EngineState(engine=FakeAPIEngine(), agents_dir=str(tmp_path))
+	state = EngineState(engine=FakeAPIEngine(), models=object(), agents_dir=str(tmp_path))
 	agent = state.get_agent("demo")
 	assert agent.description == "fake"
 	assert state.get_agent("demo") is agent
@@ -255,7 +259,7 @@ def test_create_app_routes_and_error_handler(tmp_path):
 
 	agent_file = tmp_path / "agent.yaml"
 	agent_file.write_text("name: agent\n", encoding="utf-8")
-	app = create_app(FakeAPIEngine(), agents_dir=str(tmp_path))
+	app = create_app(FakeAPIEngine(), models=object(), agents_dir=str(tmp_path))
 	client = TestClient(app)
 	assert client.get("/health").json() == {"status": "ok"}
 	assert client.get("/ready").json() == {"status": "ready"}

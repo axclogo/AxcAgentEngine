@@ -2,7 +2,7 @@
 中文：插件 config_schema 声明测试。"""
 from __future__ import annotations
 
-from axc_agent_engine.engine import Engine
+from axc_agent_engine.engine import AgentModels, Engine
 from axc_agent_engine.plugins.base import BasePlugin
 from axc_agent_engine.plugins.builtin import AVAILABLE_BUILTIN_PLUGINS
 from axc_agent_engine.plugins.builtin.compress.plugin import CompressPlugin
@@ -65,7 +65,7 @@ def test_mcp_schema_has_servers_array_object_fields():
 	assert server_fields["url"].default is None
 
 
-def test_old_yaml_load_agent_keeps_extra_unknown_plugin_key(mock_llm, tmp_path):
+def test_agent_template_instantiate_keeps_extra_unknown_plugin_key(mock_llm, tmp_path):
 	registry = PluginRegistry()
 	registry.register(SchemaOnlyPlugin)
 	path = tmp_path / "agent.yaml"
@@ -79,6 +79,6 @@ plugins:
 """,
 		encoding="utf-8",
 	)
-	engine = Engine(default_llm=mock_llm, plugin_registry=registry)
-	agent = engine.load_agent(str(path))
+	engine = Engine(plugin_registry=registry)
+	agent = engine.load_agent_template(str(path)).instantiate(models=AgentModels(default=mock_llm))
 	assert agent._plugins[0].config["unknown_key"] == "still_allowed"

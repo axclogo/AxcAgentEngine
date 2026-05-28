@@ -9,7 +9,7 @@ Plugins are the extension boundary for optional behavior. A plugin may inject co
 Plugin registration must be explicit host code. The default `Engine` `plugin_registry` is empty, and Agent YAML can only enable plugins that were already registered.
 
 ```python
-from axc_agent_engine import Engine, LLMConfig, PluginRegistry
+from axc_agent_engine import AgentModels, Engine, PluginRegistry
 from axc_agent_engine.plugins.builtin import BuiltinToolsPlugin
 from my_project.plugins import MyPlugin
 
@@ -17,7 +17,9 @@ registry = PluginRegistry()
 registry.register(BuiltinToolsPlugin)
 registry.register(MyPlugin)
 
-engine = Engine(default_llm=llm, plugin_registry=registry)
+engine = Engine(plugin_registry=registry)
+template = engine.load_agent_template("./agents/my_agent.yaml")
+agent = template.instantiate(models=AgentModels(default=llm))
 ```
 
 YAML 只负责选择和配置插件，不负责 import 代码。  
@@ -49,13 +51,13 @@ on_execution_end(exec_ctx, result, error)
 close()
 ```
 
-同步 hook 必须保持轻量，不能做阻塞 I/O。  
+同步 hook 必须保持轻量，不能做阻塞 I/O。
 Synchronous hooks must stay lightweight and must not perform blocking I/O.
 
 ## Configuration Schema
 
-插件必须声明 `config_schema`。未声明 schema 的插件不能注册，也不能通过 `Engine.load_agent()` 加载。  
-Plugins must declare `config_schema`. Plugins without a schema cannot be registered or loaded through `Engine.load_agent()`.
+插件必须声明 `config_schema`。未声明 schema 的插件不能注册，也不能通过 `AgentTemplate.instantiate()` 加载。
+Plugins must declare `config_schema`. Plugins without a schema cannot be registered or loaded through `AgentTemplate.instantiate()`.
 
 ```python
 from axc_agent_engine import BasePlugin

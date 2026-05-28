@@ -25,7 +25,7 @@ class ReflexionPlugin(BasePlugin):
 	config_schema = REFLEXION_CONFIG_SCHEMA
 
 	def initialize(self, config: dict, plugin_ctx: "PluginContext") -> None:
-		self._llm = plugin_ctx.utility_llm or plugin_ctx.default_llm
+		self._llm = plugin_ctx.utility_model or plugin_ctx.default_model
 		self._start_after_round = config.get("start_after_round", 3)
 		self._max_len = config.get("max_reflection_len", 200)
 		self._last_reflection = ""

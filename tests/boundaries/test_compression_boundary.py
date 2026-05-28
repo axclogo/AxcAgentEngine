@@ -38,7 +38,7 @@ async def test_compress_plugin_restores_file_cache_after_summary():
 			return "summary"
 
 	store = InMemoryCompressionBoundaryStore()
-	ctx = PluginContext(utility_llm=LLM(), resources={"boundary": store})
+	ctx = PluginContext(utility_model=LLM(), resources={"boundary": store})
 	plugin = CompressPlugin()
 	plugin.initialize({
 		"summary": {"after_rounds": 1},
@@ -81,7 +81,7 @@ async def test_compress_plugin_generates_and_persists_tool_summary():
 			return "Read src/app.py and found cached content."
 
 	store = InMemoryCompressionBoundaryStore()
-	ctx = PluginContext(utility_llm=LLM(), resources={"boundary": store})
+	ctx = PluginContext(utility_model=LLM(), resources={"boundary": store})
 	plugin = CompressPlugin()
 	plugin.initialize({
 		"tool_summary": {"enabled": True},

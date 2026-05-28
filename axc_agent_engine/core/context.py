@@ -98,7 +98,7 @@ class ExecutionContext:
 	state: ExecutionState = field(default_factory=ExecutionState)
 	services: ExecutionServices = field(default_factory=ExecutionServices)
 	runtime: ExecutionRuntimeState = field(default_factory=ExecutionRuntimeState)
-	utility_llm: Any = None
+	utility_model: Any = None
 
 	#English: Source note. 中文：── 便捷方法 ──
 
@@ -176,7 +176,7 @@ class ExecutionContext:
 			state=ExecutionState(metadata=child_metadata),
 			services=self.services,
 			runtime=child_runtime,
-			utility_llm=self.utility_llm,
+			utility_model=self.utility_model,
 		)
 
 

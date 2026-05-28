@@ -8,7 +8,7 @@ from axc_agent_engine.agent import Agent
 from axc_agent_engine.runtime.checkpoint import Checkpoint, CheckpointStatus, InMemoryCheckpointStore
 from axc_agent_engine.runtime.concurrency import ConcurrencyConfig
 from axc_agent_engine.core.context import ExecutionServices
-from axc_agent_engine.engine import Engine
+from axc_agent_engine.engine import AgentModels, Engine
 from axc_agent_engine.core.errors import ExecutionTimeoutError
 from axc_agent_engine.llm.rate_limited import RateLimitedProvider
 from axc_agent_engine.core.schema import LLMMessage, LLMResponse, LLMUsage, RuntimeConfig
@@ -100,11 +100,11 @@ async def test_agent_concurrency_queue_timeout():
 @pytest.mark.asyncio
 async def test_engine_concurrency_limit_shared_across_agents(tmp_path):
 	provider = SlowProvider()
-	engine = Engine(default_llm=provider, concurrency=ConcurrencyConfig(max_engine_concurrent_runs=1))
+	engine = Engine(concurrency=ConcurrencyConfig(max_engine_concurrent_runs=1))
 	for name in ("a1", "a2"):
 		(tmp_path / f"{name}.yaml").write_text(f"name: {name}\nsystem_prompt: test\n")
-	a1 = engine.load_agent(str(tmp_path / "a1.yaml"))
-	a2 = engine.load_agent(str(tmp_path / "a2.yaml"))
+	a1 = engine.load_agent_template(str(tmp_path / "a1.yaml")).instantiate(models=AgentModels(default=provider))
+	a2 = engine.load_agent_template(str(tmp_path / "a2.yaml")).instantiate(models=AgentModels(default=provider))
 
 	await asyncio.gather(a1.chat("one", session_id="s1"), a2.chat("two", session_id="s2"))
 

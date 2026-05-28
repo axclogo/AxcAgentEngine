@@ -11,6 +11,7 @@ logger = logging.getLogger(__name__)
 class EngineState:
 	"""API 层持有的引擎状态"""
 	engine: Any  # Engine 实例
+	models: Any
 	agents_dir: str = ""
 	_agents: dict[str, Any] = field(default_factory=dict)  # name -> Agent 缓存
 
@@ -23,7 +24,8 @@ class EngineState:
 		yaml_path = self._resolve_yaml(agent_name)
 		if not yaml_path:
 			return None
-		agent = self.engine.load_agent(yaml_path)
+		template = self.engine.load_agent_template(yaml_path)
+		agent = template.instantiate(models=self.models)
 		self._agents[agent_name] = agent
 		return agent
 

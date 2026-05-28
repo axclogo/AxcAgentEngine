@@ -46,22 +46,20 @@ pip install "axc-agent-engine[api,knowledge,workflow]"
 Requires Python 3.11 or newer.
 
 ```python
-from axc_agent_engine import Engine, LLMConfig, PluginRegistry
+from axc_agent_engine import AgentModels, Engine, LLMConfig, PluginRegistry
+from axc_agent_engine.llm.client import OpenAIClient
 from axc_agent_engine.plugins.builtin import BuiltinToolsPlugin
 
 registry = PluginRegistry()
 registry.register(BuiltinToolsPlugin)
 
-engine = Engine(
-    default_llm=LLMConfig(
-        base_url="https://api.openai.com/v1",
-        api_key="sk-xxx",
-        model="gpt-4o",
-    ),
-    plugin_registry=registry,
-)
-
-agent = engine.load_agent("./agents/my_agent.yaml")
+engine = Engine(plugin_registry=registry)
+models = AgentModels(default=OpenAIClient(LLMConfig(
+    base_url="https://api.openai.com/v1",
+    api_key="sk-xxx",
+    model="gpt-4o",
+)))
+agent = engine.load_agent_template("./agents/my_agent.yaml").instantiate(models=models)
 
 # Non-streaming
 result = await agent.chat("Analyze last month's sales data")
@@ -180,13 +178,13 @@ Notes:
 
 ## Provider Configuration
 
-`Engine` accepts an `LLMConfig` or any object implementing the full `LLMProvider` protocol (`model`, `tool_name_mapping`, `chat`, `stream`, `ask`, `close`).
+`AgentModels` accepts model provider objects. `OpenAIClient(LLMConfig(...))` is the built-in OpenAI-compatible provider; custom providers implement `LLMProvider` (`model`, `tool_name_mapping`, `chat`, `stream`, `ask`, `close`).
 
 ```python
 from axc_agent_engine import ConcurrencyConfig, Engine, LLMConfig
 from axc_agent_engine.tools.name_mapping import ToolNameMappingConfig
 
-default_llm = LLMConfig(
+main_model_config = LLMConfig(
     base_url="https://api.openai.com/v1",
     api_key="sk-xxx",
     model="gpt-4o",
@@ -198,19 +196,14 @@ default_llm = LLMConfig(
 )
 
 engine = Engine(
-    default_llm=default_llm,
     concurrency=ConcurrencyConfig(
         max_engine_concurrent_runs=128,
         queue_timeout=30,
     ),
 )
-```
-
-Multiple named providers can be registered on `engine.provider_registry` and selected by name:
-
-```python
-engine.provider_registry.register("fast", fast_provider)
-agent = engine.load_agent("./agents/my_agent.yaml", default_llm="fast")
+agent = engine.load_agent_template("./agents/my_agent.yaml").instantiate(
+    models=AgentModels(default=OpenAIClient(main_model_config)),
+)
 ```
 
 Tool-name mapping is the provider's job. Internal tool names are encoded to model-safe function names before the LLM call and decoded before hooks and tool execution.
@@ -232,13 +225,14 @@ Clients should not assume full OpenAI parity; call `/v1/capabilities` first. See
 Capabilities not required by a basic agent live in plugins. The default `Engine.plugin_registry` is empty; both built-in and custom plugins must be registered explicitly.
 
 ```python
-from axc_agent_engine import Engine, LLMConfig, PluginRegistry
+from axc_agent_engine import AgentModels, Engine, PluginRegistry
 from axc_agent_engine.plugins.builtin import BuiltinToolsPlugin, MemoryPlugin
 from my_project.plugins import MyCustomPlugin
 
 registry = PluginRegistry()
 registry.register_many([BuiltinToolsPlugin, MemoryPlugin, MyCustomPlugin])
-engine = Engine(default_llm=llm, plugin_registry=registry)
+engine = Engine(plugin_registry=registry)
+agent = engine.load_agent_template("./agents/my_agent.yaml").instantiate(models=AgentModels(default=llm))
 ```
 
 | Plugin | Purpose |
@@ -280,15 +274,16 @@ Sidecars live under `axc_agent_engine.sidecar` and are invoked explicitly by the
 from axc_agent_engine.sidecar import OrchestrationTaskService
 from axc_agent_engine.storage.in_memory import InMemoryMessageBus
 
-engine = Engine(default_llm=default_llm, message_bus=InMemoryMessageBus())
-red = engine.load_agent("./agents/red.yaml")
-blue = engine.load_agent("./agents/blue.yaml")
+engine = Engine(message_bus=InMemoryMessageBus())
+models = AgentModels(default=main_model, utility=utility_model)
+red = engine.load_agent_template("./agents/red.yaml").instantiate(models=models)
+blue = engine.load_agent_template("./agents/blue.yaml").instantiate(models=models)
 
 service = OrchestrationTaskService(
     agent_getter=engine.get_agent,
     agent_lister=engine.list_agents,
     dispatcher=engine._dispatcher,
-    utility_llm=utility_llm,
+    utility_model=utility_model,
 )
 
 task = await service.run_task(
@@ -306,8 +301,8 @@ task = await service.run_task(
 ```mermaid
 flowchart TD
     A["Application creates Engine"] --> B["Inject providers and services"]
-    B --> C["Engine.load_agent(agent.yaml)"]
-    C --> D["Parse AgentConfig"]
+    B --> C["Engine.load_agent_template(agent.yaml)"]
+    C --> D["AgentTemplate.instantiate(models, mounts)"]
     D --> E["Build PluginContext"]
     E --> F["Load enabled plugins"]
     F --> G["Plugin.initialize()"]

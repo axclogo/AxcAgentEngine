@@ -11,7 +11,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def create_app(engine: Engine, agents_dir: str = "") -> FastAPI:
+def create_app(engine: Engine, models: object, agents_dir: str = "") -> FastAPI:
 	"""English: Bilingual documentation follows.
 中文：以下为双语文档说明。
 创建 FastAPI 应用"""
@@ -26,8 +26,8 @@ def create_app(engine: Engine, agents_dir: str = "") -> FastAPI:
 		CancelledError, SchemaError, ToolError,
 	)
 
-	app = FastAPI(title="AxcAgentEngine", version="2.1.0")
-	state = EngineState(engine=engine, agents_dir=agents_dir)
+	app = FastAPI(title="AxcAgentEngine", version="2.2.0")
+	state = EngineState(engine=engine, agents_dir=agents_dir, models=models)
 	app.state.engine_state = state
 
 	_ERROR_STATUS_MAP: dict[type, int] = {

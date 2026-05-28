@@ -291,7 +291,7 @@ class PORExecutionService:
 		remaining = get_remaining_count(self._plan)
 		observation = await observe_step(
 			step.step_id, step.status, step_result, step.description,
-			self._plan.goal, remaining, self._ctx.utility_llm)
+			self._plan.goal, remaining, self._ctx.utility_model)
 		if observation.action == "replan":
 			mark_step_failed(self._plan, step.step_id, step_result)
 			await self._pm.on_step_completed(self._ctx, {"step_id": step.step_id, "status": "failed", "result": step_result})
@@ -316,7 +316,7 @@ class PORExecutionService:
 	async def _do_replan(self, failed_step_id: int) -> None:
 		"""English: This documentation describes the related engine component behavior.
 中文：执行重规划。"""
-		self._plan = await replan(self._plan, failed_step_id, self._ctx.utility_llm)
+		self._plan = await replan(self._plan, failed_step_id, self._ctx.utility_model)
 		await self._save_plan_checkpoint(CheckpointStatus.RUNNING, current_step_id=failed_step_id, phase="replan")
 
 	async def _execute_single_step(self, step: PlanStep) -> tuple[str, list[Event]]:

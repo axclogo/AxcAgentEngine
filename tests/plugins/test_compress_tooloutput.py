@@ -105,7 +105,7 @@ class TestCompressPluginSummary:
 	async def test_summary_generation(self):
 		mock_llm = AsyncMock()
 		mock_llm.ask = AsyncMock(return_value="This is a summary")
-		plugin_ctx = PluginContext(utility_llm=mock_llm)
+		plugin_ctx = PluginContext(utility_model=mock_llm)
 		p = CompressPlugin()
 		p.initialize({"summary_after_rounds": 2, "summary_keep_recent": 1}, plugin_ctx)
 		ctx = ExecutionContext()
@@ -133,7 +133,7 @@ class TestCompressPluginSummary:
 		assert len(summary_msgs) == 1
 
 	@pytest.mark.asyncio
-	async def test_no_summary_without_utility_llm(self):
+	async def test_no_summary_without_utility_model(self):
 		p = CompressPlugin()
 		p.initialize({"summary_after_rounds": 1}, PluginContext())
 		ctx = ExecutionContext()
@@ -144,7 +144,7 @@ class TestCompressPluginSummary:
 	async def test_circuit_breaker(self):
 		mock_llm = AsyncMock()
 		mock_llm.ask = AsyncMock(side_effect=RuntimeError("LLM down"))
-		plugin_ctx = PluginContext(utility_llm=mock_llm)
+		plugin_ctx = PluginContext(utility_model=mock_llm)
 		p = CompressPlugin()
 		p.initialize({"summary_after_rounds": 1, "max_compact_failures": 2}, plugin_ctx)
 		ctx = ExecutionContext()

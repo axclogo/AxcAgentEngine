@@ -247,7 +247,7 @@ class TestCompressPlugin:
 	@pytest.mark.asyncio
 	async def test_circuit_breaker(self, plugin_ctx):
 		from axc_agent_engine.plugins.builtin.compress.plugin import CompressPlugin
-		plugin_ctx.utility_llm.ask = AsyncMock(side_effect=RuntimeError("fail"))
+		plugin_ctx.utility_model.ask = AsyncMock(side_effect=RuntimeError("fail"))
 		p = CompressPlugin()
 		p.initialize({"summary_after_rounds": 1, "max_compact_failures": 2}, plugin_ctx)
 		ctx = ExecutionContext()

@@ -54,8 +54,11 @@ async def test_chat_stream_loop(monkeypatch, capsys):
 	class Engine:
 		def __init__(self, *args, **kwargs):
 			pass
-		def load_agent(self, path):
-			return Agent()
+		def load_agent_template(self, path):
+			class Template:
+				def instantiate(self, *, models, mounts=None, metadata=None, overrides=None):
+					return Agent()
+			return Template()
 		async def close(self):
 			self.closed = True
 

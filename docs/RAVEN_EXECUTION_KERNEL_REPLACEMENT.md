@@ -252,7 +252,7 @@ fallback 规则必须沿用旧逻辑：
 - 仅对 timeout、connection、429、500、502、503、504、rate limit、unavailable、overloaded 触发 fallback。
 - fallback 发生时通过 `emit_internal("model_fallback", {...})` 通知 `RavenEventBridge`。
 - fallback 后单次调用结束要恢复主模型。
-- 第一阶段不要同时给 `AxcAgentEngine.Engine(..., fallback_llm=...)` 传另一个 fallback provider，避免 Axc `LLMCaller` fallback 和 RavenLLMHubProvider 内部 fallback 双重触发。`Engine` 只传 `default_llm=RavenLLMHubProvider(...)`，备用模型由该 provider 内部按 Raven 旧规则处理。
+- 第一阶段不要在 `AgentModels(fallback=...)` 再传另一个 fallback provider，避免 Axc `LLMCaller` fallback 和 RavenLLMHubProvider 内部 fallback 双重触发。`AgentModels` 只传 `default=RavenLLMHubProvider(...)`，备用模型由该 provider 内部按 Raven 旧规则处理。
 
 验收：
 
@@ -712,8 +712,8 @@ class RavenEngineAdapter:
 3. 构造 persistence adapters。
 4. 构造 `RavenToolPlugin`，传入 `tools_config` 和 Raven runtime metadata。
 5. 构造 `PluginRegistry`，注册 `RavenToolPlugin` 工厂。插件名固定为 `raven_tools`，临时 `AgentConfig.plugins` 必须包含 `{"raven_tools": {"enabled": True}}`，否则 Engine 不会加载这个插件。
-6. 构造 `AxcAgentEngine.Engine(default_llm=provider, ...)`。
-7. 用临时 YAML 文件调用当前 `Engine.load_agent(yaml_path)`，不要新增 Engine API。临时文件必须放在系统临时目录，run 结束删除。临时 YAML 只包含 AxcAgentEngine 需要的最小配置：
+6. 构造 `AxcAgentEngine.Engine(...)`，Engine 只接收基础设施和插件注册表，不接收模型。
+7. 用临时 YAML 文件调用 `Engine.load_agent_template(yaml_path).instantiate(models=AgentModels(default=provider))`。临时文件必须放在系统临时目录，run 结束删除。临时 YAML 只包含 AxcAgentEngine 需要的最小配置：
 
 ```yaml
 name: "<agent name>"
@@ -812,7 +812,7 @@ result = {
 }
 ```
 
-保留 `_validate_input()`、`_load_agent()`、SafeGuard 输入检查、`_resolve_conversation()`、`_save_user_message()`、`_resolve_model()`、`_build_context()`、`_build_messages()`、SafeGuard 输出检查、OutputFormat 输出校验、`_post_process()`、`_cleanup()`。
+保留 `_validate_input()`、`_load_agent_template()`、SafeGuard 输入检查、`_resolve_conversation()`、`_save_user_message()`、`_resolve_model()`、`_build_context()`、`_build_messages()`、SafeGuard 输出检查、OutputFormat 输出校验、`_post_process()`、`_cleanup()`。
 
 ### 12. 处理旧 AgentExecutor
 
@@ -1243,7 +1243,6 @@ class RavenEngineAdapter:
             plugin_registry.register_factory("raven_tools", lambda: RavenToolPlugin(tool_runtime))
 
             self._engine = Engine(
-                default_llm=provider,
                 message_persistence=persistence.message_persistence,
                 span_store=persistence.span_store,
                 result_store=persistence.result_store,
@@ -1251,7 +1250,9 @@ class RavenEngineAdapter:
                 checkpoint_store=persistence.checkpoint_store,
                 plugin_registry=plugin_registry,
             )
-            agent = self._engine.load_agent(str(tmp_path))
+            agent = self._engine.load_agent_template(str(tmp_path)).instantiate(
+                models=AgentModels(default=provider),
+            )
 
             user_content = build_current_user_content(
                 self.request.content,

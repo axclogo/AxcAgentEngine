@@ -48,9 +48,9 @@ class PluginContext:
 	"""English: Bilingual documentation follows.
 中文：以下为双语文档说明。
 插件初始化阶段可访问的 Engine 上下文。"""
-	default_llm: "LLMProvider | None" = None
-	fallback_llm: "LLMProvider | None" = None
-	utility_llm: "LLMProvider | None" = None
+	default_model: "LLMProvider | None" = None
+	fallback_model: "LLMProvider | None" = None
+	utility_model: "LLMProvider | None" = None
 	tool_registry: "ToolRegistry | None" = None
 	kv_store: "KVStore | None" = None
 	message_persistence: "MessagePersistence | None" = None
@@ -94,14 +94,14 @@ class PluginContext:
 		return []
 
 
-def model_info_from_providers(default_llm: object | None, fallback_llm: object | None = None,
-							  utility_llm: object | None = None, active_llm: object | None = None) -> ModelInfo:
+def model_info_from_models(default_model: object | None, fallback_model: object | None = None,
+							  utility_model: object | None = None, active_model: object | None = None) -> ModelInfo:
 	"""Build plugin-facing model metadata from provider-like objects.
 中文：此文档说明相关引擎组件的行为。"""
-	default = _provider_model_name(default_llm)
-	fallback = _provider_model_name(fallback_llm)
-	utility = _provider_model_name(utility_llm)
-	active = _provider_model_name(active_llm) or default
+	default = _provider_model_name(default_model)
+	fallback = _provider_model_name(fallback_model)
+	utility = _provider_model_name(utility_model)
+	active = _provider_model_name(active_model) or default
 	return ModelInfo(default=default, fallback=fallback, utility=utility, active=active)
 
 
@@ -137,5 +137,5 @@ __all__ = [
 	"PluginConfigSchema",
 	"PluginContext",
 	"agent_info_from_runtime",
-	"model_info_from_providers",
+	"model_info_from_models",
 ]

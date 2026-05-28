@@ -46,22 +46,20 @@ pip install "axc-agent-engine[api,knowledge,workflow]"
 需要 Python 3.11 或更高版本。
 
 ```python
-from axc_agent_engine import Engine, LLMConfig, PluginRegistry
+from axc_agent_engine import AgentModels, Engine, LLMConfig, PluginRegistry
+from axc_agent_engine.llm.client import OpenAIClient
 from axc_agent_engine.plugins.builtin import BuiltinToolsPlugin
 
 registry = PluginRegistry()
 registry.register(BuiltinToolsPlugin)
 
-engine = Engine(
-    default_llm=LLMConfig(
-        base_url="https://api.openai.com/v1",
-        api_key="sk-xxx",
-        model="gpt-4o",
-    ),
-    plugin_registry=registry,
-)
-
-agent = engine.load_agent("./agents/my_agent.yaml")
+engine = Engine(plugin_registry=registry)
+models = AgentModels(default=OpenAIClient(LLMConfig(
+    base_url="https://api.openai.com/v1",
+    api_key="sk-xxx",
+    model="gpt-4o",
+)))
+agent = engine.load_agent_template("./agents/my_agent.yaml").instantiate(models=models)
 
 # 非流式
 result = await agent.chat("Analyze last month's sales data")
@@ -187,7 +185,7 @@ plugins:
 from axc_agent_engine import ConcurrencyConfig, Engine, LLMConfig
 from axc_agent_engine.tools.name_mapping import ToolNameMappingConfig
 
-default_llm = LLMConfig(
+main_model_config = LLMConfig(
     base_url="https://api.openai.com/v1",
     api_key="sk-xxx",
     model="gpt-4o",
@@ -199,19 +197,14 @@ default_llm = LLMConfig(
 )
 
 engine = Engine(
-    default_llm=default_llm,
     concurrency=ConcurrencyConfig(
         max_engine_concurrent_runs=128,
         queue_timeout=30,
     ),
 )
-```
-
-多个命名 provider 可注册到 `engine.provider_registry`，在 `load_agent(...)` 时按名称选择：
-
-```python
-engine.provider_registry.register("fast", fast_provider)
-agent = engine.load_agent("./agents/my_agent.yaml", default_llm="fast")
+agent = engine.load_agent_template("./agents/my_agent.yaml").instantiate(
+    models=AgentModels(default=OpenAIClient(main_model_config)),
+)
 ```
 
 工具名映射属于 provider 职责。内部工具名在 LLM 调用前编码为模型安全 function name，在 hooks/工具执行前解码回来。
@@ -234,13 +227,14 @@ HTTP API 是 OpenAI Chat Completions 明确子集。
 不运行基础 Agent 也不必存在的能力都属于插件。默认 `Engine.plugin_registry` 为空，内置和自定义插件都必须由宿主显式注册。
 
 ```python
-from axc_agent_engine import Engine, LLMConfig, PluginRegistry
+from axc_agent_engine import AgentModels, Engine, PluginRegistry
 from axc_agent_engine.plugins.builtin import BuiltinToolsPlugin, MemoryPlugin
 from my_project.plugins import MyCustomPlugin
 
 registry = PluginRegistry()
 registry.register_many([BuiltinToolsPlugin, MemoryPlugin, MyCustomPlugin])
-engine = Engine(default_llm=llm, plugin_registry=registry)
+engine = Engine(plugin_registry=registry)
+agent = engine.load_agent_template("./agents/my_agent.yaml").instantiate(models=AgentModels(default=llm))
 ```
 
 | 插件 | 用途 |
@@ -285,8 +279,8 @@ engine = Engine(default_llm=llm, plugin_registry=registry)
 ```mermaid
 flowchart TD
     A["应用创建 Engine"] --> B["注入 Provider 和服务"]
-    B --> C["Engine.load_agent(agent.yaml)"]
-    C --> D["解析 AgentConfig"]
+    B --> C["Engine.load_agent_template(agent.yaml)"]
+    C --> D["AgentTemplate.instantiate(models, mounts)"]
     D --> E["构造 PluginContext"]
     E --> F["加载启用插件"]
     F --> G["Plugin.initialize()"]

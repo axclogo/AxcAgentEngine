@@ -36,7 +36,7 @@ class ModeProfile:
 	prompt_guidance: str = ""
 	requires_supervisor: bool = False
 	min_agents: int = 1
-	utility_llm_recommended: bool = False
+	utility_model_recommended: bool = False
 
 
 @dataclass(frozen=True)
@@ -51,7 +51,7 @@ class ModeRuntime:
 	supervisor: Any | None = None
 	persona: dict[str, dict] | None = None
 	max_rounds: int = 10
-	utility_llm: Any = None
+	utility_model: Any = None
 
 
 MODE_PROFILES: dict[SessionMode, ModeProfile] = {
@@ -78,13 +78,13 @@ MODE_PROFILES: dict[SessionMode, ModeProfile] = {
 		mode=SessionMode.DEBATE,
 		scheduler_factory=lambda rt: DebateScheduler(rt.agents),
 		stop_factory=lambda rt: ConsensusStop(
-			llm_client=rt.utility_llm,
+			llm_client=rt.utility_model,
 			check_interval=3,
 			max_rounds=rt.max_rounds,
-		) if rt.utility_llm else MaxRoundsStop(rt.max_rounds),
+		) if rt.utility_model else MaxRoundsStop(rt.max_rounds),
 		prompt_guidance="围绕同一命题提出论点、反驳和证据，直到分歧收敛。",
 		min_agents=2,
-		utility_llm_recommended=True,
+		utility_model_recommended=True,
 	),
 	SessionMode.INTERVIEW: ModeProfile(
 		mode=SessionMode.INTERVIEW,
@@ -103,23 +103,23 @@ MODE_PROFILES: dict[SessionMode, ModeProfile] = {
 		mode=SessionMode.BACKCAST,
 		scheduler_factory=lambda rt: RoundRobinScheduler(),
 		stop_factory=lambda rt: GoalReachedStop(
-			llm_client=rt.utility_llm,
+			llm_client=rt.utility_model,
 			check_interval=3,
 			max_rounds=rt.max_rounds,
-		) if rt.utility_llm else MaxRoundsStop(rt.max_rounds),
+		) if rt.utility_model else MaxRoundsStop(rt.max_rounds),
 		prompt_guidance="从目标倒推关键里程碑、前置条件和当前应做动作。",
-		utility_llm_recommended=True,
+		utility_model_recommended=True,
 	),
 	SessionMode.RETROSPECTIVE: ModeProfile(
 		mode=SessionMode.RETROSPECTIVE,
 		scheduler_factory=lambda rt: RoundRobinScheduler(),
 		stop_factory=lambda rt: CausalChainStop(
-			llm_client=rt.utility_llm,
+			llm_client=rt.utility_model,
 			check_interval=3,
 			max_rounds=rt.max_rounds,
-		) if rt.utility_llm else MaxRoundsStop(rt.max_rounds),
+		) if rt.utility_model else MaxRoundsStop(rt.max_rounds),
 		prompt_guidance="从结果回溯原因，逐步形成可验证的因果链。",
-		utility_llm_recommended=True,
+		utility_model_recommended=True,
 	),
 	SessionMode.REDBLUE: ModeProfile(
 		mode=SessionMode.REDBLUE,
@@ -160,8 +160,8 @@ def build_scheduler_for_mode(mode: SessionMode, runtime: ModeRuntime) -> Any:
 
 def build_stop_condition_for_mode(mode: SessionMode, runtime: ModeRuntime) -> Any:
 	profile = get_mode_profile(mode)
-	if profile.utility_llm_recommended and not runtime.utility_llm:
-		logger.warning("[session] Mode %s needs utility_llm for semantic stop condition, falling back to MaxRoundsStop", mode)
+	if profile.utility_model_recommended and not runtime.utility_model:
+		logger.warning("[session] Mode %s needs utility_model for semantic stop condition, falling back to MaxRoundsStop", mode)
 	return profile.stop_factory(runtime)
 
 

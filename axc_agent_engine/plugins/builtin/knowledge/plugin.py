@@ -433,8 +433,8 @@ class KnowledgePlugin(BasePlugin):
 				api_key=self._rerank_config.get("api_key", ""),
 				timeout=float(self._rerank_config.get("timeout", 30)),
 			))
-		if mode in {"llm", "cascade"} and self._plugin_ctx.utility_llm:
-			rerankers.append(LLMReranker(self._plugin_ctx.utility_llm))
+		if mode in {"llm", "cascade"} and self._plugin_ctx.utility_model:
+			rerankers.append(LLMReranker(self._plugin_ctx.utility_model))
 		rerankers.append(ScoreReranker())
 		if len(rerankers) == 1:
 			return rerankers[0]
@@ -443,7 +443,7 @@ class KnowledgePlugin(BasePlugin):
 	def _build_query_rewriter(self):
 		if not self._query_rewrite_config.get("enabled", False):
 			return NoopQueryRewriter()
-		return LLMQueryRewriter(self._plugin_ctx.utility_llm)
+		return LLMQueryRewriter(self._plugin_ctx.utility_model)
 
 	def _hybrid_search(self, query: str, top_k: int = 5, filters: KnowledgeFilter | dict | None = None) -> list[dict]:
 		"""English: This documentation describes the related engine component behavior.

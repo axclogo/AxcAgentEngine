@@ -1,7 +1,7 @@
 """AxcAgentEngine — 纯 Agent 执行引擎框架。"""
 from axc_agent_engine.llm.config import LLMConfig
 from axc_agent_engine.runtime.concurrency import ConcurrencyConfig, ExecutionLimiter, RateLimiter, SessionExecutionGate
-from axc_agent_engine.engine import Engine
+from axc_agent_engine.engine import AgentModels, AgentTemplate, Engine
 from axc_agent_engine.agent import Agent
 from axc_agent_engine.core.events import Event, EventType
 from axc_agent_engine.core.errors import ErrorEnvelope, ErrorCategory
@@ -24,7 +24,7 @@ from axc_agent_engine.runtime.resources import (
 
 __all__ = [
 	#English: Bilingual note. 中文：核心公开 API
-	"Engine", "LLMConfig", "Agent", "Event", "EventType",
+	"Engine", "AgentModels", "AgentTemplate", "LLMConfig", "Agent", "Event", "EventType",
 	"ConcurrencyConfig", "ExecutionLimiter", "RateLimiter", "SessionExecutionGate",
 	#English: Source note. 中文：审计与错误
 	"AuditEvent", "AuditEventType", "InMemoryAuditSink", "ErrorEnvelope", "ErrorCategory",
@@ -50,4 +50,4 @@ try:
 	from importlib.metadata import version as _get_version
 	__version__ = _get_version("axc-agent-engine")
 except Exception:
-	__version__ = "2.1.0"
+	__version__ = "2.2.0"

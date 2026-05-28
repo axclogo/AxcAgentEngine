@@ -22,7 +22,7 @@ def test_output_format_service_validates_json_schema():
 
 
 @pytest.mark.asyncio
-async def test_output_format_service_repairs_with_utility_llm():
+async def test_output_format_service_repairs_with_utility_model():
 	class Utility:
 		async def ask(self, prompt):
 			return '{"answer":"fixed"}'
@@ -197,7 +197,7 @@ async def test_output_format_validate_tool_empty_and_repair(plugin_ctx):
 	class Utility:
 		async def ask(self, prompt):
 			return "```json\n{\"answer\":\"ok\"}\n```"
-	plugin_ctx.utility_llm = Utility()
+	plugin_ctx.utility_model = Utility()
 	plugin = OutputFormatPlugin()
 	plugin.initialize({
 		"type": "json_schema",

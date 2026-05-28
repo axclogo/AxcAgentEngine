@@ -1,7 +1,7 @@
 """Tests for Engine managing dispatcher lifecycle.
 
 Verifies:
-- Engine.load_agent auto-starts consumer
+- AgentTemplate.instantiate auto-starts consumer
 - agent_call works without manual consumer setup
 - Engine.unload_agent stops consumer
 - Engine.close stops all consumers
@@ -13,7 +13,7 @@ import tempfile
 import pytest
 from unittest.mock import AsyncMock
 
-from axc_agent_engine.engine import Engine
+from axc_agent_engine.engine import AgentModels, Engine
 from axc_agent_engine.tools.name_mapping import ToolNameMappingConfig
 from axc_agent_engine.storage.in_memory import InMemoryMessageBus
 from axc_agent_engine.core.dispatcher import AgentEnvelope
@@ -57,15 +57,15 @@ plugins: {{}}
 
 class TestEngineDispatcherLifecycle:
 	@pytest.mark.asyncio
-	async def test_load_agent_starts_consumer(self):
-		"""Engine.load_agent automatically starts dispatcher consumer."""
+	async def test_instantiate_starts_consumer(self):
+		"""AgentTemplate.instantiate automatically starts dispatcher consumer."""
 		bus = InMemoryMessageBus()
 		llm = _make_mock_llm()
-		engine = Engine(default_llm=llm, message_bus=bus)
+		engine = Engine(message_bus=bus)
 		assert engine._dispatcher is not None
 		with tempfile.TemporaryDirectory() as tmp:
 			path = _write_agent_yaml(tmp)
-			agent = engine.load_agent(path)
+			agent = engine.load_agent_template(path).instantiate(models=AgentModels(default=llm))
 			# Consumer should be running
 			assert agent.name in engine._dispatcher._consumers
 			task = engine._dispatcher._consumers[agent.name]
@@ -74,13 +74,13 @@ class TestEngineDispatcherLifecycle:
 
 	@pytest.mark.asyncio
 	async def test_agent_call_works_without_manual_consumer(self):
-		"""After load_agent, dispatcher.request works immediately."""
+		"""After instantiate, dispatcher.request works immediately."""
 		bus = InMemoryMessageBus()
 		llm = _make_mock_llm()
-		engine = Engine(default_llm=llm, message_bus=bus)
+		engine = Engine(message_bus=bus)
 		with tempfile.TemporaryDirectory() as tmp:
 			path = _write_agent_yaml(tmp, "worker")
-			agent = engine.load_agent(path)
+			agent = engine.load_agent_template(path).instantiate(models=AgentModels(default=llm))
 			# Patch agent.chat to return a known value
 			agent.chat = AsyncMock(return_value="worker reply")
 			await asyncio.sleep(0.05)
@@ -96,10 +96,10 @@ class TestEngineDispatcherLifecycle:
 		"""Engine.unload_agent stops the consumer task."""
 		bus = InMemoryMessageBus()
 		llm = _make_mock_llm()
-		engine = Engine(default_llm=llm, message_bus=bus)
+		engine = Engine(message_bus=bus)
 		with tempfile.TemporaryDirectory() as tmp:
 			path = _write_agent_yaml(tmp)
-			engine.load_agent(path)
+			engine.load_agent_template(path).instantiate(models=AgentModels(default=llm))
 			assert "test_agent" in engine._dispatcher._consumers
 			await engine.unload_agent("test_agent")
 			assert "test_agent" not in engine._dispatcher._consumers
@@ -110,12 +110,12 @@ class TestEngineDispatcherLifecycle:
 		"""Engine.close stops all dispatcher consumers."""
 		bus = InMemoryMessageBus()
 		llm = _make_mock_llm()
-		engine = Engine(default_llm=llm, message_bus=bus)
+		engine = Engine(message_bus=bus)
 		with tempfile.TemporaryDirectory() as tmp:
 			path1 = _write_agent_yaml(tmp, "agent1")
 			path2 = _write_agent_yaml(tmp, "agent2")
-			engine.load_agent(path1)
-			engine.load_agent(path2)
+			engine.load_agent_template(path1).instantiate(models=AgentModels(default=llm))
+			engine.load_agent_template(path2).instantiate(models=AgentModels(default=llm))
 			assert len(engine._dispatcher._consumers) == 2
 			await engine.close()
 			assert len(engine._dispatcher._consumers) == 0
@@ -124,7 +124,7 @@ class TestEngineDispatcherLifecycle:
 	async def test_no_dispatcher_without_bus(self):
 		"""Engine without message_bus has no dispatcher."""
 		llm = _make_mock_llm()
-		engine = Engine(default_llm=llm)
+		engine = Engine()
 		assert engine._dispatcher is None
 		await engine.close()
 
@@ -133,7 +133,7 @@ class TestEngineDispatcherLifecycle:
 		"""Request to non-existent agent times out."""
 		bus = InMemoryMessageBus()
 		llm = _make_mock_llm()
-		engine = Engine(default_llm=llm, message_bus=bus)
+		engine = Engine(message_bus=bus)
 		envelope = AgentEnvelope(sender="x", recipient="ghost", content="hi")
 		result = await engine._dispatcher.request(envelope, timeout=0.2)
 		assert result.type == "error"
