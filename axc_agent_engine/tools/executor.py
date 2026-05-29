@@ -114,7 +114,11 @@ class ToolRetryPolicy:
 
 
 class SingleToolExecutor:
-	def __init__(self, validator: ToolArgumentValidator | None = None, retry_policy: ToolRetryPolicy | None = None) -> None:
+	def __init__(
+		self,
+		validator: ToolArgumentValidator | None = None,
+		retry_policy: ToolRetryPolicy | None = None,
+	) -> None:
 		self.validator = validator or ToolArgumentValidator()
 		self.retry_policy = retry_policy or ToolRetryPolicy()
 
@@ -214,7 +218,7 @@ async def _execute_once(
 执行一次工具调用尝试，并强制返回 ToolOutput。"""
 	start = time.time()
 	try:
-		raw_result = await asyncio.wait_for(tool_def.execute(arguments, context or {}), timeout=tool_def.timeout)
+		raw_result = await _await_tool_execute(tool_def, arguments, context or {})
 		duration_ms = int((time.time() - start) * 1000)
 	except asyncio.TimeoutError:
 		return ToolResult(
@@ -229,8 +233,7 @@ async def _execute_once(
 			arguments=arguments, error=str(e), success=False,
 			duration_ms=int((time.time() - start) * 1000),
 		)
-	#English: Bilingual note. 中文：工具执行后强制校验 ToolOutput 返回类型。这是插件作者必须遵守的硬边界；
-	#English: Bilingual note. 中文：上层编排器可以把异常转成 LLM 循环里的工具失败。
+	# English: ToolOutput is a hard plugin contract. 中文：ToolOutput 是插件必须遵守的硬边界。
 	if not isinstance(raw_result, ToolOutput):
 		raise TypeError(f"工具必须返回 ToolOutput，实际得到 {type(raw_result).__name__}")
 	if raw_result.is_error:
@@ -245,3 +248,10 @@ async def _execute_once(
 		arguments=arguments, output=raw_result, success=True,
 		duration_ms=duration_ms,
 	)
+
+
+async def _await_tool_execute(tool_def: ToolDefinition, arguments: dict[str, Any], context: dict[str, Any]) -> Any:
+	timeout = tool_def.timeout
+	if timeout is None or timeout <= 0:
+		return await tool_def.execute(arguments, context)
+	return await asyncio.wait_for(tool_def.execute(arguments, context), timeout=timeout)

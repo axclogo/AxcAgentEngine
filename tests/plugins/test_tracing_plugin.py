@@ -59,6 +59,55 @@ async def test_tracing_records_runtime_metadata_and_trace_context():
 
 
 @pytest.mark.asyncio
+async def test_tracing_span_store_receives_execution_metadata_and_parent_id():
+	class Store:
+		def __init__(self):
+			self.spans = []
+
+		async def save_span(self, span):
+			self.spans.append(span)
+
+	store = Store()
+	p = _plugin({"enabled": True, "output": "store"}, span_store=store)
+	reg = ToolRegistry()
+
+	async def tool(args, ctx):
+		return ToolOutput.text("ok")
+
+	reg.register(ToolDefinition(name="tool", execute=tool, is_read_only=True, risk_level="safe"))
+	ctx = ExecutionContext(
+		runtime=ExecutionRuntimeState(
+			agent_info=AgentInfo(name="agent-a", session_id="session-1"),
+			model_info=ModelInfo(default="model-a"),
+		),
+	)
+	ctx.state.metadata.update({
+		"exec_log_id": 1001,
+		"conversation_id": 123,
+		"agent_config_id": 9,
+		"run_id": "run-1",
+		"session_id": "session-1",
+		"agent_name": "agent-a",
+	})
+
+	await p.on_execution_start(ctx)
+	await execute_tool_calls([{"name": "tool", "arguments": {}, "id": "call-1"}], reg, [p], ctx)
+	await p.on_execution_end(ctx, "done", "")
+	await p.close()
+
+	root = next(span for span in store.spans if span["type"] == "execution")
+	child = next(span for span in store.spans if span["type"] == "tool_call")
+	for span in (root, child):
+		assert span["metadata"]["exec_log_id"] == 1001
+		assert span["metadata"]["conversation_id"] == 123
+		assert span["metadata"]["agent_config_id"] == 9
+		assert span["metadata"]["run_id"] == "run-1"
+		assert span["metadata"]["session_id"] == "session-1"
+		assert span["metadata"]["agent_name"] == "agent-a"
+	assert child["parent_span_id"] == root["span_id"]
+
+
+@pytest.mark.asyncio
 async def test_tracing_correlates_concurrent_tools_without_parent_mislink():
 	spans = []
 	p = _plugin({"enabled": True, "output": "callback"})
@@ -128,7 +177,13 @@ async def test_tracing_correlates_same_name_concurrent_tools_by_call_id():
 @pytest.mark.asyncio
 async def test_tracing_redacts_arguments_and_results():
 	spans = []
-	p = _plugin({"enabled": True, "output": "callback", "include_arguments": True, "include_result": True, "max_result_length": 4})
+	p = _plugin({
+		"enabled": True,
+		"output": "callback",
+		"include_arguments": True,
+		"include_result": True,
+		"max_result_length": 4,
+	})
 	p.set_callback(spans.append)
 	reg = ToolRegistry()
 
@@ -335,7 +390,8 @@ def test_tracing_helpers_and_logging(caplog):
 	assert _truncate("abcdef", 3) == "abc...[省略 3 个字符]"
 	assert _sampled("trace", 1.0)
 	assert not _sampled("trace", 0.0)
-	assert TraceSampler(0.0, sample_errors=False, slow_span_ms=10).should_emit({"duration_ms": 11, "sampled": False}, False)
+	sampler = TraceSampler(0.0, sample_errors=False, slow_span_ms=10)
+	assert sampler.should_emit({"duration_ms": 11, "sampled": False}, False)
 	assert TraceSampler(0.0, sample_errors=True, slow_span_ms=0).should_emit({"sampled": False}, True)
 	assert _trace_summary([
 		{"type": "tool_call", "duration_ms": 3, "error": {"message": "x"}},

@@ -5,24 +5,44 @@ not just that keywords are absent.
 """
 import asyncio
 import pytest
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 
+from axc_agent_engine.core.events import Event, EventType
 from axc_agent_engine.core.dispatcher import AgentMessageDispatcher, AgentEnvelope
 from axc_agent_engine.storage.in_memory import InMemoryMessageBus
 
 
+def _stream_events(events):
+	async def stream(*args, **kwargs):
+		for event in events:
+			yield event
+	return stream
+
+
+def _raise_stream(error):
+	async def stream(*args, **kwargs):
+		raise error
+		yield Event.done("")
+	return stream
+
+
+async def _slow_stream(*args, **kwargs):
+	await asyncio.sleep(10)
+	yield Event.done("late")
+
+
 class TestDispatcherConsumer:
-	"""Test run_agent_consumer: publish → consumer → agent.chat → reply."""
+	"""Test run_agent_consumer: publish -> consumer -> agent.stream -> reply."""
 
 	@pytest.mark.asyncio
 	async def test_consumer_receives_and_replies(self):
-		"""Publish to agent.{name}.inbox, consumer calls agent.chat, reply envelope arrives."""
+		"""Publish to agent.{name}.inbox, consumer calls agent.stream, reply envelope arrives."""
 		bus = InMemoryMessageBus()
 		dispatcher = AgentMessageDispatcher(message_bus=bus)
 		# Mock agent
 		agent = MagicMock()
 		agent.name = "worker"
-		agent.chat = AsyncMock(return_value="I processed your request")
+		agent.stream = _stream_events([Event.done("I processed your request")])
 		# Start consumer
 		dispatcher.run_agent_consumer(agent)
 		await asyncio.sleep(0.05)  # Let consumer subscribe
@@ -31,17 +51,16 @@ class TestDispatcherConsumer:
 		result = await dispatcher.request(envelope, timeout=5.0)
 		assert result.type == "reply"
 		assert result.content == "I processed your request"
-		agent.chat.assert_called_once_with("do something", metadata={})
 		await dispatcher.stop_all()
 
 	@pytest.mark.asyncio
 	async def test_consumer_handles_agent_error(self):
-		"""Agent.chat raises -> request returns an error envelope."""
+		"""agent.stream raises -> request returns an error envelope."""
 		bus = InMemoryMessageBus()
 		dispatcher = AgentMessageDispatcher(message_bus=bus)
 		agent = MagicMock()
 		agent.name = "broken"
-		agent.chat = AsyncMock(side_effect=RuntimeError("agent crashed"))
+		agent.stream = _raise_stream(RuntimeError("agent crashed"))
 		dispatcher.run_agent_consumer(agent)
 		await asyncio.sleep(0.05)
 		envelope = AgentEnvelope(sender="caller", recipient="broken", content="hi")
@@ -67,10 +86,10 @@ class TestDispatcherConsumer:
 		dispatcher = AgentMessageDispatcher(message_bus=bus)
 		agent_a = MagicMock()
 		agent_a.name = "agent_a"
-		agent_a.chat = AsyncMock(return_value="reply from A")
+		agent_a.stream = _stream_events([Event.done("reply from A")])
 		agent_b = MagicMock()
 		agent_b.name = "agent_b"
-		agent_b.chat = AsyncMock(return_value="reply from B")
+		agent_b.stream = _stream_events([Event.done("reply from B")])
 		dispatcher.run_agent_consumer(agent_a)
 		dispatcher.run_agent_consumer(agent_b)
 		await asyncio.sleep(0.05)
@@ -84,18 +103,18 @@ class TestDispatcherConsumer:
 
 	@pytest.mark.asyncio
 	async def test_consumer_uses_agent_own_runtime(self):
-		"""Consumer calls agent.chat which uses the agent's own LLM/plugins."""
+		"""Consumer calls agent.stream which uses the agent's own LLM/plugins."""
 		bus = InMemoryMessageBus()
 		dispatcher = AgentMessageDispatcher(message_bus=bus)
 		call_log: list[str] = []
 
-		async def tracked_chat(msg, **kwargs):
+		async def tracked_stream(msg, **kwargs):
 			call_log.append(f"agent_runtime:{msg}")
-			return f"processed:{msg}"
+			yield Event.done(f"processed:{msg}")
 
 		agent = MagicMock()
 		agent.name = "tracked"
-		agent.chat = tracked_chat
+		agent.stream = tracked_stream
 		dispatcher.run_agent_consumer(agent)
 		await asyncio.sleep(0.05)
 		envelope = AgentEnvelope(sender="test", recipient="tracked", content="task1")
@@ -111,13 +130,13 @@ class TestDispatcherConsumer:
 		dispatcher = AgentMessageDispatcher(message_bus=bus)
 		seen_metadata = {}
 
-		async def tracked_chat(msg, **kwargs):
+		async def tracked_stream(msg, **kwargs):
 			seen_metadata.update(kwargs.get("metadata") or {})
-			return "ok"
+			yield Event.done("ok")
 
 		agent = MagicMock()
 		agent.name = "tracked"
-		agent.chat = tracked_chat
+		agent.stream = tracked_stream
 		dispatcher.run_agent_consumer(agent)
 		await asyncio.sleep(0.05)
 		envelope = AgentEnvelope(
@@ -139,15 +158,15 @@ class TestDispatcherConsumer:
 		dispatcher = AgentMessageDispatcher(message_bus=bus)
 		call_count = 0
 
-		async def slow_chat(msg, **kwargs):
+		async def slow_stream(msg, **kwargs):
 			nonlocal call_count
 			call_count += 1
 			await asyncio.sleep(0.05)
-			return f"reply:{msg}"
+			yield Event.done(f"reply:{msg}")
 
 		agent = MagicMock()
 		agent.name = "slow"
-		agent.chat = slow_chat
+		agent.stream = slow_stream
 		dispatcher.run_agent_consumer(agent)
 		await asyncio.sleep(0.05)
 		env1 = AgentEnvelope(sender="t", recipient="slow", content="msg1")
@@ -168,13 +187,13 @@ class TestDispatcherConsumer:
 		dispatcher = AgentMessageDispatcher(message_bus=bus)
 		received: list[str] = []
 
-		async def capture_chat(msg, **kwargs):
+		async def capture_stream(msg, **kwargs):
 			received.append(msg)
-			return "ignored"
+			yield Event.done("ignored")
 
 		agent = MagicMock()
 		agent.name = "receiver"
-		agent.chat = capture_chat
+		agent.stream = capture_stream
 		dispatcher.run_agent_consumer(agent)
 		await asyncio.sleep(0.05)
 		envelope = AgentEnvelope(sender="broadcaster", recipient="receiver", content="broadcast msg")
@@ -190,11 +209,91 @@ class TestDispatcherConsumer:
 		dispatcher = AgentMessageDispatcher(message_bus=bus)
 		agent = MagicMock()
 		agent.name = "stoppable"
-		agent.chat = AsyncMock(return_value="ok")
+		agent.stream = _stream_events([Event.done("ok")])
 		dispatcher.run_agent_consumer(agent)
 		await asyncio.sleep(0.05)
 		await dispatcher.stop_consumer("stoppable")
 		assert "stoppable" not in dispatcher._consumers
+
+	@pytest.mark.asyncio
+	async def test_request_forwards_sub_agent_events(self):
+		bus = InMemoryMessageBus()
+		dispatcher = AgentMessageDispatcher(message_bus=bus)
+		agent = MagicMock()
+		agent.name = "worker"
+		agent.stream = _stream_events([
+			Event.tool_call("search", "child-tool", {"q": "x"}),
+			Event.tool_result("search", "child-tool", "ok"),
+			Event.done("done"),
+		])
+		seen = []
+		dispatcher.run_agent_consumer(agent)
+		await asyncio.sleep(0.05)
+		envelope = AgentEnvelope(
+			sender="caller",
+			recipient="worker",
+			content="do",
+			metadata={"parent_tool_call_id": "parent-call", "run_id": "run-1"},
+		)
+		result = await dispatcher.request(envelope, timeout=5.0, event_callback=seen.append)
+		assert result.type == "reply"
+		types = [item.type for item in seen]
+		assert "sub_agent_start" in types
+		assert "sub_agent_step" in types
+		assert "sub_agent_complete" in types
+		tool_step = next(item for item in seen if item.metadata.get("step", {}).get("type") == "tool_call")
+		assert tool_step.metadata["parent_tool_call_id"] == "parent-call"
+		assert tool_step.metadata["step"]["tool"] == "search"
+		result_step = next(item for item in seen if item.metadata.get("step", {}).get("type") == "tool_result")
+		assert result_step.metadata["step"]["tool"] == "search"
+		assert result_step.metadata["step"]["content"] == "ok"
+		complete = next(item for item in seen if item.type == "sub_agent_complete")
+		assert complete.metadata["success"] is True
+		await dispatcher.stop_all()
+
+	@pytest.mark.asyncio
+	async def test_request_forwards_failed_sub_agent_complete(self):
+		bus = InMemoryMessageBus()
+		dispatcher = AgentMessageDispatcher(message_bus=bus)
+		agent = MagicMock()
+		agent.name = "worker"
+		agent.stream = _stream_events([Event.error("failed")])
+		seen = []
+		dispatcher.run_agent_consumer(agent)
+		await asyncio.sleep(0.05)
+		result = await dispatcher.request(
+			AgentEnvelope(sender="caller", recipient="worker", content="do"),
+			timeout=5.0,
+			event_callback=seen.append,
+		)
+		assert result.type == "error"
+		complete = next(item for item in seen if item.type == "sub_agent_complete")
+		assert complete.metadata["success"] is False
+		assert complete.metadata["error"] == "failed"
+		await dispatcher.stop_all()
+
+	@pytest.mark.asyncio
+	async def test_request_forwards_timeout_sub_agent_complete(self):
+		bus = InMemoryMessageBus()
+		dispatcher = AgentMessageDispatcher(message_bus=bus)
+		agent = MagicMock()
+		agent.name = "worker"
+		agent.stream = _slow_stream
+		seen = []
+		dispatcher.run_agent_consumer(agent)
+		await asyncio.sleep(0.05)
+		result = await dispatcher.request(
+			AgentEnvelope(sender="caller", recipient="worker", content="do"),
+			timeout=0.05,
+			event_callback=seen.append,
+		)
+		await asyncio.sleep(0.05)
+		assert result.type == "error"
+		assert any(item.type == "sub_agent_start" for item in seen)
+		complete = next(item for item in seen if item.type == "sub_agent_complete")
+		assert complete.metadata["success"] is False
+		assert "未响应" in complete.metadata["error"]
+		await dispatcher.stop_all()
 
 
 class TestEnvelopeFields:
@@ -229,8 +328,7 @@ class TestNoDirectAgentChat:
 		source = inspect.getsource(session)
 		assert "chat_with_messages" not in source
 		assert "stream_with_messages" not in source
-		# agent.chat is only allowed inside dispatcher consumer, not in session
-		# Session uses dispatcher.request, not agent.chat
+		# Sessions use dispatcher.request; dispatcher consumers execute target agent.stream.
 		assert "agent.chat" not in source.replace("agent.chat", "").replace("dispatcher", "")
 
 	def test_collaboration_no_target_chat(self):

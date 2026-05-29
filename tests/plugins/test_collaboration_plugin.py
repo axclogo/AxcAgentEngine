@@ -12,9 +12,11 @@ from axc_agent_engine.runtime.resources import ResourceRegistry
 class RecordingDispatcher:
 	def __init__(self) -> None:
 		self.envelopes: list[AgentEnvelope] = []
+		self.callbacks = []
 
-	async def request(self, envelope: AgentEnvelope, timeout: float = 60.0) -> AgentEnvelope:
+	async def request(self, envelope: AgentEnvelope, timeout: float = 60.0, event_callback=None) -> AgentEnvelope:
 		self.envelopes.append(envelope)
+		self.callbacks.append(event_callback)
 		return AgentEnvelope(
 			sender=envelope.recipient,
 			recipient=envelope.sender,
@@ -125,9 +127,9 @@ async def test_agent_call_rejects_self_call_by_default():
 
 async def test_agent_call_uses_timeout_argument():
 	class TimeoutDispatcher(RecordingDispatcher):
-		async def request(self, envelope: AgentEnvelope, timeout: float = 60.0) -> AgentEnvelope:
+		async def request(self, envelope: AgentEnvelope, timeout: float = 60.0, event_callback=None) -> AgentEnvelope:
 			self.timeout = timeout
-			return await super().request(envelope, timeout)
+			return await super().request(envelope, timeout, event_callback)
 
 	dispatcher = TimeoutDispatcher()
 	plugin = _plugin([SimpleNamespace(name="worker", description="")], dispatcher)
@@ -137,6 +139,56 @@ async def test_agent_call_uses_timeout_argument():
 	)
 
 	assert dispatcher.timeout == 7
+
+
+async def test_agent_call_uses_collaboration_timeout_config():
+	class TimeoutDispatcher(RecordingDispatcher):
+		async def request(self, envelope: AgentEnvelope, timeout: float = 60.0, event_callback=None) -> AgentEnvelope:
+			self.timeout = timeout
+			return await super().request(envelope, timeout, event_callback)
+
+	dispatcher = TimeoutDispatcher()
+	plugin = _plugin([SimpleNamespace(name="worker", description="")], dispatcher, {"timeout": 300})
+	await plugin._tool_agent_call(
+		{"agent_name": "worker", "message": "do it"},
+		{"agent_name": "caller"},
+	)
+
+	assert dispatcher.timeout == 300
+
+
+def test_agent_call_tool_disables_outer_timeout():
+	plugin = _plugin([SimpleNamespace(name="worker", description="")], RecordingDispatcher(), {"timeout": 300})
+	tool = next(item for item in plugin.get_tools() if item.name == "agent_call")
+	assert tool.timeout == 0
+
+
+async def test_agent_call_forwards_child_events_to_exec_sink():
+	dispatcher = RecordingDispatcher()
+	plugin = _plugin([SimpleNamespace(name="worker", description="")], dispatcher)
+	events = []
+	exec_ctx = SimpleNamespace(
+		runtime=SimpleNamespace(agent_call_depth=0, event_sink=events.append),
+		state=SimpleNamespace(metadata={"run_id": "run-1"}),
+	)
+
+	await plugin._tool_agent_call(
+		{"agent_name": "worker", "message": "do it"},
+		{"agent_name": "caller", "exec_ctx": exec_ctx, "tool_call_id": "parent-call"},
+	)
+	dispatcher.callbacks[0](AgentEnvelope(
+		type="sub_agent_step",
+		content="tool",
+		metadata={
+			"agent_name": "worker",
+			"parent_tool_call_id": "parent-call",
+			"step": {"type": "tool_call", "tool": "search"},
+		},
+	))
+
+	assert events[0].type.value == "sub_agent_step"
+	assert events[0].metadata["parent_tool_call_id"] == "parent-call"
+	assert events[0].metadata["step"]["type"] == "tool_call"
 
 
 def test_collaboration_plugin_does_not_expose_inline_multi_agent_session_without_sidecar():

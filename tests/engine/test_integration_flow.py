@@ -8,11 +8,28 @@ from axc_agent_engine.core.llm_caller import LLMCaller
 from axc_agent_engine.core.context import ExecutionContext, ExecutionConfig, ExecutionState
 from axc_agent_engine.core.plugin_manager import PluginManager
 from axc_agent_engine.tools.registry import ToolRegistry
-from axc_agent_engine.core.events import EventType
+from axc_agent_engine.core.events import Event, EventType
 from axc_agent_engine.core.errors import ProviderError
 from axc_agent_engine.core.schema import ToolDefinition
 from axc_agent_engine.plugins.base import BasePlugin
 from axc_agent_engine.tools.tool_output import ToolOutput
+
+
+class EventSinkToolPlugin(BasePlugin):
+	name = "event_sink_tool"
+
+	def __init__(self, events: list) -> None:
+		self.events = events
+
+	def get_tools(self):
+		async def call_child(args, ctx):
+			event_sink = ctx["exec_ctx"].runtime.event_sink
+			event_sink(Event(type=EventType.SUB_AGENT_START, metadata={"agent_name": "child"}))
+			await asyncio.sleep(0.01)
+			event_sink(Event(type=EventType.SUB_AGENT_STEP, metadata={"step": {"type": "tool_call"}}))
+			event_sink(Event(type=EventType.SUB_AGENT_COMPLETE, metadata={"success": True}))
+			return ToolOutput.text("child done")
+		return [ToolDefinition(name="call_child", execute=call_child, timeout=0)]
 
 
 async def _run_executor(executor, message: str) -> str:
@@ -121,6 +138,27 @@ class TestToolCallFlow:
 		assert EventType.TOOL_CALL in types
 		assert EventType.TOOL_RESULT in types
 		assert EventType.DONE in types
+
+	@pytest.mark.asyncio
+	async def test_tool_runtime_events_are_streamed_before_tool_result(self):
+		tool_call_msg = {
+			"role": "assistant", "content": "",
+			"tool_calls": [{"id": "tc-1", "function": {"name": "call_child", "arguments": "{}"}}],
+		}
+		final_msg = {"role": "assistant", "content": "done"}
+		provider = _mock_llm_provider([tool_call_msg, final_msg])
+		plugin = EventSinkToolPlugin([])
+		pm = PluginManager([plugin])
+		llm_caller = LLMCaller(primary=provider, fallback=None, plugin_manager=pm)
+		reg = ToolRegistry()
+		reg.register_many(plugin.get_tools())
+		ctx = ExecutionContext(config=ExecutionConfig(stream=False), state=ExecutionState())
+		executor = Executor(llm_caller=llm_caller, registry=reg, plugin_manager=pm, ctx=ctx)
+		events = [event async for event in executor.run_stream("call child")]
+		types = [event.type for event in events]
+		assert types.index(EventType.SUB_AGENT_START) < types.index(EventType.TOOL_RESULT)
+		assert types.index(EventType.SUB_AGENT_STEP) < types.index(EventType.TOOL_RESULT)
+		assert types.index(EventType.SUB_AGENT_COMPLETE) < types.index(EventType.TOOL_RESULT)
 
 	@pytest.mark.asyncio
 	async def test_tool_validation_failure_in_flow(self):

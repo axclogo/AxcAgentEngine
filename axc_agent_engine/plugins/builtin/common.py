@@ -9,6 +9,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from axc_agent_engine.core.events import Event, EventType
+
 
 def bounded_int(value: Any, minimum: int, maximum: int) -> int:
 	"""English: Bilingual documentation follows.
@@ -44,6 +46,19 @@ def result_store_from_context(context: dict, plugin_ctx: Any = None) -> Any:
 	if isinstance(context, dict) and context.get("result_store"):
 		return context["result_store"]
 	return getattr(plugin_ctx, "result_store", None)
+
+
+def agent_event_callback(exec_ctx: Any):
+	"""English: Bridge dispatcher envelopes into run event sink. 中文：转发子 Agent 事件到当前运行流。"""
+	event_sink = getattr(getattr(exec_ctx, "runtime", None), "event_sink", None) if exec_ctx else None
+	if not event_sink:
+		return None
+
+	def callback(envelope: Any) -> None:
+		event_type = EventType(envelope.type)
+		event_sink(Event(type=event_type, content=envelope.content, metadata=envelope.metadata))
+
+	return callback
 
 
 async def externalize_text(

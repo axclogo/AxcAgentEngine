@@ -13,10 +13,18 @@ import tempfile
 import pytest
 from unittest.mock import AsyncMock
 
+from axc_agent_engine.core.schema import LLMMessage, LLMResponse, LLMStreamChunk, LLMUsage
 from axc_agent_engine.engine import AgentModels, Engine
 from axc_agent_engine.tools.name_mapping import ToolNameMappingConfig
 from axc_agent_engine.storage.in_memory import InMemoryMessageBus
 from axc_agent_engine.core.dispatcher import AgentEnvelope
+from axc_agent_engine.core.events import Event, EventType
+from axc_agent_engine.core.schema import ToolDefinition
+from axc_agent_engine.plugins.base import BasePlugin
+from axc_agent_engine.plugins.builtin.collaboration.plugin import CollaborationPlugin
+from axc_agent_engine.plugins.config_schema import config_schema
+from axc_agent_engine.plugins.registry import PluginRegistry
+from axc_agent_engine.tools.tool_output import ToolOutput
 
 
 def _make_mock_llm():
@@ -55,6 +63,55 @@ plugins: {{}}
 	return path
 
 
+def _stream_done(content: str):
+	async def stream(*args, **kwargs):
+		yield Event.done(content)
+	return stream
+
+
+class SequenceLLMProvider:
+	model = "test"
+	tool_name_mapping = ToolNameMappingConfig()
+
+	def __init__(self, responses: list[LLMResponse]) -> None:
+		self.responses = responses
+		self.index = 0
+		self.ask = AsyncMock(return_value="ok")
+		self.close = AsyncMock()
+
+	async def chat(self, messages, tools=None, **kwargs):
+		index = min(self.index, len(self.responses) - 1)
+		self.index += 1
+		return self.responses[index]
+
+	async def stream(self, messages, tools=None, **kwargs):
+		response = await self.chat(messages, tools, **kwargs)
+		message = response.message
+		if message.tool_calls:
+			for index, tool_call in enumerate(message.tool_calls):
+				yield LLMStreamChunk(tool_call_delta={**tool_call, "index": index})
+			return
+		if message.content:
+			yield LLMStreamChunk(content_delta=message.content, usage=response.usage)
+
+
+def _response(content: str = "", tool_calls: list[dict] | None = None) -> LLMResponse:
+	return LLMResponse(
+		message=LLMMessage(content=content, tool_calls=tool_calls or []),
+		usage=LLMUsage(input_tokens=1, output_tokens=1),
+	)
+
+
+class ChildToolPlugin(BasePlugin):
+	name = "child_tools"
+	config_schema = config_schema("child_tools", "Child Tools", "Test child tools.", [])
+
+	def get_tools(self):
+		async def child_tool(args, ctx):
+			return ToolOutput.text("child tool result")
+		return [ToolDefinition(name="child_tool", description="child tool", execute=child_tool)]
+
+
 class TestEngineDispatcherLifecycle:
 	@pytest.mark.asyncio
 	async def test_instantiate_starts_consumer(self):
@@ -81,8 +138,7 @@ class TestEngineDispatcherLifecycle:
 		with tempfile.TemporaryDirectory() as tmp:
 			path = _write_agent_yaml(tmp, "worker")
 			agent = engine.load_agent_template(path).instantiate(models=AgentModels(default=llm))
-			# Patch agent.chat to return a known value
-			agent.chat = AsyncMock(return_value="worker reply")
+			agent.stream = _stream_done("worker reply")
 			await asyncio.sleep(0.05)
 			# Use dispatcher to call the agent
 			envelope = AgentEnvelope(sender="caller", recipient="worker", content="do task")
@@ -90,6 +146,85 @@ class TestEngineDispatcherLifecycle:
 			assert result.type == "reply"
 			assert result.content == "worker reply"
 		await engine.close()
+
+	@pytest.mark.asyncio
+	async def test_agent_call_stream_forwards_child_agent_events(self):
+		"""Parent stream receives child agent details from collaboration.agent_call."""
+		registry = PluginRegistry()
+		registry.register(CollaborationPlugin)
+		registry.register(ChildToolPlugin)
+		bus = InMemoryMessageBus()
+		engine = Engine(message_bus=bus, plugin_registry=registry)
+		parent_model = SequenceLLMProvider([
+			_response(tool_calls=[{
+				"id": "parent-call",
+				"function": {
+					"name": "agent_call",
+					"arguments": '{"agent_name":"worker","message":"search it","timeout":5}',
+				},
+			}]),
+			_response("parent done"),
+		])
+		child_model = SequenceLLMProvider([
+			_response(tool_calls=[{"id": "child-tool", "function": {"name": "child_tool", "arguments": "{}"}}]),
+			_response("child done"),
+		])
+		with tempfile.TemporaryDirectory() as tmp:
+			worker_path = os.path.join(tmp, "worker.yaml")
+			with open(worker_path, "w", encoding="utf-8") as f:
+				f.write("""
+name: worker
+description: test worker
+system_prompt: worker
+runtime:
+  max_rounds: 5
+plugins:
+  child_tools:
+    enabled: true
+""")
+			parent_path = os.path.join(tmp, "parent.yaml")
+			with open(parent_path, "w", encoding="utf-8") as f:
+				f.write("""
+name: parent
+description: test parent
+system_prompt: parent
+runtime:
+  max_rounds: 5
+  allowed_capabilities:
+    - agent_call
+plugins:
+  collaboration:
+    enabled: true
+    timeout: 5
+    allow_self_call: false
+""")
+			engine.load_agent_template(worker_path).instantiate(models=AgentModels(default=child_model))
+			parent = engine.load_agent_template(parent_path).instantiate(models=AgentModels(default=parent_model))
+			await asyncio.sleep(0.05)
+			events = [
+				event async for event in parent.stream_with_messages(
+					[{"role": "user", "content": "delegate"}],
+					session_id="s1",
+				)
+			]
+		await engine.close()
+		sub_events = [event for event in events if event.type in EventType.__members__.values()]
+		start = next(event for event in events if event.type == EventType.SUB_AGENT_START)
+		tool_call = next(
+			event for event in events
+			if event.type == EventType.SUB_AGENT_STEP and event.metadata["step"]["type"] == "tool_call"
+		)
+		tool_result = next(
+			event for event in events
+			if event.type == EventType.SUB_AGENT_STEP and event.metadata["step"]["type"] == "tool_result"
+		)
+		complete = next(event for event in events if event.type == EventType.SUB_AGENT_COMPLETE)
+		assert sub_events
+		assert start.metadata["agent_name"] == "worker"
+		assert tool_call.metadata["parent_tool_call_id"] == "parent-call"
+		assert tool_call.metadata["step"]["tool"] == "child_tool"
+		assert tool_result.metadata["step"]["content"] == "child tool result"
+		assert complete.metadata["success"] is True
 
 	@pytest.mark.asyncio
 	async def test_unload_agent_stops_consumer(self):

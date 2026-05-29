@@ -82,6 +82,7 @@ class ExecutionRuntimeState:
 	model_info: "ModelInfo | None" = None
 	agent_info: "AgentInfo | None" = None
 	cancel_source: "ExecutionState | None" = None
+	event_sink: Any = None
 
 
 @dataclass

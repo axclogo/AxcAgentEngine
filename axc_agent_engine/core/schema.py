@@ -61,7 +61,7 @@ class ToolDefinition:
 	parameters: dict[str, Any] = field(default_factory=lambda: {"type": "object", "properties": {}})
 	execute: Callable[..., Awaitable["ToolOutput"]] | None = None
 	is_read_only: bool = False
-	timeout: int = 120
+	timeout: float | None = 120
 	deferred: bool = False
 	capability: str = ""  # Capability 枚举值；空字符串表示不限制
 	risk_level: str = "safe"  # RiskLevel 枚举值

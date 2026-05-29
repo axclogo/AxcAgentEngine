@@ -3,6 +3,7 @@ from axc_agent_engine.core.events import (
 	Event, EventType,
 	STREAM_EVENTS, THINKING_EVENTS, TOOL_EVENTS,
 	PLAN_EVENTS, SYSTEM_EVENTS, TERMINAL_EVENTS,
+	SUB_AGENT_EVENTS,
 )
 
 
@@ -42,8 +43,17 @@ class TestEventCategories:
 		assert EventType.ERROR in TERMINAL_EVENTS
 		assert len(TERMINAL_EVENTS) == 2
 
+	def test_sub_agent_events_contains_correct_types(self):
+		assert EventType.SUB_AGENT_START in SUB_AGENT_EVENTS
+		assert EventType.SUB_AGENT_STEP in SUB_AGENT_EVENTS
+		assert EventType.SUB_AGENT_COMPLETE in SUB_AGENT_EVENTS
+		assert len(SUB_AGENT_EVENTS) == 3
+
 	def test_all_event_types_categorized(self):
-		all_categorized = STREAM_EVENTS | THINKING_EVENTS | TOOL_EVENTS | PLAN_EVENTS | SYSTEM_EVENTS | TERMINAL_EVENTS
+		all_categorized = (
+			STREAM_EVENTS | THINKING_EVENTS | TOOL_EVENTS | PLAN_EVENTS | SYSTEM_EVENTS | TERMINAL_EVENTS |
+			SUB_AGENT_EVENTS
+		)
 		all_types = set(EventType)
 		assert all_types == all_categorized
 
@@ -53,10 +63,19 @@ class TestEventCategories:
 		assert isinstance(TOOL_EVENTS, frozenset)
 		assert isinstance(PLAN_EVENTS, frozenset)
 		assert isinstance(SYSTEM_EVENTS, frozenset)
+		assert isinstance(SUB_AGENT_EVENTS, frozenset)
 		assert isinstance(TERMINAL_EVENTS, frozenset)
 
 	def test_categories_no_overlap(self):
-		categories = [STREAM_EVENTS, THINKING_EVENTS, TOOL_EVENTS, PLAN_EVENTS, SYSTEM_EVENTS, TERMINAL_EVENTS]
+		categories = [
+			STREAM_EVENTS,
+			THINKING_EVENTS,
+			TOOL_EVENTS,
+			PLAN_EVENTS,
+			SYSTEM_EVENTS,
+			TERMINAL_EVENTS,
+			SUB_AGENT_EVENTS,
+		]
 		for i, cat_a in enumerate(categories):
 			for cat_b in categories[i+1:]:
 				assert cat_a & cat_b == frozenset()

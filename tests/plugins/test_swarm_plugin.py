@@ -15,9 +15,13 @@ class RecordingDispatcher:
 	def __init__(self, replies: dict[str, str] | None = None) -> None:
 		self.envelopes: list[AgentEnvelope] = []
 		self.replies = replies or {}
+		self.timeouts: list[float] = []
+		self.callbacks = []
 
-	async def request(self, envelope: AgentEnvelope, timeout: float = 60.0) -> AgentEnvelope:
+	async def request(self, envelope: AgentEnvelope, timeout: float = 60.0, event_callback=None) -> AgentEnvelope:
 		self.envelopes.append(envelope)
+		self.timeouts.append(timeout)
+		self.callbacks.append(event_callback)
 		content = self.replies.get(envelope.recipient, f"{envelope.recipient} reply")
 		return AgentEnvelope(
 			sender=envelope.recipient,
@@ -163,5 +167,17 @@ def test_swarm_tool_has_capability_and_risk():
 	tool = plugin.get_tools()[0]
 	assert tool.name == "swarm_dispatch"
 	assert tool.is_read_only is False
+	assert tool.timeout == 0
 	assert tool.capability == "agent_call"
 	assert tool.risk_level == "moderate"
+
+
+async def test_swarm_dispatch_uses_task_timeout_without_outer_conflict():
+	dispatcher = RecordingDispatcher()
+	plugin = _plugin([SimpleNamespace(name="worker", description="")], dispatcher, {"timeout": 300})
+	result = await plugin._tool_swarm_dispatch(
+		{"goal": "ship", "timeout": 300, "tasks": [{"agent_name": "worker", "description": "do", "timeout": 250}]},
+		{"agent_name": "caller"},
+	)
+	assert not result.is_error
+	assert dispatcher.timeouts == [250]

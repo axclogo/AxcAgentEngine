@@ -4,6 +4,7 @@ import pytest
 from axc_agent_engine.engine import AgentModels, Engine
 from axc_agent_engine.llm.config import LLMConfig
 from axc_agent_engine.core.errors import ConfigError, PluginInitError, SchemaError
+from axc_agent_engine.core.run_request import RunRequest
 from axc_agent_engine.agent import Agent
 from axc_agent_engine.plugins import PluginContext
 from axc_agent_engine.plugins.base import BasePlugin
@@ -203,6 +204,87 @@ plugins:
 		executor = agent._create_executor("session-1", metadata={"tenant_id": "request"})
 		assert executor._ctx.state.metadata["tenant_id"] == "request"
 		assert executor._ctx.state.metadata["agent_name"] == "template_agent"
+
+	def test_run_request_merges_run_id_from_run_options(self):
+		request = RunRequest.create(
+			user_message="hi",
+			run_options={"run_id": "run-1"},
+			metadata={"exec_log_id": 1001},
+		)
+		assert request.metadata["run_id"] == "run-1"
+		assert request.metadata["exec_log_id"] == 1001
+
+	def test_run_request_rejects_conflicting_run_id_metadata(self):
+		with pytest.raises(ValueError, match="run_options.run_id conflicts with metadata.run_id"):
+			RunRequest.create(
+				user_message="hi",
+				run_options={"run_id": "run-1"},
+				metadata={"run_id": "other"},
+			)
+
+	@pytest.mark.asyncio
+	async def test_resume_stream_rejects_conflicting_metadata_run_id(self, mock_llm, tmp_path):
+		path = tmp_path / "agent.yaml"
+		path.write_text("name: metadata_agent\nsystem_prompt: base\n", encoding="utf-8")
+		agent = Engine().load_agent_template(str(path)).instantiate(models=AgentModels(default=mock_llm))
+		with pytest.raises(ValueError, match="metadata.run_id conflicts with resume run_id"):
+			[event async for event in agent.resume_stream("run-1", metadata={"run_id": "other"})]
+
+	@pytest.mark.asyncio
+	async def test_resume_stream_rejects_conflicting_run_options_run_id(self, mock_llm, tmp_path):
+		path = tmp_path / "agent.yaml"
+		path.write_text("name: metadata_agent\nsystem_prompt: base\n", encoding="utf-8")
+		agent = Engine().load_agent_template(str(path)).instantiate(models=AgentModels(default=mock_llm))
+		with pytest.raises(ValueError, match="run_options.run_id conflicts with resume run_id"):
+			[event async for event in agent.resume_stream("run-1", run_options={"run_id": "other"})]
+
+	@pytest.mark.asyncio
+	async def test_stream_with_messages_passes_metadata_to_run_request(self, mock_llm, tmp_path):
+		path = tmp_path / "agent.yaml"
+		path.write_text("name: metadata_agent\nsystem_prompt: base\n", encoding="utf-8")
+		agent = Engine().load_agent_template(str(path)).instantiate(models=AgentModels(default=mock_llm))
+		seen = {}
+
+		async def execute_stream(**kwargs):
+			seen.update(kwargs)
+			if False:
+				yield None
+
+		agent._execute_stream = execute_stream
+		metadata = {"exec_log_id": 1001, "conversation_id": 123, "agent_config_id": 9}
+		events = [
+			event async for event in agent.stream_with_messages(
+				[{"role": "user", "content": "hello"}],
+				session_id="session-1",
+				run_options={"run_id": "run-1"},
+				metadata=metadata,
+			)
+		]
+		assert events == []
+		assert seen["session_id"] == "session-1"
+		assert seen["run_options"] == {"run_id": "run-1"}
+		assert seen["metadata"] == metadata
+
+	def test_run_request_metadata_reaches_execution_context(self, mock_llm, tmp_path):
+		path = tmp_path / "agent.yaml"
+		path.write_text("name: metadata_agent\nsystem_prompt: base\n", encoding="utf-8")
+		agent = Engine().load_agent_template(str(path)).instantiate(models=AgentModels(default=mock_llm))
+		request = RunRequest.create(
+			user_message="hello",
+			session_id="session-1",
+			stream=True,
+			messages=[{"role": "user", "content": "hello"}],
+			run_options={"run_id": "run-1"},
+			metadata={"exec_log_id": 1001, "conversation_id": 123, "agent_config_id": 9},
+		)
+		executor = agent._create_executor(request)
+		metadata = executor._ctx.state.metadata
+		assert metadata["exec_log_id"] == 1001
+		assert metadata["conversation_id"] == 123
+		assert metadata["agent_config_id"] == 9
+		assert metadata["run_id"] == "run-1"
+		assert metadata["session_id"] == "session-1"
+		assert metadata["agent_name"] == "metadata_agent"
 
 	def test_instantiate_rejects_invalid_overrides(self, mock_llm, agent_yaml):
 		engine = Engine()

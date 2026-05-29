@@ -22,6 +22,9 @@ class EventType(str, Enum):
 	PLAN_CREATED = "plan_created"
 	STEP_START = "step_start"
 	STEP_COMPLETED = "step_completed"
+	SUB_AGENT_START = "sub_agent_start"
+	SUB_AGENT_STEP = "sub_agent_step"
+	SUB_AGENT_COMPLETE = "sub_agent_complete"
 	ERROR = "error"
 	DONE = "done"
 
@@ -32,6 +35,7 @@ THINKING_EVENTS = frozenset({EventType.THINKING_START, EventType.THINKING_DELTA,
 TOOL_EVENTS = frozenset({EventType.TOOL_CALL, EventType.TOOL_RESULT, EventType.TOOL_ARGS_PREVIEW})
 PLAN_EVENTS = frozenset({EventType.PLAN_CREATED, EventType.STEP_START, EventType.STEP_COMPLETED})
 SYSTEM_EVENTS = frozenset({EventType.CACHE_HIT, EventType.COST_UPDATE, EventType.STATE_CHANGE})
+SUB_AGENT_EVENTS = frozenset({EventType.SUB_AGENT_START, EventType.SUB_AGENT_STEP, EventType.SUB_AGENT_COMPLETE})
 TERMINAL_EVENTS = frozenset({EventType.DONE, EventType.ERROR})
 
 
@@ -151,3 +155,39 @@ class Event:
 中文：以下为双语文档说明。
 创建 COST_UPDATE 事件。"""
 		return cls(type=EventType.COST_UPDATE, metadata={"input_tokens": input_tokens, "output_tokens": output_tokens})
+
+	@classmethod
+	def sub_agent_start(cls, agent_name: str, message: str, metadata: dict[str, Any]) -> "Event":
+		"""Create SUB_AGENT_START.
+中文：创建子 Agent 开始事件。"""
+		return cls(type=EventType.SUB_AGENT_START, content=message, metadata={"agent_name": agent_name, **metadata})
+
+	@classmethod
+	def sub_agent_step(cls, agent_name: str, step: dict[str, Any], metadata: dict[str, Any]) -> "Event":
+		"""Create SUB_AGENT_STEP.
+中文：创建子 Agent 明细事件。"""
+		return cls(type=EventType.SUB_AGENT_STEP, metadata={"agent_name": agent_name, "step": step, **metadata})
+
+	@classmethod
+	def sub_agent_complete(
+		cls,
+		agent_name: str,
+		success: bool,
+		duration_ms: int,
+		error: str,
+		result: str,
+		metadata: dict[str, Any],
+	) -> "Event":
+		"""Create SUB_AGENT_COMPLETE.
+中文：创建子 Agent 完成事件。"""
+		return cls(
+			type=EventType.SUB_AGENT_COMPLETE,
+			content=result,
+			metadata={
+				"agent_name": agent_name,
+				"success": success,
+				"duration_ms": duration_ms,
+				"error": error,
+				**metadata,
+			},
+		)

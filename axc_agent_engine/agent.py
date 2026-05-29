@@ -10,22 +10,27 @@ from dataclasses import replace
 from contextlib import AsyncExitStack
 from typing import Any, AsyncIterator
 
-from axc_agent_engine.runtime.concurrency import ExecutionLimiter, SessionExecutionGate
 from axc_agent_engine.core.context import ExecutionConfig, ExecutionContext, ExecutionServices
+from axc_agent_engine.core.events import Event, EventType
 from axc_agent_engine.core.executor import Executor
 from axc_agent_engine.core.llm_caller import LLMCaller
 from axc_agent_engine.core.plugin_manager import PluginManager
 from axc_agent_engine.core.run_request import RunRequest
 from axc_agent_engine.core.session import Session
 from axc_agent_engine.core.session_manager import SessionManager
-from axc_agent_engine.core.events import Event, EventType
-from axc_agent_engine.runtime.input import InputProvider, InputProviderResult, PassthroughInputProvider
-from axc_agent_engine.llm.provider import LLMProvider
-from axc_agent_engine.plugins.base import BasePlugin
-from axc_agent_engine.plugins import agent_info_from_runtime, model_info_from_models
 from axc_agent_engine.core.schema import RuntimeConfig
+from axc_agent_engine.llm.provider import LLMProvider
+from axc_agent_engine.plugins import agent_info_from_runtime, model_info_from_models
+from axc_agent_engine.plugins.base import BasePlugin
+from axc_agent_engine.runtime.concurrency import ExecutionLimiter, SessionExecutionGate
+from axc_agent_engine.runtime.input import InputProvider, InputProviderResult, PassthroughInputProvider
 from axc_agent_engine.tools.registry import ToolRegistry
-from axc_agent_engine.workflow import WorkflowResumePlan, WorkflowResumeRequest, WorkflowRuntime, create_workflow_runtime
+from axc_agent_engine.workflow import (
+	WorkflowResumePlan,
+	WorkflowResumeRequest,
+	WorkflowRuntime,
+	create_workflow_runtime,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -214,6 +219,7 @@ class Agent:
 		session_id: str = "",
 		llm_options: dict | None = None,
 		run_options: dict | None = None,
+		metadata: dict | None = None,
 	) -> str:
 		"""English: Bilingual documentation follows.
 中文：以下为双语文档说明。
@@ -229,6 +235,7 @@ class Agent:
 			stream=False,
 			llm_options=llm_options,
 			run_options=run_options,
+			metadata=metadata,
 		)
 
 	async def stream(
@@ -237,6 +244,7 @@ class Agent:
 		session_id: str = "",
 		llm_options: dict | None = None,
 		run_options: dict | None = None,
+		metadata: dict | None = None,
 	) -> AsyncIterator[Event]:
 		"""English: Bilingual documentation follows.
 中文：以下为双语文档说明。
@@ -249,6 +257,7 @@ class Agent:
 			session_id=session_id,
 			llm_options=llm_options,
 			run_options=run_options,
+			metadata=metadata,
 		):
 			yield event
 
@@ -258,6 +267,7 @@ class Agent:
 		session_id: str = "",
 		llm_options: dict | None = None,
 		run_options: dict | None = None,
+		metadata: dict | None = None,
 	) -> AsyncIterator[Event]:
 		"""English: Bilingual documentation follows.
 中文：以下为双语文档说明。
@@ -272,6 +282,7 @@ class Agent:
 			session_id=session_id,
 			llm_options=llm_options,
 			run_options=run_options,
+			metadata=metadata,
 		):
 			yield event
 
@@ -281,13 +292,20 @@ class Agent:
 		message: str = "",
 		llm_options: dict | None = None,
 		run_options: dict | None = None,
+		metadata: dict | None = None,
 	) -> str:
 		"""English: Bilingual documentation follows.
 中文：以下为双语文档说明。
 非流式恢复执行级 checkpoint。"""
 		from axc_agent_engine.core.errors import ProviderError
 		result = ""
-		async for event in self.resume_stream(run_id, message=message, llm_options=llm_options, run_options=run_options):
+		async for event in self.resume_stream(
+			run_id,
+			message=message,
+			llm_options=llm_options,
+			run_options=run_options,
+			metadata=metadata,
+		):
 			if event.type == EventType.DONE:
 				result = event.content
 			elif event.type == EventType.ERROR:
@@ -300,15 +318,18 @@ class Agent:
 		message: str = "",
 		llm_options: dict | None = None,
 		run_options: dict | None = None,
+		metadata: dict | None = None,
 	) -> AsyncIterator[Event]:
 		"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-通过 WorkflowRuntime 恢复 execution/round 或 POR checkpoint。"""
+	中文：以下为双语文档说明。
+	通过 WorkflowRuntime 恢复 execution/round 或 POR checkpoint。"""
+		self._validate_resume_metadata(run_id, metadata, run_options)
 		request = WorkflowResumeRequest(
 			run_id=run_id,
 			message=message,
-			handler=lambda plan: self._resume_from_workflow_plan(plan, message, llm_options, run_options),
+			handler=lambda plan: self._resume_from_workflow_plan(plan, message, llm_options, run_options, metadata),
 			checkpoint_store=self._services.checkpoint_store,
+			metadata=dict(metadata or {}),
 		)
 		async for event in self._workflow_runtime.resume(request):
 			yield event
@@ -319,6 +340,7 @@ class Agent:
 		message: str = "",
 		llm_options: dict | None = None,
 		run_options: dict | None = None,
+		metadata: dict | None = None,
 	) -> AsyncIterator[Event]:
 		"""Resume from a WorkflowRuntime-owned plan.
 中文：此文档说明相关引擎组件的行为。"""
@@ -329,15 +351,18 @@ class Agent:
 		session_id = plan.session_id
 		stream = bool((run_options or {}).get("stream", True))
 		async with await self._run_coordinator.slots(session_id):
+			request_metadata = {"run_id": run_id, **dict(metadata or {})}
 			request = RunRequest.create(
 				user_message=message,
 				session_id=session_id,
 				stream=stream,
 				llm_options=llm_options,
 				run_options=run_options,
+				metadata=request_metadata,
 			)
 			executor = self._create_executor(request)
 			executor.load_resume_snapshot(run_id, plan.snapshot)
+			executor._ctx.state.metadata.update(request.metadata)
 			async for event in executor.run_stream(message):
 				yield event
 			if session_id:
@@ -415,7 +440,10 @@ class Agent:
 		)
 		async with await self._run_coordinator.slots(request.session_id):
 			executor = self._create_executor(request)
-			raw_messages = request.messages if request.messages is not None else [{"role": "user", "content": request.user_message}]
+			raw_messages = (
+				request.messages if request.messages is not None
+				else [{"role": "user", "content": request.user_message}]
+			)
 			processed = await self._process_input(raw_messages, request.session_id)
 			effective_user_message = self._extract_last_user_message(processed.messages) or request.user_message
 			if processed.artifacts:
@@ -457,6 +485,15 @@ class Agent:
 				metadata=metadata,
 			)
 		return self._executor_factory.create(request)
+
+	@staticmethod
+	def _validate_resume_metadata(run_id: str, metadata: dict | None, run_options: dict | None) -> None:
+		metadata_run_id = (metadata or {}).get("run_id")
+		option_run_id = (run_options or {}).get("run_id")
+		if metadata_run_id and str(metadata_run_id) != run_id:
+			raise ValueError("metadata.run_id conflicts with resume run_id")
+		if option_run_id and str(option_run_id) != run_id:
+			raise ValueError("run_options.run_id conflicts with resume run_id")
 
 	async def _process_input(self, messages: list[dict[str, Any]], session_id: str) -> InputProviderResult:
 		context = {

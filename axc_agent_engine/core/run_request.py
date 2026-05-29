@@ -12,6 +12,7 @@ class RunOptions:
 	approval_queue: Any = None
 	response_queue: Any = None
 	stream: bool | None = None
+	run_id: str = ""
 
 	@classmethod
 	def from_dict(cls, raw: dict | None) -> "RunOptions":
@@ -21,6 +22,7 @@ class RunOptions:
 			approval_queue=raw.get("approval_queue"),
 			response_queue=raw.get("response_queue"),
 			stream=raw.get("stream") if isinstance(raw.get("stream"), bool) else None,
+			run_id=str(raw.get("run_id") or ""),
 		)
 
 
@@ -46,6 +48,11 @@ class RunRequest:
 		metadata: dict | None = None,
 	) -> "RunRequest":
 		options = RunOptions.from_dict(run_options)
+		request_metadata = dict(metadata or {})
+		if options.run_id and request_metadata.get("run_id") and str(request_metadata["run_id"]) != options.run_id:
+			raise ValueError("run_options.run_id conflicts with metadata.run_id")
+		if options.run_id:
+			request_metadata["run_id"] = options.run_id
 		return cls(
 			user_message=user_message,
 			session_id=session_id,
@@ -53,7 +60,7 @@ class RunRequest:
 			messages=messages,
 			llm_options=dict(llm_options or {}),
 			options=options,
-			metadata=dict(metadata or {}),
+			metadata=request_metadata,
 		)
 
 

@@ -44,9 +44,17 @@ Do not add any fallback, degradation, silent skip, or forced continuation for fa
 
 Invalid configuration must fail directly. Missing resources must fail directly. Plugin load failures must fail directly. Missing plugin dependencies must fail directly. Plugin hook failures must fail directly.
 
+引擎不为任何宿主的错误使用买单，不通过兜底、兼容错误写法、自动修正错误输入来掩盖问题；宿主用错就直接崩溃或报错。
+
+The engine must not pay for any host misuse. Do not hide host errors through fallbacks, compatibility with invalid patterns, or automatic correction of invalid input. If the host uses the engine incorrectly, fail or raise directly.
+
 允许存在显式、用户可见、语义清晰的策略，例如用户主动配置的 fallback model、工具 retry policy、检索链内部明确的排序/召回策略。它们不能掩盖配置错误或致命运行错误。
 
 Explicit, user-visible, semantically clear strategies are allowed, such as a user-configured fallback model, a tool retry policy, or a deliberate retrieval ranking/recall strategy. They must not hide configuration errors or fatal runtime failures.
+
+上报错误后，必须先核实是否确实为 bug；确认是 bug 后，修复必须补齐对应测试用例，覆盖复现路径和修复后的正确行为。
+
+After an error is reported, first verify whether it is a real bug. Once confirmed, the fix must include matching tests that cover the reproduction path and the corrected behavior.
 
 ## 3. Module Boundaries
 

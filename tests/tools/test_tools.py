@@ -195,6 +195,26 @@ class TestToolExecutor:
 		assert "timeout" in result.error.lower()
 
 	@pytest.mark.asyncio
+	async def test_execute_timeout_zero_disables_outer_wait_for(self):
+		async def slow(args, ctx):
+			await asyncio.sleep(0.02)
+			return ToolOutput.text("done")
+		td = ToolDefinition(name="slow", execute=slow, timeout=0)
+		result = await asyncio.wait_for(execute_tool(td, {}, "id1"), timeout=0.2)
+		assert result.success is True
+		assert result.output.content == "done"
+
+	@pytest.mark.asyncio
+	async def test_execute_timeout_none_disables_outer_wait_for(self):
+		async def slow(args, ctx):
+			await asyncio.sleep(0.02)
+			return ToolOutput.text("done")
+		td = ToolDefinition(name="slow", execute=slow, timeout=None)
+		result = await asyncio.wait_for(execute_tool(td, {}, "id1"), timeout=0.2)
+		assert result.success is True
+		assert result.output.content == "done"
+
+	@pytest.mark.asyncio
 	async def test_execute_exception(self):
 		async def bad(args, ctx):
 			raise ValueError("oops")

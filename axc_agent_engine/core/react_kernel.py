@@ -130,6 +130,7 @@ class ReActKernel:
 			async for item in self._turn_runner.run(
 				emit_tool_events=emit_tool_events,
 				event_filter=event_filter,
+				event_sink=self._ctx.runtime.event_sink,
 			):
 				if isinstance(item, ReActTurnResult):
 					turn_result = item

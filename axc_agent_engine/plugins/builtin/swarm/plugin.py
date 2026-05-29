@@ -11,7 +11,7 @@ from axc_agent_engine.core.constants import MAX_CALL_DEPTH
 from axc_agent_engine.core.errors import ErrorCategory, ErrorEnvelope
 from axc_agent_engine.core.schema import ToolDefinition
 from axc_agent_engine.plugins.base import BasePlugin
-from axc_agent_engine.plugins.builtin.common import bounded_int, externalize_text
+from axc_agent_engine.plugins.builtin.common import agent_event_callback, bounded_int, externalize_text
 from axc_agent_engine.plugins.builtin.config_schemas import SWARM_CONFIG_SCHEMA
 
 if TYPE_CHECKING:
@@ -68,6 +68,7 @@ class SwarmPlugin(BasePlugin):
 				"failure_policy": {"type": "string", "enum": ["best_effort", "fail_fast"], "default": self._failure_policy},
 			}, "required": ["goal", "tasks"]},
 			is_read_only=False,
+			timeout=0,
 			capability="agent_call",
 			risk_level="moderate",
 			execute=self._tool_swarm_dispatch,
@@ -121,7 +122,11 @@ class SwarmPlugin(BasePlugin):
 						metadata=task_metadata,
 					)
 					try:
-						reply = await dispatcher.request(envelope, timeout=task["timeout"])
+						reply = await dispatcher.request(
+							envelope,
+							timeout=task["timeout"],
+							event_callback=agent_event_callback(exec_ctx),
+						)
 						duration_ms = int((time.time() - task_start) * 1000)
 						if reply.type == "error":
 							return _task_result(task, "error", duration_ms=duration_ms, error=reply.content)
@@ -262,7 +267,14 @@ async def _gather_swarm(tasks: list[dict], runner, failure_policy: str) -> list[
 			future.cancel()
 
 
-def _task_result(task: dict, status: str, duration_ms: int = 0, result: Any = "", error: str = "", artifact: Any = None) -> dict:
+def _task_result(
+	task: dict,
+	status: str,
+	duration_ms: int = 0,
+	result: Any = "",
+	error: str = "",
+	artifact: Any = None,
+) -> dict:
 	payload = {
 		"task_id": task["task_id"],
 		"index": task["index"],
@@ -297,6 +309,7 @@ def _swarm_metadata(context: dict, exec_ctx: Any, depth: int, swarm_id: str, goa
 		"agent_call_depth": depth,
 		"caller_agent": context.get("agent_name", metadata.get("agent_name", "")),
 		"caller_session_id": context.get("session_id", metadata.get("session_id", "")),
+		"parent_tool_call_id": context.get("tool_call_id", ""),
 		"swarm_id": swarm_id,
 		"swarm_goal": goal,
 	})
@@ -305,7 +318,12 @@ def _swarm_metadata(context: dict, exec_ctx: Any, depth: int, swarm_id: str, goa
 	return metadata
 
 
-async def _externalize_result(content: str, result_store: Any, max_result_bytes: int, metadata: dict[str, Any]) -> tuple[Any, Any]:
+async def _externalize_result(
+	content: str,
+	result_store: Any,
+	max_result_bytes: int,
+	metadata: dict[str, Any],
+) -> tuple[Any, Any]:
 	return await externalize_text(content, result_store, max_result_bytes, metadata, logger, "swarm")
 
 

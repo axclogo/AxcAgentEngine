@@ -185,4 +185,3 @@ async def _fail_tool_call(
 		error=error.message,
 		success=False,
 	)
-

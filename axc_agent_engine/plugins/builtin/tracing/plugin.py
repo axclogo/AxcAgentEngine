@@ -89,6 +89,7 @@ class SpanFactory:
 			"routing_mode": str(getattr(agent_info, "routing_mode", "") or metadata.get("routing_mode", "")),
 			"model": getattr(model_info, "active", "") or getattr(model_info, "default", "") if model_info else "",
 			"sampled": bool(state.get("sampled", True)),
+			"metadata": _span_metadata(metadata),
 		}
 		if extra:
 			span.update(extra)
@@ -379,7 +380,10 @@ class TracingPlugin(BasePlugin):
 		span = state.setdefault("active_spans", {}).pop(tool_call_id, None) if tool_call_id else None
 		result_str = result.compact_view() if result else ""
 		success = not result.is_error if result else True
-		error = _error_payload(result_str, self._max_error_length, code="tool.output_error") if result and result.is_error else {}
+		error = (
+			_error_payload(result_str, self._max_error_length, code="tool.output_error")
+			if result and result.is_error else {}
+		)
 		extra = {
 			"tool_call_id": tool_call_id,
 			"content_type": getattr(result, "content_type", ""),
@@ -587,6 +591,24 @@ def _current_tool_runtime(exec_ctx: "ExecutionContext") -> dict[str, Any]:
 	if isinstance(contexts, dict):
 		return dict(contexts.get(key, {}))
 	return {}
+
+
+def _span_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
+	"""Copy execution metadata into a JSON-safe span payload.
+中文：将执行 metadata 复制为 span 可保存载荷。"""
+	return {key: _span_metadata_value(value) for key, value in metadata.items()}
+
+
+def _span_metadata_value(value: Any) -> Any:
+	if isinstance(value, (str, int, float, bool)) or value is None:
+		return value
+	if isinstance(value, list):
+		return [_span_metadata_value(item) for item in value]
+	if isinstance(value, tuple):
+		return [_span_metadata_value(item) for item in value]
+	if isinstance(value, dict):
+		return {str(key): _span_metadata_value(item) for key, item in value.items()}
+	return str(value)
 
 
 def _trace_id(exec_ctx: "ExecutionContext") -> str:

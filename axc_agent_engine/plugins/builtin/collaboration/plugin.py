@@ -7,6 +7,7 @@ from typing import Any, TYPE_CHECKING
 from axc_agent_engine.core.constants import MAX_CALL_DEPTH
 from axc_agent_engine.core.schema import ToolDefinition
 from axc_agent_engine.plugins.base import BasePlugin
+from axc_agent_engine.plugins.builtin.common import agent_event_callback
 from axc_agent_engine.plugins.builtin.config_schemas import COLLABORATION_CONFIG_SCHEMA
 
 if TYPE_CHECKING:
@@ -125,6 +126,7 @@ class CollaborationPlugin(BasePlugin):
 				 "timeout": {"type": "number", "description": "调用超时时间（秒）"}},
 				 "required": ["agent_name", "message"]},
 				is_read_only=False,
+				timeout=0,
 				capability="agent_call",
 				risk_level="moderate",
 				execute=self._tool_agent_call,
@@ -213,10 +215,11 @@ class CollaborationPlugin(BasePlugin):
 		if exec_ctx:
 			exec_ctx.runtime.agent_call_depth = current_depth + 1
 		metadata = _collaboration_metadata(context, exec_ctx, current_depth + 1)
+		metadata["parent_tool_call_id"] = str(context.get("tool_call_id", ""))
 		envelope = self._envelope_factory.create(caller, agent_name, message, context, metadata)
 		start = time.time()
 		try:
-			reply = await dispatcher.request(envelope, timeout=timeout)
+			reply = await dispatcher.request(envelope, timeout=timeout, event_callback=agent_event_callback(exec_ctx))
 			duration_ms = int((time.time() - start) * 1000)
 			if reply.type == "error":
 				return ToolOutput.error(reply.content)
@@ -270,7 +273,8 @@ class CollaborationPlugin(BasePlugin):
 			cancelled = cancel(task_id)
 			if inspect.isawaitable(cancelled):
 				cancelled = await cancelled
-		return ToolOutput.json_output({"task_id": task_id, "cancelled": bool(cancelled)}, summary="推演任务已取消" if cancelled else "推演任务未取消")
+		summary = "推演任务已取消" if cancelled else "推演任务未取消"
+		return ToolOutput.json_output({"task_id": task_id, "cancelled": bool(cancelled)}, summary=summary)
 
 	def _is_agent_allowed(self, agent_name: str, caller: str = "") -> bool:
 		return self._agent_policy.allowed(agent_name, caller)

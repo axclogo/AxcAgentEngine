@@ -111,6 +111,29 @@ class TestPacker:
 		assert result.messages[-1]["content"] == "current"
 		assert result.truncated is True
 
+	def test_keeps_tool_call_group_atomic(self):
+		messages = normalize_messages([
+			{"role": "user", "content": "old"},
+			{"role": "assistant", "content": "", "tool_calls": [{"id": "tc-1"}]},
+			{"role": "tool", "tool_call_id": "tc-1", "content": "tool result"},
+			{"role": "user", "content": "current"},
+		])
+		result = pack_context(messages, max_input_tokens=40, reserve_output_tokens=5)
+		call_ids = {call["id"] for message in result.messages for call in message.get("tool_calls", [])}
+		tool_ids = {message.get("tool_call_id") for message in result.messages if message.get("role") == "tool"}
+		assert call_ids <= tool_ids
+
+	def test_drops_oversized_tool_call_group_atomic(self):
+		messages = normalize_messages([
+			{"role": "user", "content": "old"},
+			{"role": "assistant", "content": "", "tool_calls": [{"id": "tc-1"}]},
+			{"role": "tool", "tool_call_id": "tc-1", "content": "x" * 1000},
+			{"role": "user", "content": "current"},
+		])
+		result = pack_context(messages, max_input_tokens=30, reserve_output_tokens=5)
+		assert not any(message.get("tool_calls") for message in result.messages)
+		assert not any(message.get("role") == "tool" for message in result.messages)
+
 
 class TestRecall:
 	def test_keyword_score(self):

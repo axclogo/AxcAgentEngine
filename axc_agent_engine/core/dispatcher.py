@@ -4,21 +4,25 @@
 - 每个 Agent 都有一个 consumer task（run_agent_consumer），订阅 agent.{name}.inbox
 - 调用方通过 dispatcher.request() 发送消息并等待回复
 - consumer 接收 envelope 后使用目标 Agent 自己的 runtime 执行，再发到 _reply:{correlation_id}
-- consumer 外部不允许直接跨 Agent 调 agent.chat()
+- consumer 外部不允许直接跨 Agent 调 agent.stream()
 """
 from __future__ import annotations
 
 import asyncio
 import logging
+import time
 import uuid
 from dataclasses import dataclass, field
-from typing import Any, TYPE_CHECKING
+from typing import Any, Awaitable, Callable, TYPE_CHECKING
 
 if TYPE_CHECKING:
 	from axc_agent_engine.agent import Agent
+	from axc_agent_engine.core.events import Event
 	from axc_agent_engine.storage.protocols import MessageBus
 
 logger = logging.getLogger(__name__)
+
+AgentEventCallback = Callable[["AgentEnvelope"], Awaitable[None] | None]
 
 
 @dataclass
@@ -74,13 +78,14 @@ class AgentMessageDispatcher:
 	1. Engine 使用 MessageBus 创建 dispatcher
 	2. 每个已加载 Agent 调用 run_agent_consumer(agent) 启动 consumer
 	3. 调用方使用 request(envelope) 发送并等待回复
-	4. consumer 收到消息后通过目标 agent.chat() 执行，并用 AgentEnvelope 回复
+	4. consumer 收到消息后通过目标 agent.stream() 执行，转发子事件，并用 AgentEnvelope 回复
 	"""
 
 	def __init__(self, message_bus: "MessageBus") -> None:
 		self._bus = message_bus
 		self._consumers: dict[str, asyncio.Task] = {}
 		self._pending: dict[str, asyncio.Future[AgentEnvelope]] = {}
+		self._event_callbacks: dict[str, AgentEventCallback] = {}
 
 	def run_agent_consumer(self, agent: "Agent") -> asyncio.Task:
 		"""English: Bilingual documentation follows.
@@ -89,7 +94,7 @@ class AgentMessageDispatcher:
 
 		consumer 会：
 		- 从总线接收 AgentEnvelope
-		- 通过 agent.chat() 执行，使用目标 Agent 自己的 runtime/LLM
+		- 通过 agent.stream() 执行，使用目标 Agent 自己的 runtime/LLM
 		- 把回复 envelope 发布到 _reply:{correlation_id}
 		- 出错时发布 error envelope
 		"""
@@ -116,7 +121,12 @@ class AgentMessageDispatcher:
 		for name in list(self._consumers.keys()):
 			await self.stop_consumer(name)
 
-	async def request(self, envelope: AgentEnvelope, timeout: float = 60.0) -> AgentEnvelope:
+	async def request(
+		self,
+		envelope: AgentEnvelope,
+		timeout: float = 60.0,
+		event_callback: AgentEventCallback | None = None,
+	) -> AgentEnvelope:
 		"""English: Bilingual documentation follows.
 中文：以下为双语文档说明。
 向目标 Agent 发送消息，并等待 correlation_id 匹配的回复。
@@ -128,14 +138,34 @@ class AgentMessageDispatcher:
 		envelope.correlation_id = correlation_id
 		envelope.type = "request"
 		reply_channel = f"_reply:{correlation_id}"
+		event_channel = f"_events:{correlation_id}"
 		loop = asyncio.get_running_loop()
 		future: asyncio.Future[AgentEnvelope] = loop.create_future()
 		self._pending[correlation_id] = future
+		started = time.time()
+		if event_callback:
+			self._event_callbacks[correlation_id] = event_callback
 		listen_task = asyncio.create_task(self._listen_reply(reply_channel, correlation_id))
+		event_task = (
+			asyncio.create_task(self._listen_events(event_channel, correlation_id))
+			if event_callback else None
+		)
 		try:
 			await self._bus.publish(self._agent_channel(envelope.recipient), envelope.to_dict())
 			return await asyncio.wait_for(future, timeout=timeout)
 		except asyncio.TimeoutError:
+			if event_callback:
+				timeout_event = _sub_agent_complete_envelope(
+					envelope.recipient,
+					envelope,
+					False,
+					started,
+					"",
+					f"Agent '{envelope.recipient}' 在 {timeout}s 内未响应",
+				)
+				result = event_callback(timeout_event)
+				if hasattr(result, "__await__"):
+					await result
 			return AgentEnvelope(
 				sender=envelope.recipient,
 				recipient=envelope.sender,
@@ -147,9 +177,14 @@ class AgentMessageDispatcher:
 			)
 		finally:
 			self._pending.pop(correlation_id, None)
+			self._event_callbacks.pop(correlation_id, None)
 			listen_task.cancel()
+			if event_task:
+				event_task.cancel()
 			try:
 				await listen_task
+				if event_task:
+					await event_task
 			except (asyncio.CancelledError, Exception):
 				pass
 
@@ -177,27 +212,50 @@ class AgentMessageDispatcher:
 		"""English: Bilingual documentation follows.
 中文：以下为双语文档说明。
 处理收到的 envelope：通过目标 Agent runtime 执行并回复。"""
+		started = time.time()
 		try:
-			if envelope.conversation_id:
-				result = await agent.chat(
-					envelope.content,
-					session_id=envelope.conversation_id,
+			await self._publish_child_event(
+				envelope,
+				_sub_agent_start_envelope(agent.name, envelope),
+			)
+			events = await self._run_agent_stream(agent, envelope)
+			result_event = _last_event(events, "done")
+			error_event = _last_event(events, "error")
+			success = result_event is not None and error_event is None
+			result = result_event.content if result_event else ""
+			error = error_event.content if error_event else ""
+			await self._publish_child_event(
+				envelope,
+				_sub_agent_complete_envelope(agent.name, envelope, success, started, result, error),
+			)
+			if error_event:
+				reply_envelope = AgentEnvelope(
+					sender=agent.name,
+					recipient=envelope.sender,
+					type="error",
+					content=error,
+					correlation_id=envelope.correlation_id,
+					conversation_id=envelope.conversation_id,
+					trace_id=envelope.trace_id,
 					metadata=envelope.metadata,
 				)
 			else:
-				result = await agent.chat(envelope.content, metadata=envelope.metadata)
-			reply_envelope = AgentEnvelope(
-				sender=agent.name,
-				recipient=envelope.sender,
-				type="reply",
-				content=result,
-				correlation_id=envelope.correlation_id,
-				conversation_id=envelope.conversation_id,
-				trace_id=envelope.trace_id,
-				metadata=envelope.metadata,
-			)
+				reply_envelope = AgentEnvelope(
+					sender=agent.name,
+					recipient=envelope.sender,
+					type="reply",
+					content=result,
+					correlation_id=envelope.correlation_id,
+					conversation_id=envelope.conversation_id,
+					trace_id=envelope.trace_id,
+					metadata=envelope.metadata,
+				)
 		except Exception as e:
 			logger.warning(f"[dispatcher] Agent '{agent.name}' execution failed: {e}")
+			await self._publish_child_event(
+				envelope,
+				_sub_agent_complete_envelope(agent.name, envelope, False, started, "", str(e)),
+			)
 			reply_envelope = AgentEnvelope(
 				sender=agent.name,
 				recipient=envelope.sender,
@@ -210,6 +268,23 @@ class AgentMessageDispatcher:
 		if envelope.correlation_id:
 			reply_channel = f"_reply:{envelope.correlation_id}"
 			await self._bus.publish(reply_channel, reply_envelope.to_dict())
+
+	async def _publish_child_event(self, request: AgentEnvelope, event: AgentEnvelope) -> None:
+		if not request.correlation_id:
+			return
+		await self._bus.publish(f"_events:{request.correlation_id}", event.to_dict())
+
+	async def _run_agent_stream(self, agent: "Agent", envelope: AgentEnvelope) -> list["Event"]:
+		events: list["Event"] = []
+		async for event in agent.stream(
+			envelope.content,
+			session_id=envelope.conversation_id,
+			metadata=envelope.metadata,
+		):
+			events.append(event)
+			if event.type.value != "done":
+				await self._publish_child_event(envelope, _sub_agent_step_envelope(agent.name, envelope, event))
+		return events
 
 	async def _listen_reply(self, channel: str, correlation_id: str) -> None:
 		"""English: Bilingual documentation follows.
@@ -225,6 +300,104 @@ class AgentMessageDispatcher:
 		except asyncio.CancelledError:
 			pass
 
+	async def _listen_events(self, channel: str, correlation_id: str) -> None:
+		try:
+			async for msg in self._bus.subscribe(channel):
+				if msg.get("correlation_id") != correlation_id:
+					continue
+				callback = self._event_callbacks.get(correlation_id)
+				if callback:
+					result = callback(AgentEnvelope.from_dict(msg))
+					if hasattr(result, "__await__"):
+						await result
+		except asyncio.CancelledError:
+			pass
+
 	@staticmethod
 	def _agent_channel(agent_name: str) -> str:
 		return f"agent.{agent_name}.inbox"
+
+
+def _sub_agent_start_envelope(agent_name: str, envelope: AgentEnvelope) -> AgentEnvelope:
+	return _event_envelope(
+		envelope,
+		"sub_agent_start",
+		envelope.content,
+		{
+			"agent_name": agent_name,
+			"agent_id": agent_name,
+			"message": envelope.content,
+			**_parent_metadata(envelope),
+		},
+	)
+
+
+def _sub_agent_step_envelope(agent_name: str, envelope: AgentEnvelope, event: "Event") -> AgentEnvelope:
+	return _event_envelope(
+		envelope,
+		"sub_agent_step",
+		event.content,
+		{
+			"agent_name": agent_name,
+			**_parent_metadata(envelope),
+			"step": _event_step(event),
+		},
+	)
+
+
+def _sub_agent_complete_envelope(
+	agent_name: str,
+	envelope: AgentEnvelope,
+	success: bool,
+	started: float,
+	result: str,
+	error: str,
+) -> AgentEnvelope:
+	return _event_envelope(
+		envelope,
+		"sub_agent_complete",
+		result,
+		{
+			"agent_name": agent_name,
+			"success": success,
+			"duration_ms": int((time.time() - started) * 1000),
+			"error": error,
+			"result_preview": result[:500],
+			**_parent_metadata(envelope),
+		},
+	)
+
+
+def _event_envelope(source: AgentEnvelope, event_type: str, content: str, metadata: dict[str, Any]) -> AgentEnvelope:
+	return AgentEnvelope(
+		sender=source.recipient,
+		recipient=source.sender,
+		type=event_type,
+		content=content,
+		correlation_id=source.correlation_id,
+		conversation_id=source.conversation_id,
+		trace_id=source.trace_id,
+		metadata=metadata,
+	)
+
+
+def _parent_metadata(envelope: AgentEnvelope) -> dict[str, Any]:
+	return {
+		"parent_tool_call_id": str(envelope.metadata.get("parent_tool_call_id", "")),
+		"run_id": str(envelope.metadata.get("run_id", "")),
+		"trace_id": str(envelope.trace_id or envelope.metadata.get("trace_id", "")),
+	}
+
+
+def _event_step(event: "Event") -> dict[str, Any]:
+	return {
+		"type": event.type.value,
+		"tool": event.tool_name,
+		"content": event.content,
+		"arguments": event.arguments,
+		"duration_ms": int(event.metadata.get("duration_ms", 0) or 0),
+	}
+
+
+def _last_event(events: list["Event"], event_type: str) -> "Event | None":
+	return next((event for event in reversed(events) if event.type.value == event_type), None)
