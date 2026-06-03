@@ -5,7 +5,7 @@ from typing import Any, TYPE_CHECKING
 from axc_agent_engine.plugins.base import BasePlugin
 from axc_agent_engine.plugins.builtin.config_schemas import RISK_GUARD_CONFIG_SCHEMA
 from axc_agent_engine.core.schema import RiskLevel
-from axc_agent_engine.runtime.risk import classify_tool_risk
+from axc_agent_engine.runtime.risk import RiskRuleEngine, classify_tool_risk
 
 if TYPE_CHECKING:
 	from axc_agent_engine.core.context import ExecutionContext
@@ -25,11 +25,12 @@ class RiskGuardPlugin(BasePlugin):
 
 	def initialize(self, config: dict, plugin_ctx: "PluginContext" = None) -> None:
 		self._custom_rules = config.get("rules", [])
+		self._rule_engine = RiskRuleEngine(self._custom_rules)
 
 	async def pre_tool_call(self, exec_ctx: "ExecutionContext" = None, tool_name: str = "",
 					  arguments: dict = None) -> tuple[bool, dict]:
 		arguments = arguments or {}
-		risk = classify_risk(tool_name, arguments, custom_rules=self._custom_rules)
+		risk = self._rule_engine.classify(tool_name, arguments).level
 		if risk == RiskLevel.BLOCKED:
 			logger.warning(f"[risk_guard] Blocked tool: {tool_name}")
 			self._last_rejection_reason = f"工具 {tool_name} 命中 blocked 风险规则，参数不允许执行"

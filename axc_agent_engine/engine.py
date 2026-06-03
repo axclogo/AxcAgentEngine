@@ -333,12 +333,13 @@ def _apply_overrides(raw: dict[str, Any], overrides: dict[str, Any]) -> None:
 		parts = str(path).split(".")
 		if not parts or any(not part for part in parts):
 			raise SchemaError(f"Invalid override path: {path}")
+		if parts[0] not in raw:
+			raise SchemaError(f"Unknown override root: {parts[0]}")
 		target: dict[str, Any] = raw
-		for part in parts[:-1]:
+		for index, part in enumerate(parts[:-1]):
 			next_target = target.get(part)
 			if next_target is None:
-				next_target = {}
-				target[part] = next_target
+				raise SchemaError(f"Override path does not exist: {'.'.join(parts[:index + 1])}")
 			if not isinstance(next_target, dict):
 				raise SchemaError(f"Override path is not an object: {path}")
 			target = next_target

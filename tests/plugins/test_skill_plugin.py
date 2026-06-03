@@ -172,23 +172,12 @@ async def test_script_large_stdout_externalized(tmp_path):
 	assert await store.get(result.artifacts[0].id, 0, 64) == "x" * 64
 
 
-@pytest.mark.asyncio
-async def test_skill_status_and_reload_report_load_errors(tmp_path):
+def test_skill_initialize_raises_on_missing_directory(tmp_path):
 	from axc_agent_engine.plugins.builtin.skill.plugin import SkillPlugin
 
 	plugin = SkillPlugin()
-	plugin.initialize({"paths": [str(tmp_path / "missing")]}, None)
-
-	status = await plugin._tool_skill_status({}, {})
-	assert status.content["loaded"] == 0
-	assert status.content["errors"]
-
-	_create_skill(tmp_path)
-	plugin._paths = [str(tmp_path)]
-	reloaded = await plugin._tool_reload_skills({}, {})
-
-	assert reloaded.content["loaded"] == 1
-	assert reloaded.content["errors"] == []
+	with pytest.raises(FileNotFoundError, match="Skill directory not found"):
+		plugin.initialize({"paths": [str(tmp_path / "missing")]}, None)
 
 
 def test_duplicate_skill_policy_error_reports_conflict(tmp_path):
@@ -197,13 +186,12 @@ def test_duplicate_skill_policy_error_reports_conflict(tmp_path):
 	_create_skill(tmp_path / "first", "demo")
 	_create_skill(tmp_path / "second", "demo")
 	plugin = SkillPlugin()
-	plugin.initialize({"paths": [str(tmp_path / "first"), str(tmp_path / "second")], "duplicate_policy": "error"}, None)
 
-	assert "demo" in plugin._skills
-	assert any(error.get("error") == "duplicate skill" for error in plugin._load_errors)
+	with pytest.raises(ValueError, match="Duplicate skill"):
+		plugin.initialize({"paths": [str(tmp_path / "first"), str(tmp_path / "second")], "duplicate_policy": "error"}, None)
 
 
-def test_skill_catalog_accepts_object_tuple_provider_and_filters_invalid_items():
+def test_skill_catalog_rejects_invalid_items():
 	from axc_agent_engine.plugins import PluginContext
 	from axc_agent_engine.plugins.builtin.skill.plugin import SkillPlugin
 
@@ -217,15 +205,11 @@ def test_skill_catalog_accepts_object_tuple_provider_and_filters_invalid_items()
 			)
 
 	plugin = SkillPlugin()
-	plugin.initialize(
-		{"allowed_skills": ["allowed", "denied"], "denied_skills": ["denied"]},
-		PluginContext(resources={"skill.catalog": Catalog()}),
-	)
-
-	assert sorted(plugin._skills) == ["allowed"]
-	assert plugin._skills["allowed"]["trigger_keywords"] == ["one"]
-	assert any(error["error"] == "empty skill name" for error in plugin._load_errors)
-	assert any(error["error"] == "skill item is not an object" for error in plugin._load_errors)
+	with pytest.raises(ValueError, match="name cannot be empty"):
+		plugin.initialize(
+			{"allowed_skills": ["allowed", "denied"], "denied_skills": ["denied"]},
+			PluginContext(resources={"skill.catalog": Catalog()}),
+		)
 
 
 def test_skill_catalog_duplicate_policy_replace_and_skip():
@@ -243,15 +227,14 @@ def test_skill_catalog_duplicate_policy_replace_and_skip():
 
 	assert replace._skills["demo"]["description"] == "new"
 	assert skip._skills["demo"]["description"] == "old"
-	assert any(error["error"] == "duplicate skill skipped" for error in skip._load_errors)
+	assert skip._load_errors == []
 
 
 def test_skill_frontmatter_parse_and_extension_normalization(tmp_path):
 	from axc_agent_engine.plugins.builtin.skill.plugin import SkillPlugin, _normalize_extensions, _parse_frontmatter
 
-	meta, body = _parse_frontmatter("---\n: bad yaml\n---\nbody")
-	assert meta == {}
-	assert body == "body"
+	with pytest.raises(ValueError, match="frontmatter YAML"):
+		_parse_frontmatter("---\n: bad yaml\n---\nbody")
 	assert _parse_frontmatter("plain body") == ({}, "plain body")
 	assert _normalize_extensions(["py", ".sh", "exe", ""]) == {".py", ".sh"}
 	assert _normalize_extensions("bad") == {".py", ".sh"}
@@ -263,6 +246,40 @@ def test_skill_frontmatter_parse_and_extension_normalization(tmp_path):
 
 	assert plugin._skills["plain"]["name"] == "plain"
 	assert plugin._skills["plain"]["content"] == "plain body"
+
+
+@pytest.mark.asyncio
+async def test_skill_fail_fast_and_catalog_edges(tmp_path):
+	from axc_agent_engine.plugins import PluginContext
+	from axc_agent_engine.plugins.builtin.skill.plugin import SkillPlugin, _catalog_skills, _parse_frontmatter
+
+	with pytest.raises(ValueError, match="requires paths"):
+		SkillPlugin().initialize({}, None)
+	with pytest.raises(ValueError, match="duplicate_policy"):
+		SkillPlugin().initialize({"paths": [str(tmp_path)], "duplicate_policy": "bad"}, None)
+	with pytest.raises(TypeError, match="skill.catalog"):
+		_catalog_skills(object())
+	with pytest.raises(ValueError, match="frontmatter must be an object"):
+		_parse_frontmatter("---\n- bad\n---\nbody")
+
+	catalog = type("Catalog", (), {"skills": [{"name": "allowed", "content": "body"}, {"name": "denied", "content": "body"}]})()
+	plugin = SkillPlugin()
+	plugin.initialize(
+		{"allowed_skills": ["allowed", "denied"], "denied_skills": ["denied"]},
+		PluginContext(resources={"skill.catalog": catalog}),
+	)
+	assert sorted(plugin._skills) == ["allowed"]
+	assert plugin.inject_context(None, "topic")
+	status = await plugin._tool_skill_status({}, {})
+	assert status.content["loaded"] == 1
+
+	_create_skill(tmp_path, "skipme")
+	(tmp_path / "ignored.txt").write_text("x", encoding="utf-8")
+	empty_dir = tmp_path / "empty"
+	empty_dir.mkdir()
+	loader = SkillPlugin()
+	loader.initialize({"paths": [str(tmp_path)], "allowed_skills": ["missing"]}, None)
+	assert loader._skills == {}
 
 
 @pytest.mark.asyncio

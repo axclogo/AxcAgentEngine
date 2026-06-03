@@ -54,8 +54,11 @@ class TestBasePlugin:
 
 class TestPluginLoader:
 	def test_load_disabled(self, plugin_ctx):
+		from axc_agent_engine.plugins.builtin.compress.plugin import CompressPlugin
+		registry = PluginRegistry()
+		registry.register(CompressPlugin)
 		config = {"compress": {"enabled": False}}
-		plugins = load_plugins(config, plugin_ctx, PluginRegistry())
+		plugins = load_plugins(config, plugin_ctx, registry)
 		assert len(plugins) == 0
 
 	def test_load_enabled(self, plugin_ctx):
@@ -69,7 +72,7 @@ class TestPluginLoader:
 
 	def test_load_enabled_missing_raises(self, plugin_ctx):
 		config = {"nonexistent": {"enabled": True}}
-		with pytest.raises(PluginInitError, match="enabled but not registered"):
+		with pytest.raises(PluginInitError, match="configured but not registered"):
 			load_plugins(config, plugin_ctx, PluginRegistry())
 
 	def test_phase_ordering(self, plugin_ctx):

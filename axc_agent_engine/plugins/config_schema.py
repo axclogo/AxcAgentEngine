@@ -166,6 +166,14 @@ def normalize_plugin_config_schema(
 	return schema
 
 
+def validate_plugin_config(plugin_name: str, config: dict[str, Any], schema: PluginConfigSchema) -> None:
+	"""Strictly validate plugin YAML against declared schema.
+中文：按插件声明 Schema 严格校验 YAML 配置。"""
+	if not isinstance(config, dict):
+		raise ValueError(f"Plugin {plugin_name} config must be an object")
+	_validate_object(config, schema.fields, f"plugins.{plugin_name}")
+
+
 def _with_common_fields(fields: list[PluginConfigField]) -> list[PluginConfigField]:
 	"""Add shared plugin fields unless already declared.
 中文：补充插件通用字段，已有声明则保留。"""
@@ -181,3 +189,52 @@ def _with_common_fields(fields: list[PluginConfigField]) -> list[PluginConfigFie
 			default=True,
 		))
 	return common + list(fields)
+
+
+def _validate_object(value: dict[str, Any], fields: list[PluginConfigField], path: str) -> None:
+	field_map = {field.key: field for field in fields if field.key}
+	for key in value:
+		if key not in field_map:
+			raise ValueError(f"Unknown config field: {path}.{key}")
+	for field in fields:
+		if not field.key:
+			continue
+		child_path = f"{path}.{field.key}"
+		if field.required and field.key not in value:
+			raise ValueError(f"Missing required config field: {child_path}")
+		if field.key in value:
+			_validate_value(value[field.key], field, child_path)
+
+
+def _validate_value(value: Any, field: PluginConfigField, path: str) -> None:
+	if value is None:
+		if field.required:
+			raise ValueError(f"Config field {path} is required")
+		return
+	if field.enum and value not in field.enum:
+		raise ValueError(f"Config field {path} must be one of {field.enum}, got {value!r}")
+	if field.type == "string":
+		_require_type(value, str, path, "string")
+	elif field.type == "integer":
+		if isinstance(value, bool) or not isinstance(value, int):
+			raise ValueError(f"Config field {path} must be an integer")
+	elif field.type == "number":
+		if isinstance(value, bool) or not isinstance(value, (int, float)):
+			raise ValueError(f"Config field {path} must be a number")
+	elif field.type == "boolean":
+		_require_type(value, bool, path, "boolean")
+	elif field.type == "object":
+		_require_type(value, dict, path, "object")
+		if field.children:
+			_validate_object(value, field.children, path)
+	elif field.type == "array":
+		if not isinstance(value, list):
+			raise ValueError(f"Config field {path} must be an array")
+		if field.item_schema:
+			for idx, item in enumerate(value):
+				_validate_value(item, field.item_schema, f"{path}[{idx}]")
+
+
+def _require_type(value: Any, expected: type, path: str, label: str) -> None:
+	if not isinstance(value, expected):
+		raise ValueError(f"Config field {path} must be a {label}")

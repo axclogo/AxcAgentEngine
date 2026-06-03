@@ -13,10 +13,10 @@ from axc_agent_engine.core.errors import ErrorCategory, ErrorEnvelope
 from axc_agent_engine.core.schema import ToolDefinition
 from axc_agent_engine.plugins.base import BasePlugin
 from axc_agent_engine.plugins.builtin.common import (
-	bounded_int,
 	exec_ctx_from_tool_context,
 	externalize_text,
 	result_store_from_context,
+	strict_bounded_int,
 )
 from axc_agent_engine.plugins.builtin.config_schemas import SKILL_CONFIG_SCHEMA
 from axc_agent_engine.runtime.sandbox_local import LocalSubprocessExecutor
@@ -205,12 +205,22 @@ class SkillPlugin(BasePlugin):
 		self._allowed_extensions = _normalize_extensions(config.get("allowed_extensions", list(_SCRIPT_RUNNERS)))
 		self._duplicate_policy = str(config.get("duplicate_policy", "skip")).lower()
 		if self._duplicate_policy not in {"skip", "replace", "error"}:
-			self._duplicate_policy = "skip"
-		self._timeout = bounded_int(config.get("timeout", 60), 1, 3600)
-		self._stdout_limit = bounded_int(config.get("stdout_limit", 1500), 1, 10 * 1024 * 1024)
-		self._stderr_limit = bounded_int(config.get("stderr_limit", 500), 1, 10 * 1024 * 1024)
-		self._max_skill_content_chars = bounded_int(config.get("max_skill_content_chars", 100_000), 1, 10_000_000)
-		self._max_result_bytes = bounded_int(config.get("max_result_bytes", 256_000), 1, 50 * 1024 * 1024)
+			raise ValueError("skill.duplicate_policy must be one of skip, replace, error")
+		self._timeout = strict_bounded_int(config.get("timeout", 60), 1, 3600, "skill.timeout")
+		self._stdout_limit = strict_bounded_int(config.get("stdout_limit", 1500), 1, 10 * 1024 * 1024, "skill.stdout_limit")
+		self._stderr_limit = strict_bounded_int(config.get("stderr_limit", 500), 1, 10 * 1024 * 1024, "skill.stderr_limit")
+		self._max_skill_content_chars = strict_bounded_int(
+			config.get("max_skill_content_chars", 100_000),
+			1,
+			10_000_000,
+			"skill.max_skill_content_chars",
+		)
+		self._max_result_bytes = strict_bounded_int(
+			config.get("max_result_bytes", 256_000),
+			1,
+			50 * 1024 * 1024,
+			"skill.max_result_bytes",
+		)
 		self._skills: dict[str, dict] = {}
 		self._load_errors: list[dict[str, str]] = []
 		self._script_command_runner = SkillScriptRunner(self._timeout, self._stdout_limit, self._stderr_limit)
@@ -305,13 +315,13 @@ class SkillPlugin(BasePlugin):
 中文：扫描技能目录"""
 		self._skills.clear()
 		self._load_errors.clear()
+		if not self._paths and not self._has_catalog_resource():
+			raise ValueError("skill plugin requires paths or mounted skill.catalog")
 		self._load_catalog_skills()
 		for path in self._paths:
 			real_path = os.path.realpath(path)
 			if not os.path.isdir(real_path):
-				self._load_errors.append({"path": path, "error": "directory not found"})
-				logger.warning("[skill] Skill directory not found: %s", path)
-				continue
+				raise FileNotFoundError(f"Skill directory not found: {path}")
 			for entry in sorted(os.listdir(real_path)):
 				skill_dir = os.path.join(real_path, entry)
 				if not os.path.isdir(skill_dir):
@@ -328,32 +338,24 @@ class SkillPlugin(BasePlugin):
 		catalog = self._plugin_ctx.resources.get(self._catalog_resource)
 		if not catalog:
 			return
-		try:
-			raw_skills = _catalog_skills(catalog)
-			for raw_skill in raw_skills:
-				self._load_catalog_skill(raw_skill)
-		except Exception as e:
-			self._load_errors.append({"resource": self._catalog_resource, "error": str(e)})
-			logger.warning("[skill] Failed to load skill catalog %s: %s", self._catalog_resource, e)
+		raw_skills = _catalog_skills(catalog)
+		for raw_skill in raw_skills:
+			self._load_catalog_skill(raw_skill)
 
 	def _load_catalog_skill(self, raw_skill: Any) -> None:
 		if not isinstance(raw_skill, dict):
-			self._load_errors.append({"resource": self._catalog_resource, "error": "skill item is not an object"})
-			return
+			raise ValueError("skill.catalog item must be an object")
 		name = str(raw_skill.get("name", "")).strip()
 		if not name:
-			self._load_errors.append({"resource": self._catalog_resource, "error": "empty skill name"})
-			return
+			raise ValueError("skill.catalog item name cannot be empty")
 		if self._allowed_skills and name not in self._allowed_skills:
 			return
 		if name in self._denied_skills:
 			return
 		if name in self._skills:
 			if self._duplicate_policy == "error":
-				self._load_errors.append({"resource": self._catalog_resource, "skill": name, "error": "duplicate skill"})
-				return
+				raise ValueError(f"Duplicate skill: {name}")
 			if self._duplicate_policy == "skip":
-				self._load_errors.append({"resource": self._catalog_resource, "skill": name, "error": "duplicate skill skipped"})
 				return
 		trigger_keywords = raw_skill.get("trigger_keywords", [])
 		if isinstance(trigger_keywords, str):
@@ -383,51 +385,44 @@ class SkillPlugin(BasePlugin):
 	def _load_skill_dir(self, skill_dir: str, skill_md: str) -> None:
 		"""English: This documentation describes the related engine component behavior.
 中文：加载单个技能目录"""
-		try:
-			with open(skill_md, "r", encoding="utf-8") as f:
-				content = f.read()
-			meta, body = _parse_frontmatter(content)
-			name = str(meta.get("name", os.path.basename(skill_dir))).strip()
-			if not name:
-				self._load_errors.append({"path": skill_dir, "error": "empty skill name"})
+		with open(skill_md, "r", encoding="utf-8") as f:
+			content = f.read()
+		meta, body = _parse_frontmatter(content)
+		name = str(meta.get("name", os.path.basename(skill_dir))).strip()
+		if not name:
+			raise ValueError(f"Skill name cannot be empty: {skill_dir}")
+		if self._allowed_skills and name not in self._allowed_skills:
+			return
+		if name in self._denied_skills:
+			return
+		if name in self._skills:
+			if self._duplicate_policy == "error":
+				raise ValueError(f"Duplicate skill: {name}")
+			if self._duplicate_policy == "skip":
 				return
-			if self._allowed_skills and name not in self._allowed_skills:
-				return
-			if name in self._denied_skills:
-				return
-			if name in self._skills:
-				if self._duplicate_policy == "error":
-					self._load_errors.append({"path": skill_dir, "skill": name, "error": "duplicate skill"})
-					return
-				if self._duplicate_policy == "skip":
-					self._load_errors.append({"path": skill_dir, "skill": name, "error": "duplicate skill skipped"})
-					return
-			scripts_path = os.path.join(skill_dir, "scripts")
-			trigger_keywords = meta.get("trigger_keywords", [])
-			if isinstance(trigger_keywords, str):
-				trigger_keywords = [trigger_keywords]
-			elif not isinstance(trigger_keywords, list):
-				trigger_keywords = []
-			self._skills[name] = {
-				"name": name,
-				"description": str(meta.get("description", "")),
-				"when_to_use": str(meta.get("when_to_use", "")),
-				"trigger_keywords": [str(item) for item in trigger_keywords],
-				"content": body,
-				"content_length": len(body),
-				"content_hash": hashlib.sha256(body.encode("utf-8")).hexdigest(),
-				"version": str(meta.get("version", "")),
-				"author": str(meta.get("author", "")),
-				"source": str(meta.get("source", "")),
-				"trusted": bool(meta.get("trusted", False)),
-				"skill_dir": os.path.realpath(skill_dir),
-				"skill_md": os.path.realpath(skill_md),
-				"scripts_path": scripts_path if os.path.isdir(scripts_path) else None,
-				"scripts": _list_scripts(scripts_path, self._allowed_extensions) if os.path.isdir(scripts_path) else [],
-			}
-		except Exception as e:
-			self._load_errors.append({"path": skill_dir, "error": str(e)})
-			logger.warning("[skill] Failed to load skill %s: %s", skill_dir, e)
+		scripts_path = os.path.join(skill_dir, "scripts")
+		trigger_keywords = meta.get("trigger_keywords", [])
+		if isinstance(trigger_keywords, str):
+			trigger_keywords = [trigger_keywords]
+		elif not isinstance(trigger_keywords, list):
+			trigger_keywords = []
+		self._skills[name] = {
+			"name": name,
+			"description": str(meta.get("description", "")),
+			"when_to_use": str(meta.get("when_to_use", "")),
+			"trigger_keywords": [str(item) for item in trigger_keywords],
+			"content": body,
+			"content_length": len(body),
+			"content_hash": hashlib.sha256(body.encode("utf-8")).hexdigest(),
+			"version": str(meta.get("version", "")),
+			"author": str(meta.get("author", "")),
+			"source": str(meta.get("source", "")),
+			"trusted": bool(meta.get("trusted", False)),
+			"skill_dir": os.path.realpath(skill_dir),
+			"skill_md": os.path.realpath(skill_md),
+			"scripts_path": scripts_path if os.path.isdir(scripts_path) else None,
+			"scripts": _list_scripts(scripts_path, self._allowed_extensions) if os.path.isdir(scripts_path) else [],
+		}
 
 	async def _tool_list_skills(self, args: dict, context: dict):
 		"""list_skills 工具实现"""
@@ -715,6 +710,9 @@ class SkillPlugin(BasePlugin):
 			"skills": [_skill_public_metadata(skill) for skill in self._skills.values()],
 		}
 
+	def _has_catalog_resource(self) -> bool:
+		return bool(self._plugin_ctx and self._plugin_ctx.resources.get(self._catalog_resource))
+
 
 def _find_skill_markdown(skill_dir: str) -> str:
 	for filename in _SKILL_FILENAMES:
@@ -736,8 +734,10 @@ def _parse_frontmatter(content: str) -> tuple[dict, str]:
 	try:
 		import yaml
 		meta = yaml.safe_load(parts[1]) or {}
-	except Exception:
-		meta = {}
+	except Exception as exc:
+		raise ValueError("Skill frontmatter YAML is invalid") from exc
+	if not isinstance(meta, dict):
+		raise ValueError("Skill frontmatter must be an object")
 	body = parts[2].strip()
 	return meta, body
 
@@ -775,7 +775,7 @@ def _catalog_skills(catalog: Any) -> list[Any]:
 		return list(skills.values())
 	if isinstance(skills, (list, tuple)):
 		return list(skills)
-	return []
+	raise TypeError("skill.catalog must be a dict, sequence, list_skills() provider, or expose skills")
 
 
 def _list_scripts(scripts_path: str, allowed_extensions: set[str]) -> list[dict[str, Any]]:

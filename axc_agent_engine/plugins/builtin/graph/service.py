@@ -139,27 +139,27 @@ class GraphService:
 	def read_source(self, source: str) -> tuple[list[dict], list[dict]]:
 		entities: list[dict] = []
 		relations: list[dict] = []
-		try:
-			with open(source, "r", encoding="utf-8") as f:
-				for line_no, line in enumerate(f, start=1):
-					line = line.strip()
-					if not line:
-						continue
-					try:
-						item = json.loads(line)
-					except json.JSONDecodeError as e:
-						self.load_errors.append({"source": source, "line": line_no, "error": str(e)})
-						continue
-					if "source_id" in item and "target_id" in item and "relation_type" in item:
-						relations.append(item)
-					elif "source" in item and "target" in item and "relation_type" in item:
-						relations.append(item)
-					elif "id" in item and "name" in item:
-						entities.append(item)
-					else:
-						self.load_errors.append({"source": source, "line": line_no, "error": "unknown graph record"})
-		except Exception as e:
-			self.load_errors.append({"source": source, "error": str(e)})
+		with open(source, "r", encoding="utf-8") as f:
+			for line_no, line in enumerate(f, start=1):
+				line = line.strip()
+				if not line:
+					continue
+				try:
+					item = json.loads(line)
+				except json.JSONDecodeError as exc:
+					error = {"source": source, "line": line_no, "error": str(exc)}
+					self.load_errors.append(error)
+					raise ValueError(str(error)) from exc
+				if "source_id" in item and "target_id" in item and "relation_type" in item:
+					relations.append(item)
+				elif "source" in item and "target" in item and "relation_type" in item:
+					relations.append(item)
+				elif "id" in item and "name" in item:
+					entities.append(item)
+				else:
+					error = {"source": source, "line": line_no, "error": "unknown graph record"}
+					self.load_errors.append(error)
+					raise ValueError(str(error))
 		return entities, relations
 
 	def validate_entity_type(self, entity_type: str) -> str:

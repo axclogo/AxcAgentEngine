@@ -104,7 +104,7 @@ async def test_graph_plugin_enforces_type_allowlists():
 
 
 @pytest.mark.asyncio
-async def test_graph_plugin_status_reload_and_source_errors(tmp_path):
+async def test_graph_plugin_source_errors_raise_on_initialize(tmp_path):
 	missing = tmp_path / "missing.jsonl"
 	source = tmp_path / "graph.jsonl"
 	source.write_text(
@@ -114,13 +114,22 @@ async def test_graph_plugin_status_reload_and_source_errors(tmp_path):
 		encoding="utf-8",
 	)
 	plugin = GraphPlugin()
-	plugin.initialize({"sources": [str(missing), str(source)]}, PluginContext(resources={"graph.store": InMemoryGraphStore()}))
+	with pytest.raises(ValueError, match="source not found"):
+		plugin.initialize({"sources": [str(missing), str(source)]}, PluginContext(resources={"graph.store": InMemoryGraphStore()}))
+	with pytest.raises(ValueError, match="Expecting value"):
+		plugin.initialize({"sources": [str(source)]}, PluginContext(resources={"graph.store": InMemoryGraphStore()}))
 
-	status = await plugin._tool_status({}, {})
-	reloaded = await plugin._tool_reload_sources({"clear_existing": True}, {})
-
+	valid = tmp_path / "valid.jsonl"
+	valid.write_text(
+		'{"id":"alice","name":"Alice","type":"person","description":"Engineer"}\n'
+		'{"source_id":"alice","target_id":"acme","relation_type":"WORKS_AT"}\n',
+		encoding="utf-8",
+	)
+	ok = GraphPlugin()
+	ok.initialize({"sources": [str(valid)]}, PluginContext(resources={"graph.store": InMemoryGraphStore()}))
+	status = await ok._tool_status({}, {})
+	reloaded = await ok._tool_reload_sources({"clear_existing": True}, {})
 	assert status.content["entities"] >= 1
-	assert status.content["load_errors"]
 	assert reloaded.is_error
 	assert "mounted graph.store" in reloaded.content
 
@@ -184,11 +193,20 @@ def test_graph_service_read_source_and_payload_branches(tmp_path):
 	)
 	config = GraphConfig.from_dict({"sources": [], "include_metadata": False, "namespace": "ns", "max_limit": 2})
 	service = GraphService(config, InMemoryGraphStore())
-	entities, relations = service.read_source(str(source))
+	with pytest.raises(ValueError, match="unknown graph record"):
+		service.read_source(str(source))
+	valid = tmp_path / "valid_graph.jsonl"
+	valid.write_text(
+		'{"id":"alice","name":"Alice","type":"person","metadata":{"secret":1}}\n'
+		'{"source":"Alice","target":"Bob","relation_type":"KNOWS"}\n',
+		encoding="utf-8",
+	)
+	entities, relations = service.read_source(str(valid))
 	assert len(entities) == 1
 	assert len(relations) == 1
-	assert len(service.load_errors) == 2
-	assert service.read_source(str(source / "missing")) == ([], [])
+	assert len(service.load_errors) == 1
+	with pytest.raises(OSError):
+		service.read_source(str(source / "missing"))
 
 	prepared = service.upsert_entity({"name": " Alice ", "entity_type": "person", "metadata": {"x": 1}})
 	assert "metadata" not in service.get_entity(prepared["entity"]["id"])
@@ -256,12 +274,9 @@ def test_graph_source_loader_limits_validation_and_store_errors(tmp_path):
 		lambda: len(store.entities),
 		lambda: len(store.relations),
 	)
-	stats = loader.load()
-	assert stats == {"entities": 1, "relations": 1, "sources": 1}
+	with pytest.raises(ValueError, match="not allowed"):
+		loader.load()
 	assert any("not allowed" in item["error"] for item in errors)
-	assert any(item["error"] == "entity limit reached" for item in errors)
-	assert any(item["error"] == "source/target missing" for item in errors)
-	assert any(item["error"] == "relation limit reached" for item in errors)
 
 
 def test_graph_source_loader_records_store_exceptions(tmp_path):
@@ -286,8 +301,8 @@ def test_graph_source_loader_records_store_exceptions(tmp_path):
 		lambda: 0,
 		lambda: 0,
 	)
-	assert loader.load()["entities"] == 0
-	assert [item["error"] for item in errors] == ["entity boom", "relation boom"]
+	with pytest.raises(RuntimeError, match="entity boom"):
+		loader.load()
 
 
 @pytest.mark.asyncio

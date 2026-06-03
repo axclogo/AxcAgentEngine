@@ -26,6 +26,20 @@ def bounded_int(value: Any, minimum: int, maximum: int) -> int:
 	return max(minimum, min(maximum, parsed))
 
 
+def strict_bounded_int(value: Any, minimum: int, maximum: int, field_name: str) -> int:
+	"""Parse config integer and fail on invalid range.
+中文：解析配置整数，类型或范围错误直接失败。"""
+	if isinstance(value, bool):
+		raise ValueError(f"{field_name} must be an integer")
+	try:
+		parsed = int(value)
+	except (TypeError, ValueError) as exc:
+		raise ValueError(f"{field_name} must be an integer") from exc
+	if parsed < minimum or parsed > maximum:
+		raise ValueError(f"{field_name} must be between {minimum} and {maximum}")
+	return parsed
+
+
 def exec_ctx_from_tool_context(context: dict) -> Any:
 	"""English: Bilingual documentation follows.
 中文：以下为双语文档说明。
@@ -80,11 +94,7 @@ async def externalize_text(
 	size = len(text.encode("utf-8"))
 	if not result_store or size <= threshold_bytes:
 		return content, None
-	try:
-		ref = await result_store.put(text, metadata=metadata)
-	except Exception as e:
-		logger.warning("[%s] failed to externalize large result: %s", source, e)
-		return content, None
+	ref = await result_store.put(text, metadata=metadata)
 	payload = {"artifact_id": ref.id, "size": ref.size, "truncated": True}
 	if preview_chars > 0:
 		payload["preview"] = text[:preview_chars]

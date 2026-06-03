@@ -6,13 +6,9 @@ import math
 import re
 import hashlib
 import json
-import logging
 from collections import Counter
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Protocol, runtime_checkable
-
-logger = logging.getLogger(__name__)
-
 
 @dataclass(frozen=True)
 class KnowledgeDocument:
@@ -252,7 +248,7 @@ class LLMReranker:
 
 
 class CascadeReranker:
-	"""Try rerankers in order and fall back on failure or empty output.
+	"""Run rerankers in order; configured reranker failures are fatal.
 中文：此文档说明相关引擎组件的行为。"""
 
 	def __init__(self, rerankers: list[Reranker]) -> None:
@@ -260,12 +256,9 @@ class CascadeReranker:
 
 	async def rerank(self, query: str, results: list[RetrievalResult], top_k: int) -> list[RetrievalResult]:
 		for reranker in self.rerankers:
-			try:
-				reranked = await reranker.rerank(query, results, top_k)
-				if reranked:
-					return reranked[:top_k]
-			except Exception as exc:
-				logger.warning("[knowledge] reranker %s failed: %s", type(reranker).__name__, exc)
+			reranked = await reranker.rerank(query, results, top_k)
+			if reranked:
+				return reranked[:top_k]
 		return results[:top_k]
 
 
@@ -295,12 +288,8 @@ class LLMQueryRewriter:
 			f"最多查询数：{max_queries}\n"
 			f"原始问题：{query}"
 		)
-		try:
-			content = await self.utility_model.ask(prompt)
-			items = _parse_query_array(content)
-		except Exception as exc:
-			logger.warning("[knowledge] query rewrite failed: %s", exc)
-			items = []
+		content = await self.utility_model.ask(prompt)
+		items = _parse_query_array(content)
 		return _dedupe_queries([query, *items], max_queries)
 
 
@@ -522,11 +511,8 @@ class HybridRetriever:
 		request = normalize_search_request(query, top_k=top_k, candidate_k=candidate_k)
 		queries = [request.query]
 		if self.query_rewriter:
-			try:
-				rewritten = await self.query_rewriter(request.query, 4)
-				queries = _dedupe_queries([request.query, *(rewritten or [])], 4)
-			except Exception as exc:
-				logger.warning("[knowledge] query rewriter failed: %s", exc)
+			rewritten = await self.query_rewriter(request.query, 4)
+			queries = _dedupe_queries([request.query, *(rewritten or [])], 4)
 		merged_inputs: list[list[RetrievalResult]] = []
 		for current_query in queries:
 			bm25 = self.bm25.search(current_query, top_k=request.candidate_k, filters=request.filters)

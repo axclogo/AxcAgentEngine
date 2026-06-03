@@ -10,7 +10,7 @@ from axc_agent_engine.plugins import PluginContext
 from axc_agent_engine.plugins.base import BasePlugin
 from axc_agent_engine.observability.audit import InMemoryAuditSink
 from axc_agent_engine.plugins.builtin.compress.plugin import CompressPlugin
-from axc_agent_engine.plugins.config_schema import config_schema
+from axc_agent_engine.plugins.config_schema import config_field, config_schema
 from axc_agent_engine.plugins.registry import PluginRegistry
 from axc_agent_engine.runtime.resources import ResourceRegistry
 from axc_agent_engine.runtime.checkpoint import InMemoryCheckpointStore
@@ -50,7 +50,9 @@ def compress_registry():
 class CapturePlugin(BasePlugin):
 	name = "capture"
 	display_name = "Capture"
-	config_schema = config_schema("capture", "Capture", "Test plugin.", [])
+	config_schema = config_schema("capture", "Capture", "Test plugin.", [
+		config_field("value", "Value", "string", "Captured test value."),
+	])
 	last_config = None
 	last_ctx = None
 
@@ -91,7 +93,7 @@ class TestEngine:
 
 	def test_default_plugin_registry_is_empty(self, mock_llm, agent_yaml):
 		engine = Engine()
-		with pytest.raises(PluginInitError, match="enabled but not registered"):
+		with pytest.raises(PluginInitError, match="configured but not registered"):
 			engine.load_agent_template(agent_yaml).instantiate(models=AgentModels(default=mock_llm))
 
 	def test_mock_provider_tool_name_mapping_falls_back_to_default(self, mock_llm, agent_yaml, compress_registry):

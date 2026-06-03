@@ -92,10 +92,8 @@ async def test_vector_store_requires_mounted_embedding():
 	plugin = KnowledgePlugin()
 	plugin.initialize({}, PluginContext(resources=ResourceRegistry({"knowledge.vector_store": VectorStore()})))
 
-	output = await plugin._tool_knowledge_search({"query": "python"}, {})
-
-	assert output.is_error
-	assert "knowledge.embedding" in output.content
+	with pytest.raises(RuntimeError, match="knowledge.embedding"):
+		await plugin._tool_knowledge_search({"query": "python"}, {})
 
 
 @pytest.mark.asyncio
@@ -133,10 +131,8 @@ async def test_mounted_index_failure_is_not_silently_downgraded(tmp_path):
 		PluginContext(workspace=str(tmp_path), resources=ResourceRegistry({"knowledge.index": FailingIndex()})),
 	)
 
-	output = await plugin._tool_knowledge_search({"query": "python"}, {})
-
-	assert output.is_error
-	assert "index down" in output.content
+	with pytest.raises(RuntimeError, match="index down"):
+		await plugin._tool_knowledge_search({"query": "python"}, {})
 
 
 @pytest.mark.asyncio

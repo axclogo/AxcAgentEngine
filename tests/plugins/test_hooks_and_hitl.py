@@ -1,5 +1,7 @@
 import asyncio
 
+import pytest
+
 from axc_agent_engine.core.context import ExecutionContext
 from axc_agent_engine.plugins.builtin.hooks.plugin import HooksPlugin, _safe_eval_condition
 from axc_agent_engine.plugins.builtin.human_in_the_loop.plugin import HumanInTheLoopPlugin, _risk_level
@@ -45,11 +47,45 @@ async def test_hooks_notify_error_plan_step_and_post_tool():
 	assert [p["event"] for p in payloads] == ["on_error", "on_plan_created", "on_step_completed"]
 
 
+async def test_hooks_fail_fast_notify_and_condition_edges():
+	plugin = HooksPlugin()
+	plugin.initialize({"rules": [
+		{"event": "pre_llm_call", "condition": "False", "action": "inject", "params": {"content": "hidden"}},
+		{"event": "on_error", "action": "log"},
+		{"event": "on_plan_created", "action": "log"},
+		{"event": "on_step_completed", "action": "log"},
+		{"event": "post_tool_call", "condition": "False", "action": "log"},
+	]}, None)
+	messages, tools = plugin.pre_llm_call(ExecutionContext(), [{"role": "user", "content": "x"}], [])
+	assert messages == [{"role": "user", "content": "x"}]
+	assert tools == []
+	await plugin.on_error(ExecutionContext(), RuntimeError("boom"))
+	await plugin.on_plan_created(ExecutionContext(), {})
+	await plugin.on_step_completed(ExecutionContext(), {})
+	assert await plugin.post_tool_call(ExecutionContext(), "tool", {}, ToolOutput.text("ok"), 1)
+
+	bad = HooksPlugin()
+	bad.initialize({"rules": [{"event": "on_error", "action": "notify"}]}, None)
+	with pytest.raises(ValueError, match="requires params.callback"):
+		await bad.on_error(ExecutionContext(), RuntimeError("boom"))
+	for rule in [
+		"bad(",
+		"eval('x')",
+		"x.y = 1",
+	]:
+		with pytest.raises(ValueError):
+			HooksPlugin().initialize({"rules": [{"event": "pre_tool_call", "condition": rule}]}, None)
+	with pytest.raises(ValueError, match="rule must be an object"):
+		HooksPlugin().initialize({"rules": ["bad"]}, None)
+
+
 def test_safe_eval_condition_supported_and_rejected_paths():
 	assert _safe_eval_condition("tool_name.startswith('r') and arguments['x'] in [1, 2]", {"tool_name": "read", "arguments": {"x": 1}})
 	assert _safe_eval_condition("not False", {})
-	assert not _safe_eval_condition("x" * 501, {})
-	assert not _safe_eval_condition("bad(", {})
+	with pytest.raises(ValueError, match="too long"):
+		_safe_eval_condition("x" * 501, {})
+	with pytest.raises(ValueError, match="evaluation failed"):
+		_safe_eval_condition("bad(", {})
 	assert not _safe_eval_condition("obj == 1", {"obj": object()})
 
 

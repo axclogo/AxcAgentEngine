@@ -24,6 +24,8 @@ class HooksPlugin(BasePlugin):
 
 	def initialize(self, config: dict, plugin_ctx: "PluginContext") -> None:
 		self._rules: list[dict] = config.get("rules", [])
+		for rule in self._rules:
+			_validate_rule(rule)
 
 	async def pre_tool_call(self, exec_ctx: "ExecutionContext", tool_name: str,
 					  arguments: dict) -> tuple[bool, dict]:
@@ -105,11 +107,9 @@ class HooksPlugin(BasePlugin):
 中文：以下为双语文档说明。
 触发 NOTIFY 动作"""
 		callback = rule.get("params", {}).get("callback")
-		if callback and callable(callback):
-			try:
-				callback(payload)
-			except Exception as e:
-				logger.warning(f"[hooks] notify callback error: {e}")
+		if not callable(callback):
+			raise ValueError("hooks notify action requires params.callback")
+		callback(payload)
 
 	async def post_tool_call(self, exec_ctx: "ExecutionContext", tool_name: str,
 					   arguments: dict, result: "ToolOutput", duration_ms: int = 0) -> "ToolOutput":
@@ -148,8 +148,7 @@ def _safe_eval_condition(condition: str, context: dict) -> bool:
 	字符串方法（startswith, endswith, get）、下标访问和常量。
 	"""
 	if len(condition) > 500:
-		logger.warning(f"[hooks] Condition too long ({len(condition)} chars), rejected")
-		return False
+		raise ValueError(f"hooks condition is too long: {len(condition)} chars")
 	#English: Bilingual note. 中文：校验 context 只包含安全类型
 	for v in context.values():
 		if not isinstance(v, _ALLOWED_TYPES):
@@ -157,8 +156,8 @@ def _safe_eval_condition(condition: str, context: dict) -> bool:
 	try:
 		tree = ast.parse(condition.strip(), mode="eval")
 		return bool(_eval_node(tree.body, context, depth=0))
-	except Exception:
-		return False
+	except Exception as exc:
+		raise ValueError(f"hooks condition evaluation failed: {condition}") from exc
 
 
 def _eval_node(node: ast.AST, ctx: dict, depth: int = 0) -> Any:
@@ -197,3 +196,30 @@ def _eval_node(node: ast.AST, ctx: dict, depth: int = 0) -> Any:
 		if isinstance(obj, (dict, list)):
 			return obj[node.slice.value]
 	return None
+
+
+def _validate_rule(rule: dict[str, Any]) -> None:
+	if not isinstance(rule, dict):
+		raise ValueError("hooks rule must be an object")
+	condition = str(rule.get("condition", ""))
+	if condition:
+		_validate_condition_syntax(condition)
+	if rule.get("action") == "notify":
+		params = rule.get("params", {})
+		if "callback" in params and not callable(params["callback"]):
+			raise ValueError("hooks notify params.callback must be callable")
+
+
+def _validate_condition_syntax(condition: str) -> None:
+	if len(condition) > 500:
+		raise ValueError(f"hooks condition is too long: {len(condition)} chars")
+	try:
+		tree = ast.parse(condition.strip(), mode="eval")
+	except SyntaxError as exc:
+		raise ValueError(f"hooks condition syntax is invalid: {condition}") from exc
+	for node in ast.walk(tree):
+		if isinstance(node, ast.Call):
+			if not isinstance(node.func, ast.Attribute) or node.func.attr not in {"startswith", "endswith", "get"}:
+				raise ValueError(f"hooks condition uses unsupported call: {condition}")
+		elif isinstance(node, ast.Attribute) and not isinstance(getattr(node, "ctx", None), ast.Load):
+			raise ValueError(f"hooks condition uses unsupported attribute write: {condition}")

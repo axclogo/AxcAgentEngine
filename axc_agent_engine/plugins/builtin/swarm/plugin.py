@@ -11,7 +11,7 @@ from axc_agent_engine.core.constants import MAX_CALL_DEPTH
 from axc_agent_engine.core.errors import ErrorCategory, ErrorEnvelope
 from axc_agent_engine.core.schema import ToolDefinition
 from axc_agent_engine.plugins.base import BasePlugin
-from axc_agent_engine.plugins.builtin.common import agent_event_callback, bounded_int, externalize_text
+from axc_agent_engine.plugins.builtin.common import agent_event_callback, bounded_int, externalize_text, strict_bounded_int
 from axc_agent_engine.plugins.builtin.config_schemas import SWARM_CONFIG_SCHEMA
 
 if TYPE_CHECKING:
@@ -37,14 +37,19 @@ class SwarmPlugin(BasePlugin):
 
 	def initialize(self, config: dict, plugin_ctx: "PluginContext") -> None:
 		self._enabled = config.get("enabled", True)
-		self._max_concurrent = bounded_int(config.get("max_concurrent", 5), 1, 100)
-		self._max_depth = bounded_int(config.get("max_depth", MAX_CALL_DEPTH), 1, 20)
-		self._timeout = _bounded_timeout(config.get("timeout", 60.0), 60.0)
-		self._task_timeout = _bounded_timeout(config.get("task_timeout", self._timeout), self._timeout)
+		self._max_concurrent = strict_bounded_int(config.get("max_concurrent", 5), 1, 100, "swarm.max_concurrent")
+		self._max_depth = strict_bounded_int(config.get("max_depth", MAX_CALL_DEPTH), 1, 20, "swarm.max_depth")
+		self._timeout = _strict_timeout(config.get("timeout", 60.0), "swarm.timeout")
+		self._task_timeout = _strict_timeout(config.get("task_timeout", self._timeout), "swarm.task_timeout")
 		self._allow_self_call = bool(config.get("allow_self_call", False))
 		self._allowed_agents = {str(name) for name in config.get("allowed_agents", [])}
 		self._denied_agents = {str(name) for name in config.get("denied_agents", [])}
-		self._max_result_bytes = bounded_int(config.get("max_result_bytes", 256_000), 1, 10 * 1024 * 1024)
+		self._max_result_bytes = strict_bounded_int(
+			config.get("max_result_bytes", 256_000),
+			1,
+			10 * 1024 * 1024,
+			"swarm.max_result_bytes",
+		)
 		self._failure_policy = str(config.get("failure_policy", "best_effort"))
 		self._plugin_ctx = plugin_ctx
 		self._dispatcher = SwarmDispatcher(self)
@@ -333,3 +338,15 @@ def _bounded_timeout(value: Any, default: float) -> float:
 	except (TypeError, ValueError):
 		timeout = default
 	return max(1.0, min(timeout, 3600.0))
+
+
+def _strict_timeout(value: Any, field_name: str) -> float:
+	if isinstance(value, bool):
+		raise ValueError(f"{field_name} must be a number")
+	try:
+		timeout = float(value)
+	except (TypeError, ValueError) as exc:
+		raise ValueError(f"{field_name} must be a number") from exc
+	if timeout < 1.0 or timeout > 3600.0:
+		raise ValueError(f"{field_name} must be between 1.0 and 3600.0")
+	return timeout

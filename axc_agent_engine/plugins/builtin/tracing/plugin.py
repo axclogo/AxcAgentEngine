@@ -113,19 +113,11 @@ class SpanEmitter:
 		if plugin._span_store:
 			plugin._schedule(plugin._save_span(span))
 		if plugin._exporter:
-			try:
-				result = plugin._exporter(dict(span))
-				if hasattr(result, "__await__"):
-					plugin._schedule(result)
-			except Exception as e:
-				plugin._stats["failed"] += 1
-				logger.warning("[tracing] exporter error: %s", e)
+			result = plugin._exporter(dict(span))
+			if hasattr(result, "__await__"):
+				plugin._schedule(result)
 		if plugin._callback:
-			try:
-				plugin._callback(dict(span))
-			except Exception as e:
-				plugin._stats["failed"] += 1
-				logger.warning("[tracing] callback error: %s", e)
+			plugin._callback(dict(span))
 			return
 		if plugin._output == "log":
 			_log_span(span)
@@ -170,14 +162,14 @@ class TracingPlugin(BasePlugin):
 		self._output = str(config.get("output", "log"))
 		self._include_args = bool(config.get("include_arguments", False))
 		self._include_result = bool(config.get("include_result", False))
-		self._max_argument_length = _bounded_int(config.get("max_argument_length", 2000), 1, 200_000)
-		self._max_result_len = _bounded_int(config.get("max_result_length", 200), 1, 200_000)
-		self._max_error_length = _bounded_int(config.get("max_error_length", 2000), 1, 200_000)
-		self._sample_rate = _bounded_float(config.get("sample_rate", 1.0), 0.0, 1.0)
+		self._max_argument_length = _strict_int(config.get("max_argument_length", 2000), 1, 200_000, "tracing.max_argument_length")
+		self._max_result_len = _strict_int(config.get("max_result_length", 200), 1, 200_000, "tracing.max_result_length")
+		self._max_error_length = _strict_int(config.get("max_error_length", 2000), 1, 200_000, "tracing.max_error_length")
+		self._sample_rate = _strict_float(config.get("sample_rate", 1.0), 0.0, 1.0, "tracing.sample_rate")
 		self._sample_errors = bool(config.get("sample_errors", True))
-		self._slow_span_ms = _bounded_int(config.get("slow_span_ms", 0), 0, 3_600_000)
-		self._recent_limit = _bounded_int(config.get("recent_limit", 200), 1, 10_000)
-		self._queue_limit = _bounded_int(config.get("queue_limit", 1000), 1, 100_000)
+		self._slow_span_ms = _strict_int(config.get("slow_span_ms", 0), 0, 3_600_000, "tracing.slow_span_ms")
+		self._recent_limit = _strict_int(config.get("recent_limit", 200), 1, 10_000, "tracing.recent_limit")
+		self._queue_limit = _strict_int(config.get("queue_limit", 1000), 1, 100_000, "tracing.queue_limit")
 		self._redact_keys = {str(k).lower() for k in config.get("redact_keys", [])} | _DEFAULT_REDACT_KEYS
 		self._audit_mode = bool(config.get("audit_mode", False))
 		self._exporter: Callable[[dict], Any] | None = plugin_ctx.resources.get("tracing.exporter")
@@ -186,6 +178,7 @@ class TracingPlugin(BasePlugin):
 		self._kv_store = getattr(plugin_ctx, "kv_store", None)
 		self._recent_spans: deque[dict[str, Any]] = deque(maxlen=self._recent_limit)
 		self._pending_tasks: set[asyncio.Task] = set()
+		self._task_errors: list[BaseException] = []
 		self._stats: dict[str, int] = {"emitted": 0, "stored": 0, "dropped": 0, "failed": 0, "redacted": 0}
 		self._redaction = RedactionService(self._redact_keys, self._max_argument_length, self._stats)
 		self._sampler = TraceSampler(self._sample_rate, self._sample_errors, self._slow_span_ms)
@@ -468,10 +461,7 @@ class TracingPlugin(BasePlugin):
 			return ToolOutput.error("trace_id 不能为空")
 		spans = []
 		if self._span_store:
-			try:
-				spans = await self._span_store.query_by_trace(trace_id)
-			except Exception as e:
-				logger.warning("[tracing] query trace failed: %s", e)
+			spans = await self._span_store.query_by_trace(trace_id)
 		if not spans:
 			spans = [span for span in self._recent_spans if span.get("trace_id") == trace_id]
 		spans = sorted(spans, key=lambda item: (item.get("start_time", 0), item.get("span_id", "")))
@@ -535,19 +525,15 @@ class TracingPlugin(BasePlugin):
 		return self._sampler.should_emit(span, force_sample)
 
 	async def _save_span(self, span: dict[str, Any]) -> None:
-		try:
-			await self._span_store.save_span(dict(span))
-			self._stats["stored"] += 1
-		except Exception as e:
-			self._stats["failed"] += 1
-			logger.warning("[tracing] span_store save failed: %s", e)
+		await self._span_store.save_span(dict(span))
+		self._stats["stored"] += 1
 
 	def _schedule(self, coro: Any) -> None:
 		if len(self._pending_tasks) >= self._queue_limit:
 			self._stats["dropped"] += 1
 			if hasattr(coro, "close"):
 				coro.close()
-			return
+			raise RuntimeError("tracing async export queue is full")
 		try:
 			loop = asyncio.get_running_loop()
 			task = loop.create_task(coro)
@@ -555,7 +541,7 @@ class TracingPlugin(BasePlugin):
 			self._stats["dropped"] += 1
 			if hasattr(coro, "close"):
 				coro.close()
-			return
+			raise RuntimeError("tracing async output requires a running event loop")
 		self._pending_tasks.add(task)
 		task.add_done_callback(self._on_task_done)
 
@@ -566,14 +552,23 @@ class TracingPlugin(BasePlugin):
 		exc = task.exception()
 		if exc:
 			self._stats["failed"] += 1
-			logger.warning("[tracing] background task failed: %s", exc)
+			self._task_errors.append(exc)
 
 	async def _flush_pending(self) -> None:
 		if not self._pending_tasks:
+			self._raise_task_errors()
 			return
 		tasks = list(self._pending_tasks)
 		self._pending_tasks.clear()
-		await asyncio.gather(*tasks, return_exceptions=True)
+		await asyncio.gather(*tasks)
+		self._raise_task_errors()
+
+	def _raise_task_errors(self) -> None:
+		if not self._task_errors:
+			return
+		error = self._task_errors.pop(0)
+		self._task_errors.clear()
+		raise RuntimeError("tracing background task failed") from error
 
 	def _sync_metadata(self, exec_ctx: "ExecutionContext", state: dict[str, Any]) -> None:
 		exec_ctx.state.metadata["tracing"] = {
@@ -701,6 +696,30 @@ def _bounded_float(value: Any, minimum: float, maximum: float) -> float:
 	except (TypeError, ValueError):
 		return maximum
 	return max(minimum, min(maximum, parsed))
+
+
+def _strict_int(value: Any, minimum: int, maximum: int, field_name: str) -> int:
+	if isinstance(value, bool):
+		raise ValueError(f"{field_name} must be an integer")
+	try:
+		parsed = int(value)
+	except (TypeError, ValueError) as exc:
+		raise ValueError(f"{field_name} must be an integer") from exc
+	if parsed < minimum or parsed > maximum:
+		raise ValueError(f"{field_name} must be between {minimum} and {maximum}")
+	return parsed
+
+
+def _strict_float(value: Any, minimum: float, maximum: float, field_name: str) -> float:
+	if isinstance(value, bool):
+		raise ValueError(f"{field_name} must be a number")
+	try:
+		parsed = float(value)
+	except (TypeError, ValueError) as exc:
+		raise ValueError(f"{field_name} must be a number") from exc
+	if parsed < minimum or parsed > maximum:
+		raise ValueError(f"{field_name} must be between {minimum} and {maximum}")
+	return parsed
 
 
 def _resource_name(value: Any, default: str) -> str:

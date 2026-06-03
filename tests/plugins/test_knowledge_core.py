@@ -126,17 +126,17 @@ async def test_llm_reranker_scores_candidates():
 
 
 @pytest.mark.asyncio
-async def test_cascade_reranker_falls_back_to_score():
+async def test_cascade_reranker_raises_on_configured_failure():
 	class FailingReranker:
 		async def rerank(self, query, results, top_k):
 			raise RuntimeError("down")
 
 	reranker = CascadeReranker([FailingReranker(), ScoreReranker()])
-	results = await reranker.rerank("python retrieval", [
-		RetrievalResult(id="1", text="python retrieval", score=0.1, retrieval="bm25"),
-		RetrievalResult(id="2", text="cooking", score=0.2, retrieval="bm25"),
-	], top_k=1)
-	assert results[0].id == "1"
+	with pytest.raises(RuntimeError, match="down"):
+		await reranker.rerank("python retrieval", [
+			RetrievalResult(id="1", text="python retrieval", score=0.1, retrieval="bm25"),
+			RetrievalResult(id="2", text="cooking", score=0.2, retrieval="bm25"),
+		], top_k=1)
 
 
 @pytest.mark.asyncio
@@ -200,6 +200,9 @@ async def test_retrieval_filter_vector_hybrid_and_helpers():
 		raise RuntimeError("rewrite failed")
 
 	retriever = HybridRetriever(docs, vector_search=vector_search, reranker=reranker, query_rewriter=bad_rewriter)
+	with pytest.raises(RuntimeError, match="rewrite failed"):
+		await retriever.search_with_trace(KnowledgeSearchRequest("alpha retrieval", top_k=1, candidate_k=2, include_trace=True))
+	retriever = HybridRetriever(docs, vector_search=vector_search, reranker=reranker)
 	response = await retriever.search_with_trace(KnowledgeSearchRequest("alpha retrieval", top_k=1, candidate_k=2, include_trace=True))
 	assert response.results
 	assert response.trace.candidate_count >= 1

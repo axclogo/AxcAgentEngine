@@ -2,11 +2,20 @@
 中文：插件 config_schema 声明测试。"""
 from __future__ import annotations
 
+import pytest
+
+from axc_agent_engine.core.errors import PluginInitError
 from axc_agent_engine.engine import AgentModels, Engine
 from axc_agent_engine.plugins.base import BasePlugin
 from axc_agent_engine.plugins.builtin import AVAILABLE_BUILTIN_PLUGINS
 from axc_agent_engine.plugins.builtin.compress.plugin import CompressPlugin
-from axc_agent_engine.plugins.config_schema import config_schema
+from axc_agent_engine.plugins.config_schema import (
+	array_field,
+	config_field,
+	config_schema,
+	object_field,
+	validate_plugin_config,
+)
 from axc_agent_engine.plugins.registry import PluginRegistry
 
 
@@ -64,7 +73,7 @@ def test_mcp_schema_has_servers_array_object_fields():
 	assert server_fields["url"].default is None
 
 
-def test_agent_template_instantiate_keeps_extra_unknown_plugin_key(mock_llm, tmp_path):
+def test_agent_template_instantiate_rejects_extra_unknown_plugin_key(mock_llm, tmp_path):
 	registry = PluginRegistry()
 	registry.register(SchemaOnlyPlugin)
 	path = tmp_path / "agent.yaml"
@@ -79,5 +88,51 @@ plugins:
 		encoding="utf-8",
 	)
 	engine = Engine(plugin_registry=registry)
-	agent = engine.load_agent_template(str(path)).instantiate(models=AgentModels(default=mock_llm))
-	assert agent._plugins[0].config["unknown_key"] == "still_allowed"
+	with pytest.raises(PluginInitError, match="Unknown config field"):
+		engine.load_agent_template(str(path)).instantiate(models=AgentModels(default=mock_llm))
+
+
+def test_validate_plugin_config_rejects_boundary_errors():
+	schema = config_schema("strict", "Strict", "Strict schema.", [
+		config_field("mode", "Mode", "string", "Mode.", enum=["a", "b"], required=True),
+		config_field("count", "Count", "integer", "Count."),
+		config_field("ratio", "Ratio", "number", "Ratio."),
+		config_field("flag", "Flag", "boolean", "Flag."),
+		object_field("nested", "Nested", "Nested object.", [
+			config_field("name", "Name", "string", "Name."),
+		]),
+		array_field("items", "Items", "String items.", config_field("", "Item", "string", "Item.")),
+		config_field("free", "Free", "object", "Free object."),
+	])
+	validate_plugin_config("strict", {
+		"mode": "a",
+		"count": 1,
+		"ratio": 1.5,
+		"flag": False,
+		"nested": {"name": "ok"},
+		"items": ["x"],
+		"free": {"any": {"shape": True}},
+	}, schema)
+	cases = [
+		({"mode": "a", "unknown": 1}, "Unknown config field"),
+		({"count": 1}, "Missing required"),
+		({"mode": "z"}, "must be one of"),
+		({"mode": "a", "count": True}, "integer"),
+		({"mode": "a", "ratio": True}, "number"),
+		({"mode": "a", "flag": "yes"}, "boolean"),
+		({"mode": "a", "nested": []}, "object"),
+		({"mode": "a", "nested": {"bad": "x"}}, "Unknown config field"),
+		({"mode": "a", "items": "x"}, "array"),
+		({"mode": "a", "items": [1]}, "string"),
+	]
+	for config, pattern in cases:
+		with pytest.raises(ValueError, match=pattern):
+			validate_plugin_config("strict", config, schema)
+
+
+def test_validate_plugin_config_required_none_is_invalid():
+	schema = config_schema("strict", "Strict", "Strict schema.", [
+		config_field("name", "Name", "string", "Name.", required=True),
+	])
+	with pytest.raises(ValueError, match="required"):
+		validate_plugin_config("strict", {"name": None}, schema)

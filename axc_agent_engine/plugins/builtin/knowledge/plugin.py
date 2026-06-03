@@ -95,6 +95,8 @@ class KnowledgePlugin(BasePlugin):
 		self._query_rewriter = self._build_query_rewriter()
 		self._load_sources()
 		self._build_bm25_index()
+		if not self._has_retrieval_source():
+			raise RuntimeError("knowledge plugin requires sources or mounted knowledge resources")
 
 	def inject_context(self, exec_ctx: "ExecutionContext", topic: str = "") -> str:
 		if not self._chunks or not topic:
@@ -112,8 +114,6 @@ class KnowledgePlugin(BasePlugin):
 			await self._ensure_local_index()
 
 	def get_tools(self) -> list[ToolDefinition]:
-		if not self._has_retrieval_source():
-			return []
 		return [
 			ToolDefinition(
 				name="knowledge_search",
@@ -145,18 +145,14 @@ class KnowledgePlugin(BasePlugin):
 		query = str(args.get("query", "")).strip()
 		if not query:
 			return ToolOutput.error("query 不能为空")
-		try:
-			payload = await self._hybrid_search_payload(
-				query,
-				top_k=int(args.get("top_k", 5)),
-				candidate_k=int(args.get("candidate_k", self._default_candidate_k)),
-				filters=_tool_filters(args),
-				min_score=float(args.get("min_score", 0.0) or 0.0),
-				include_trace=bool(args.get("include_trace", self._include_trace_default)),
-			)
-		except Exception as exc:
-			logger.exception("[knowledge] search failed")
-			return ToolOutput.error(f"knowledge_search failed: {exc}")
+		payload = await self._hybrid_search_payload(
+			query,
+			top_k=int(args.get("top_k", 5)),
+			candidate_k=int(args.get("candidate_k", self._default_candidate_k)),
+			filters=_tool_filters(args),
+			min_score=float(args.get("min_score", 0.0) or 0.0),
+			include_trace=bool(args.get("include_trace", self._include_trace_default)),
+		)
 		return ToolOutput.json_output(
 			payload,
 			summary=f"knowledge_search：为 '{query[:50]}' 找到 {len(payload.get('results', []))} 条结果",
@@ -264,7 +260,7 @@ class KnowledgePlugin(BasePlugin):
 			for doc in self._documents
 		]
 		for error in result.errors:
-			logger.warning("[knowledge] %s", error)
+			raise RuntimeError(f"knowledge source load failed: {error}")
 		logger.info("[knowledge] loaded %s local document chunks", len(self._chunks))
 
 	def _build_bm25_index(self) -> None:
@@ -333,9 +329,11 @@ class KnowledgePlugin(BasePlugin):
 	async def _search_vector_store(self, request: KnowledgeSearchRequest) -> list[RetrievalResult]:
 		vectors = await _maybe_await(self._embedding.embed([request.query]))
 		if not vectors:
-			return []
+			raise RuntimeError("knowledge.embedding returned no vectors")
 		raw = await _maybe_await(self._vector_store.search(vectors[0], top_k=request.candidate_k))
-		return [_normalize_result(item, f"{_VECTOR_STORE_RESOURCE}:{idx}") for idx, item in enumerate(raw or [])]
+		if raw is None:
+			raise RuntimeError("knowledge.vector_store.search returned None")
+		return [_normalize_result(item, f"{_VECTOR_STORE_RESOURCE}:{idx}") for idx, item in enumerate(raw)]
 
 	def _merge_result_sets(self, result_sets: list[list[RetrievalResult]], request: KnowledgeSearchRequest) -> list[RetrievalResult]:
 		non_empty = [[item for item in items if item.score >= request.min_score] for items in result_sets if items]
@@ -416,10 +414,7 @@ class KnowledgePlugin(BasePlugin):
 
 
 async def _call_search(search: Any, request: KnowledgeSearchRequest) -> Any:
-	try:
-		return await _maybe_await(search(request))
-	except TypeError:
-		return await _maybe_await(search(request.query, top_k=request.top_k, candidate_k=request.candidate_k))
+	return await _maybe_await(search(request))
 
 
 async def _maybe_await(value: Any) -> Any:
@@ -443,7 +438,7 @@ def _normalize_response(raw: Any, request: KnowledgeSearchRequest, retrieval: st
 			trace=RetrievalTrace(query=request.query, candidate_count=len(results), returned_count=min(len(results), request.top_k)) if request.include_trace else None,
 		)
 	if raw is None:
-		return KnowledgeSearchResponse(results=[])
+		raise RuntimeError(f"{retrieval} returned None")
 	raise RuntimeError(f"unsupported knowledge search response: {type(raw).__name__}")
 
 

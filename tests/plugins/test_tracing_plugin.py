@@ -20,6 +20,8 @@ from axc_agent_engine.plugins.builtin.tracing.plugin import (
 	_resource_name,
 	_sampled,
 	_span_metadata,
+	_strict_float,
+	_strict_int,
 	_trace_summary,
 	_truncate,
 )
@@ -322,8 +324,8 @@ async def test_tracing_tool_queries_empty_store_failures_and_session_filter():
 	await p.on_execution_end(ctx, "ok", "")
 
 	assert (await p._tool_get_trace({}, {})).is_error
-	trace = await p._tool_get_trace({"trace_id": ctx.state.metadata["tracing"]["trace_id"]}, {})
-	assert trace.content["count"] == 1
+	with pytest.raises(RuntimeError, match="store down"):
+		await p._tool_get_trace({"trace_id": ctx.state.metadata["tracing"]["trace_id"]}, {})
 	assert (await p._tool_list_traces({"session_id": "other"}, {})).content["count"] == 0
 	assert (await p._tool_list_traces({"session_id": "sess-a", "limit": "bad"}, {})).content["count"] == 1
 
@@ -367,13 +369,12 @@ async def test_tracing_exporter_callback_schedule_and_audit_branches():
 		return ToolOutput.text("result")
 
 	reg.register(ToolDefinition(name="tool", execute=tool, is_read_only=True))
-	await execute_tool_calls([{"name": "tool", "arguments": {"password": "secret"}, "id": "audit-1"}], reg, [p], ctx)
+	with pytest.raises(RuntimeError, match="callback failed"):
+		await execute_tool_calls([{"name": "tool", "arguments": {"password": "secret"}, "id": "audit-1"}], reg, [p], ctx)
 	await p.close()
 
 	assert async_exported
 	assert callback_errors
-	assert kv.values
-	assert p._stats["failed"] >= 1
 
 
 @pytest.mark.asyncio
@@ -383,7 +384,8 @@ async def test_tracing_drops_when_queue_full_and_without_running_loop():
 
 	p = _plugin({"enabled": True, "output": "callback", "queue_limit": 1})
 	p._pending_tasks.add(asyncio.create_task(asyncio.sleep(0)))
-	p._schedule(never())
+	with pytest.raises(RuntimeError, match="queue is full"):
+		p._schedule(never())
 	assert p._stats["dropped"] == 1
 	await p.close()
 
@@ -532,11 +534,17 @@ async def test_tracing_save_span_failure_exporter_sync_failure_and_background_fa
 	ctx = ExecutionContext()
 
 	await p.on_execution_start(ctx)
-	await p.on_execution_end(ctx, "done", "")
-	p._schedule(bad_task())
-	await p.close()
-
-	assert p._stats["failed"] >= 2
+	with pytest.raises(RuntimeError, match="export down"):
+		await p.on_execution_end(ctx, "done", "")
+	p2 = TracingPlugin()
+	p2.initialize({"enabled": True, "output": "callback"}, PluginContext(span_store=FailingSpanStore()))
+	with pytest.raises(RuntimeError, match="store down"):
+		await p2._save_span({"trace_id": "x"})
+	p3 = TracingPlugin()
+	p3.initialize({"enabled": True, "output": "callback"}, PluginContext())
+	p3._schedule(bad_task())
+	with pytest.raises(RuntimeError, match="task down|background task failed"):
+		await p3.close()
 
 
 def test_tracing_schedule_without_running_loop_closes_coroutine_and_counts_drop():
@@ -544,7 +552,8 @@ def test_tracing_schedule_without_running_loop_closes_coroutine_and_counts_drop(
 		return None
 
 	p = _plugin({"enabled": True, "output": "callback"})
-	p._schedule(never())
+	with pytest.raises(RuntimeError, match="running event loop"):
+		p._schedule(never())
 	assert p._stats["dropped"] == 1
 
 
@@ -563,6 +572,18 @@ async def test_tracing_redaction_metadata_bounds_and_resource_helpers():
 	assert _bounded_int(99, 2, 5) == 5
 	assert _bounded_float("bad", 0.0, 1.0) == 1.0
 	assert _bounded_float(-1, 0.0, 1.0) == 0.0
+	assert _strict_int("3", 1, 5, "x") == 3
+	assert _strict_float("0.5", 0.0, 1.0, "x") == 0.5
+	for fn, args, pattern in [
+		(_strict_int, (True, 1, 5, "x"), "integer"),
+		(_strict_int, ("bad", 1, 5, "x"), "integer"),
+		(_strict_int, (9, 1, 5, "x"), "between"),
+		(_strict_float, (True, 0.0, 1.0, "x"), "number"),
+		(_strict_float, ("bad", 0.0, 1.0, "x"), "number"),
+		(_strict_float, (2.0, 0.0, 1.0, "x"), "between"),
+	]:
+		with pytest.raises(ValueError, match=pattern):
+			fn(*args)
 	assert _resource_name(None, "default") == "default"
 	assert _resource_name(True, "default") == "default"
 	assert _resource_name(False, "default") == ""

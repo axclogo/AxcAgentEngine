@@ -72,6 +72,14 @@ class SearchOnlyIndex:
 		return [{"text": query, "score": 0.9, "source": "search-only"}]
 
 
+class TraceIndex:
+	async def search_with_trace(self, request):
+		return KnowledgeSearchResponse(
+			results=[RetrievalResult(id="trace", text="trace hit", score=0.8, retrieval="trace")],
+			trace=RetrievalTrace(query=request.query, candidate_count=1, returned_count=1),
+		)
+
+
 @pytest.mark.asyncio
 async def test_knowledge_mounted_index_normalizes_dict_trace_and_merges_filters():
 	index = MountedIndex({
@@ -105,17 +113,52 @@ async def test_knowledge_mounted_index_normalizes_dict_trace_and_merges_filters(
 
 
 @pytest.mark.asyncio
-async def test_knowledge_search_only_index_legacy_signature_and_tool_errors():
+async def test_knowledge_fail_fast_resource_contract_edges(tmp_path):
+	class NoSearchIndex:
+		pass
+
+	class EmptyVectorStore:
+		async def search(self, vector, top_k=5):
+			return None
+
+	class Embedding:
+		async def embed(self, texts):
+			return [[1.0]]
+
+	with pytest.raises(RuntimeError, match="requires sources"):
+		KnowledgePlugin().initialize({}, PluginContext())
+	with pytest.raises(RuntimeError, match="source load failed"):
+		KnowledgePlugin().initialize({"sources": ["missing.md"]}, PluginContext(workspace=str(tmp_path)))
+
+	plugin = KnowledgePlugin()
+	plugin.initialize({}, PluginContext(resources={"knowledge.index": NoSearchIndex()}))
+	with pytest.raises(RuntimeError, match="must expose"):
+		await plugin._hybrid_search_payload("x")
+
+	vector = KnowledgePlugin()
+	vector.initialize({}, PluginContext(resources={
+		"knowledge.embedding": Embedding(),
+		"knowledge.vector_store": EmptyVectorStore(),
+	}))
+	with pytest.raises(RuntimeError, match="returned None"):
+		await vector._hybrid_search_payload("x")
+
+	trace = KnowledgePlugin()
+	trace.initialize({}, PluginContext(resources={"knowledge.index": TraceIndex()}))
+	payload = await trace._hybrid_search_payload("x", include_trace=True)
+	assert payload["results"][0]["id"] == "trace"
+
+
+@pytest.mark.asyncio
+async def test_knowledge_search_only_index_requires_request_signature_and_tool_errors():
 	plugin = KnowledgePlugin()
 	index = SearchOnlyIndex()
 	plugin.initialize({}, PluginContext(resources={"knowledge.index": index}))
 
-	result = await plugin._tool_knowledge_search({"query": "hello", "include_trace": True}, {})
 	empty = await plugin._tool_knowledge_search({"query": "  "}, {})
 
-	assert not result.is_error
-	assert result.content["results"][0]["text"] == "hello"
-	assert index.calls == [("hello", 5, 30)]
+	with pytest.raises(TypeError, match="legacy signature only"):
+		await plugin._tool_knowledge_search({"query": "hello", "include_trace": True}, {})
 	assert empty.is_error
 
 
@@ -179,7 +222,8 @@ async def test_knowledge_vector_store_requires_embedding_and_searches_when_mount
 
 	assert payload["results"][0]["text"] == "vector hit"
 	assert store.calls == [([0.1, 0.2], 3)]
-	assert (await empty._hybrid_search_payload("q"))["results"] == []
+	with pytest.raises(RuntimeError, match="returned no vectors"):
+		await empty._hybrid_search_payload("q")
 
 
 def test_knowledge_normalizers_filters_tokenize_and_highlights():
@@ -188,7 +232,8 @@ def test_knowledge_normalizers_filters_tokenize_and_highlights():
 	response = _normalize_response([KnowledgeDocument(id="d", text="doc", source="s")], request, "idx")
 	assert isinstance(response, KnowledgeSearchResponse)
 	assert response.trace.candidate_count == 1
-	assert _normalize_response(None, request, "idx").results == []
+	with pytest.raises(RuntimeError, match="returned None"):
+		_normalize_response(None, request, "idx")
 	with pytest.raises(RuntimeError, match="unsupported"):
 		_normalize_response(object(), request, "idx")
 

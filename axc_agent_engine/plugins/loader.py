@@ -7,6 +7,7 @@ import logging
 from axc_agent_engine.core.errors import PluginInitError
 from axc_agent_engine.plugins import PluginContext
 from axc_agent_engine.plugins.base import BasePlugin
+from axc_agent_engine.plugins.config_schema import validate_plugin_config
 from axc_agent_engine.plugins.registry import PluginRegistry
 
 logger = logging.getLogger(__name__)
@@ -24,11 +25,16 @@ def load_plugins(
 	"""
 	active: list[BasePlugin] = []
 	for name, config in plugins_config.items():
+		if name not in registry:
+			raise PluginInitError(f"Plugin {name} is configured but not registered")
+		schema = registry.get_plugin_config_schema(name)
+		try:
+			validate_plugin_config(name, config, schema)
+		except Exception as e:
+			raise PluginInitError(f"Plugin {name} config validation failed: {e}") from e
 		if not config.get("enabled", False):
 			continue
 		plugin = registry.create(name)
-		if plugin is None:
-			raise PluginInitError(f"Plugin {name} is enabled but not registered")
 		_validate_plugin_name(name, plugin)
 		try:
 			plugin.initialize(config, ctx)

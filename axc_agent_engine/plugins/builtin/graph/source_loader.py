@@ -38,50 +38,39 @@ class GraphSourceLoader:
 		for source in self._config.sources:
 			real_source = os.path.realpath(source)
 			if not os.path.exists(real_source):
-				self._load_errors.append({"source": source, "error": "source not found"})
-				logger.warning("[graph] Data source not found: %s", source)
-				continue
+				self._fail({"source": source, "error": "source not found"})
 			entities, relations = self._read_source(real_source)
 			external_names: dict[str, str] = {}
 			for item in entities:
 				if self._entity_count() >= self._config.max_entities:
-					self._load_errors.append({"source": source, "error": "entity limit reached"})
-					break
+					self._fail({"source": source, "error": "entity limit reached"})
 				entity_type = str(item.get("type") or item.get("entity_type") or "concept")
 				type_error = self._policy.validate_entity_type(entity_type)
 				if type_error:
-					self._load_errors.append({"source": source, "entity": item.get("id", item.get("name", "")), "error": type_error})
-					continue
-				try:
-					entity = self._store.upsert_entity(
-						clean_text(item.get("name", ""), self._config.max_name_length),
-						entity_type,
-						[clean_text(alias, self._config.max_name_length) for alias in item.get("aliases", []) if str(alias).strip()],
-						description=clean_text(item.get("description", ""), self._config.max_description_length),
-						external_id=str(item.get("id", "")),
-						namespace=self._config.namespace,
-						source=source,
-					)
-					if item.get("id"):
-						external_names[str(item["id"])] = entity["name"]
-					loaded_entities += 1
-				except Exception as e:
-					self._load_errors.append({"source": source, "entity": item.get("id", item.get("name", "")), "error": str(e)})
+					self._fail({"source": source, "entity": item.get("id", item.get("name", "")), "error": type_error})
+				entity = self._store.upsert_entity(
+					clean_text(item.get("name", ""), self._config.max_name_length),
+					entity_type,
+					[clean_text(alias, self._config.max_name_length) for alias in item.get("aliases", []) if str(alias).strip()],
+					description=clean_text(item.get("description", ""), self._config.max_description_length),
+					external_id=str(item.get("id", "")),
+					namespace=self._config.namespace,
+					source=source,
+				)
+				if item.get("id"):
+					external_names[str(item["id"])] = entity["name"]
+				loaded_entities += 1
 			for item in relations:
 				if self._relation_count() >= self._config.max_relations:
-					self._load_errors.append({"source": source, "error": "relation limit reached"})
-					break
+					self._fail({"source": source, "error": "relation limit reached"})
 				relation_type = str(item.get("relation_type", "RELATED_TO"))
 				type_error = self._policy.validate_relation_type(relation_type)
 				if type_error:
-					self._load_errors.append({"source": source, "relation": item.get("id", ""), "error": type_error})
-					continue
+					self._fail({"source": source, "relation": item.get("id", ""), "error": type_error})
 				source_name = str(item.get("source") or item.get("source_name") or external_names.get(str(item.get("source_id", "")), item.get("source_id", "")))
 				target_name = str(item.get("target") or item.get("target_name") or external_names.get(str(item.get("target_id", "")), item.get("target_id", "")))
 				if not source_name or not target_name:
-					self._load_errors.append({"source": source, "relation": item.get("id", ""), "error": "source/target missing"})
-					continue
-				try:
+					self._fail({"source": source, "relation": item.get("id", ""), "error": "source/target missing"})
 					self._store.upsert_relation(
 						source_name,
 						target_name,
@@ -90,11 +79,13 @@ class GraphSourceLoader:
 						source_memory_id=str(item.get("source_memory_id", "")),
 						external_id=str(item.get("id", "")),
 						namespace=self._config.namespace,
-						source=source,
+						data_source=source,
 					)
-					loaded_relations += 1
-				except Exception as e:
-					self._load_errors.append({"source": source, "relation": item.get("id", ""), "error": str(e)})
+				loaded_relations += 1
 		source_stats = {"entities": loaded_entities, "relations": loaded_relations, "sources": len(self._config.sources)}
 		logger.info("[graph] Loaded %s entities, %s relations", loaded_entities, loaded_relations)
 		return source_stats
+
+	def _fail(self, error: dict[str, Any]) -> None:
+		self._load_errors.append(error)
+		raise ValueError(str(error))

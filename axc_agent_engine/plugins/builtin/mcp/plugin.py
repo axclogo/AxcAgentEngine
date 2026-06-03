@@ -7,7 +7,7 @@ import time
 from typing import Any, TYPE_CHECKING
 
 from axc_agent_engine.plugins.base import BasePlugin
-from axc_agent_engine.plugins.builtin.common import bounded_int, externalize_text, result_store_from_context
+from axc_agent_engine.plugins.builtin.common import bounded_int, externalize_text, result_store_from_context, strict_bounded_int
 from axc_agent_engine.plugins.builtin.config_schemas import MCP_CONFIG_SCHEMA
 from axc_agent_engine.plugins.builtin.mcp.support import MCPConnection, MCPTool
 from axc_agent_engine.core.schema import ToolDefinition
@@ -30,7 +30,7 @@ class MCPToolFactory:
 		read_only = bool(override.get("read_only", _read_only_from_annotations(tool.annotations, plugin._default_read_only)))
 		risk_level = str(override.get("risk_level", _risk_from_annotations(tool.annotations, plugin._default_risk_level)))
 		capability = str(override.get("capability", plugin._default_capability))
-		timeout = bounded_int(override.get("timeout", 120), 1, 3600)
+		timeout = strict_bounded_int(override.get("timeout", 120), 1, 3600, f"mcp.tool_overrides.{tool_name}.timeout")
 		return ToolDefinition(
 			name=tool_name,
 			description=tool.description,
@@ -132,7 +132,12 @@ class MCPPlugin(BasePlugin):
 		self._default_capability = str(config.get("capability", ""))
 		self._default_risk_level = str(config.get("risk_level", "moderate"))
 		self._default_read_only = bool(config.get("read_only", False))
-		self._max_result_bytes = bounded_int(config.get("max_result_bytes", 512_000), 1, 10 * 1024 * 1024)
+		self._max_result_bytes = strict_bounded_int(
+			config.get("max_result_bytes", 512_000),
+			1,
+			10 * 1024 * 1024,
+			"mcp.max_result_bytes",
+		)
 		self._connections: dict[str, MCPConnection] = {}
 		self._tools: list[ToolDefinition] = []
 		self._health: dict[str, dict[str, Any]] = {}

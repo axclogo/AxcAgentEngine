@@ -26,7 +26,7 @@ def test_available_builtin_plugins_are_not_registered_automatically():
 
 def test_load_plugins_uses_only_explicit_registry():
 	registry = PluginRegistry()
-	with pytest.raises(PluginInitError, match="enabled but not registered"):
+	with pytest.raises(PluginInitError, match="configured but not registered"):
 		load_plugins({"safety": {"enabled": True}}, PluginContext(), registry)
 	registry.register(SafetyPlugin)
 	plugins = load_plugins({"safety": {"enabled": True}}, PluginContext(), registry)

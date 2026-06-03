@@ -75,6 +75,8 @@ class RiskAssessment:
 class RiskRuleEngine:
 	def __init__(self, rules: list[dict] | None = None) -> None:
 		self.rules = DEFAULT_RULES + (rules or [])
+		for rule in self.rules:
+			_validate_rule(rule)
 
 	def classify(self, tool_name: str, arguments: dict[str, Any],
 				 static_risk: str | RiskLevel = RiskLevel.SAFE) -> RiskAssessment:
@@ -94,29 +96,26 @@ class RiskRuleEngine:
 					reason = shell_assessment.reason
 					matched_rule = shell_assessment.matched_rule
 		for rule in self.rules:
-			try:
-				if not re.search(rule.get("tool_pattern", ".*"), tool_name, re.IGNORECASE):
-					continue
-				arg_name = rule.get("arg_name", "")
-				if not arg_name or arg_name not in arguments:
-					continue
-				value = arguments[arg_name]
-				matched = False
-				if rule.get("arg_pattern") and isinstance(value, str):
-					matched = bool(re.search(rule["arg_pattern"], value, re.IGNORECASE))
-				if rule.get("arg_check"):
-					check = ARG_CHECKS.get(str(rule["arg_check"]))
-					matched = matched or bool(check and check(value))
-				if matched:
-					raw_target = rule.get("escalate_to", RiskLevel.MODERATE)
-					target_value = raw_target.value if isinstance(raw_target, RiskLevel) else str(raw_target)
-					target = RiskLevel(target_value)
-					if RISK_LEVELS[target] > current_level:
-						current_level = RISK_LEVELS[target]
-						reason = rule.get("name", "")
-						matched_rule = rule.get("arg_pattern", rule.get("arg_check", ""))
-			except Exception:
+			if not re.search(rule.get("tool_pattern", ".*"), tool_name, re.IGNORECASE):
 				continue
+			arg_name = rule.get("arg_name", "")
+			if not arg_name or arg_name not in arguments:
+				continue
+			value = arguments[arg_name]
+			matched = False
+			if rule.get("arg_pattern") and isinstance(value, str):
+				matched = bool(re.search(rule["arg_pattern"], value, re.IGNORECASE))
+			if rule.get("arg_check"):
+				check = ARG_CHECKS[str(rule["arg_check"])]
+				matched = matched or bool(check(value))
+			if matched:
+				raw_target = rule.get("escalate_to", RiskLevel.MODERATE)
+				target_value = raw_target.value if isinstance(raw_target, RiskLevel) else str(raw_target)
+				target = RiskLevel(target_value)
+				if RISK_LEVELS[target] > current_level:
+					current_level = RISK_LEVELS[target]
+					reason = rule.get("name", "")
+					matched_rule = rule.get("arg_pattern", rule.get("arg_check", ""))
 		level = RISK_NAMES[current_level]
 		return RiskAssessment(level=level, reason=reason, matched_rule=str(matched_rule), allowed=level != RiskLevel.BLOCKED)
 
@@ -144,3 +143,16 @@ def classify_tool_risk(tool_name: str, arguments: dict[str, Any],
 					   static_risk: str | RiskLevel = RiskLevel.SAFE,
 					   custom_rules: list[dict] | None = None) -> RiskAssessment:
 	return RiskRuleEngine(custom_rules).classify(tool_name, arguments, static_risk)
+
+
+def _validate_rule(rule: dict[str, Any]) -> None:
+	if not isinstance(rule, dict):
+		raise ValueError("Risk rule must be an object")
+	re.compile(str(rule.get("tool_pattern", ".*")))
+	if rule.get("arg_pattern"):
+		re.compile(str(rule["arg_pattern"]))
+	if rule.get("arg_check") and str(rule["arg_check"]) not in ARG_CHECKS:
+		raise ValueError(f"Unknown risk arg_check: {rule['arg_check']}")
+	raw_target = rule.get("escalate_to", RiskLevel.MODERATE)
+	target_value = raw_target.value if isinstance(raw_target, RiskLevel) else str(raw_target)
+	RiskLevel(target_value)

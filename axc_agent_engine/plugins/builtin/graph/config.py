@@ -3,7 +3,7 @@
 from dataclasses import dataclass
 from typing import Any
 
-from axc_agent_engine.plugins.builtin.common import bounded_int
+from axc_agent_engine.plugins.builtin.common import strict_bounded_int
 
 
 @dataclass(frozen=True)
@@ -40,14 +40,24 @@ class GraphConfig:
 			denied_entity_types=frozenset(str(t) for t in config.get("denied_entity_types", [])),
 			allowed_relation_types=frozenset(str(t) for t in config.get("allowed_relation_types", [])),
 			denied_relation_types=frozenset(str(t) for t in config.get("denied_relation_types", [])),
-			max_entities=bounded_int(config.get("max_entities", 100_000), 1, 10_000_000),
-			max_relations=bounded_int(config.get("max_relations", 500_000), 1, 50_000_000),
-			max_depth=bounded_int(config.get("max_depth", 3), 0, 20),
-			default_limit=bounded_int(config.get("default_limit", 20), 1, 1000),
-			max_limit=bounded_int(config.get("max_limit", 100), 1, 10_000),
-			max_name_length=bounded_int(config.get("max_name_length", 256), 1, 4096),
-			max_description_length=bounded_int(config.get("max_description_length", 4000), 0, 200_000),
-			max_result_bytes=bounded_int(config.get("max_result_bytes", 256_000), 1, 50 * 1024 * 1024),
+			max_entities=strict_bounded_int(config.get("max_entities", 100_000), 1, 10_000_000, "graph.max_entities"),
+			max_relations=strict_bounded_int(config.get("max_relations", 500_000), 1, 50_000_000, "graph.max_relations"),
+			max_depth=strict_bounded_int(config.get("max_depth", 3), 0, 20, "graph.max_depth"),
+			default_limit=strict_bounded_int(config.get("default_limit", 20), 1, 1000, "graph.default_limit"),
+			max_limit=strict_bounded_int(config.get("max_limit", 100), 1, 10_000, "graph.max_limit"),
+			max_name_length=strict_bounded_int(config.get("max_name_length", 256), 1, 4096, "graph.max_name_length"),
+			max_description_length=strict_bounded_int(
+				config.get("max_description_length", 4000),
+				0,
+				200_000,
+				"graph.max_description_length",
+			),
+			max_result_bytes=strict_bounded_int(
+				config.get("max_result_bytes", 256_000),
+				1,
+				50 * 1024 * 1024,
+				"graph.max_result_bytes",
+			),
 			include_metadata=bool(config.get("include_metadata", True)),
 			audit_enabled=bool(config.get("audit", True)),
 		)

@@ -176,7 +176,7 @@ async def test_mcp_large_result_externalized():
     assert await store.get(result.artifacts[0].id, limit=3) == "xxx"
 
 
-async def test_mcp_large_result_externalize_failure_keeps_output():
+async def test_mcp_large_result_externalize_failure_returns_tool_error():
     class FailingStore:
         async def put(self, content, metadata=None):
             raise RuntimeError("store down")
@@ -195,8 +195,8 @@ async def test_mcp_large_result_externalize_failure_keeps_output():
     finally:
         await plugin.close()
 
-    assert result.is_error is False
-    assert result.content == "x" * 200
+    assert result.is_error is True
+    assert result.content == "store down"
 
 
 async def test_mcp_duplicate_server_does_not_keep_partial_tools():
