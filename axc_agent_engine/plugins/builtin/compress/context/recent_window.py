@@ -13,6 +13,7 @@ def select_recent_window(messages: list[dict[str, Any]], rounds: int) -> list[di
 	max_round = max((int(m.get("round", 0)) for m in messages), default=0)
 	cutoff = max(1, max_round - rounds + 1)
 	keep = _initial_keep(messages, cutoff)
+	keep |= _durable_indexes(messages)
 	keep |= _paired_tool_indexes(messages, keep)
 	return [message for index, message in enumerate(messages) if index in keep]
 
@@ -41,4 +42,13 @@ def _paired_tool_indexes(messages: list[dict[str, Any]], keep: set[int]) -> set[
 			keep.add(assistant_index)
 		if assistant_index in keep and tool_index is not None:
 			keep.add(tool_index)
+	return keep
+
+
+def _durable_indexes(messages: list[dict[str, Any]]) -> set[int]:
+	keep: set[int] = set()
+	for index, message in enumerate(messages):
+		metadata = message.get("metadata", {})
+		if isinstance(metadata, dict) and (metadata.get("durable") or metadata.get("durable_summary")):
+			keep.add(index)
 	return keep

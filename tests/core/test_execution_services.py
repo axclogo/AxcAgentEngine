@@ -202,22 +202,22 @@ class TestExecutorToolOutputEnforcement:
 		assert result.output.content["count"] == 5
 
 
-class TestToolResultCompactView:
-	def test_result_property_returns_compact_view(self):
+class TestToolResultContextView:
+	def test_result_property_returns_context_view(self):
 		from axc_agent_engine.tools.executor import ToolResult
 		output = ToolOutput.text("hello world")
 		tr = ToolResult(tool_call_id="1", tool_name="t", arguments={}, output=output, success=True)
-		assert tr.compact_view() == "hello world"
+		assert tr.context_view() == "hello world"
 
 	def test_result_property_none_output(self):
 		from axc_agent_engine.tools.executor import ToolResult
 		tr = ToolResult(tool_call_id="1", tool_name="t", arguments={}, success=False, error="err")
-		assert tr.compact_view() == ""
+		assert tr.context_view() == ""
 
-	def test_compact_view_long_content(self):
+	def test_context_view_long_content(self):
 		from axc_agent_engine.tools.executor import ToolResult
 		output = ToolOutput.text("x" * 5000)
 		tr = ToolResult(tool_call_id="1", tool_name="t", arguments={}, output=output, success=True)
-		view = tr.compact_view()
+		view = tr.context_view()
 		assert len(view) < 5000
 		assert "省略" in view

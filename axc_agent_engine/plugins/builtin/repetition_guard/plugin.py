@@ -48,13 +48,15 @@ class RepetitionGuardPlugin(BasePlugin):
 			logger.warning(f"[repetition_guard] Blocked: {reason}")
 			self._should_stop = True
 			self._stop_reason = reason
+			self._last_rejection_reason = reason
+			self._last_rejection_code = "tool.rejected_by_repetition_guard"
 			return False, arguments
 		self._tool_history.append((tool_name, args_hash))
 		return True, arguments
 
 	async def post_tool_call(self, exec_ctx: "ExecutionContext", tool_name: str,
 					   arguments: dict, result: "ToolOutput", duration_ms: int) -> "ToolOutput":
-		result_str = result.compact_view() if result else ""
+		result_str = result.context_view() if result else ""
 		self._result_history.append(result_str)
 		reason = self._check_result_rules(result_str)
 		if reason:

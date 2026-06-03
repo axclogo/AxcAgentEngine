@@ -154,3 +154,42 @@ def test_sandbox_utils_env_decode_write_and_preexec(tmp_path, monkeypatch):
 	assert path.read_text() == "hello"
 	if subprocess_preexec_fn() is not None:
 		assert callable(subprocess_preexec_fn())
+
+
+def test_sandbox_utils_decode_invalid_utf8_and_no_truncation():
+	text, truncated = decode_limited(b"\xffabc", 99)
+	assert text.startswith("\ufffd")
+	assert truncated is False
+	text, truncated = decode_limited(b"\xffabc", 2)
+	assert text == "\ufffda"
+	assert truncated is True
+
+
+def test_sandbox_utils_build_env_ignores_empty_and_unknown(monkeypatch):
+	for key in ("HOME", "PATH", "LANG", "LC_ALL", "TMPDIR"):
+		monkeypatch.delenv(key, raising=False)
+	env = build_env({"UNKNOWN": "x", "PATH": "/bin"})
+	assert env == {"PATH": "/bin"}
+
+
+def test_sandbox_preexec_returns_none_on_windows(monkeypatch):
+	monkeypatch.setattr("axc_agent_engine.runtime.sandbox_utils.sys.platform", "win32")
+	assert subprocess_preexec_fn() is None
+
+
+def test_sandbox_set_limits_ignores_resource_errors(monkeypatch):
+	import axc_agent_engine.runtime.sandbox_utils as sandbox_utils
+
+	if sandbox_utils._set_limits is None:
+		return
+	calls = []
+
+	def fail_setrlimit(limit, values):
+		calls.append((limit, values))
+		if len(calls) == 1:
+			raise ValueError("bad limit")
+		raise OSError("blocked")
+
+	monkeypatch.setattr(sandbox_utils.resource, "setrlimit", fail_setrlimit)
+	sandbox_utils._set_limits()
+	assert len(calls) == 3

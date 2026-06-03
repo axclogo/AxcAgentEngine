@@ -161,6 +161,30 @@ class TestToolCallFlow:
 		assert types.index(EventType.SUB_AGENT_COMPLETE) < types.index(EventType.TOOL_RESULT)
 
 	@pytest.mark.asyncio
+	async def test_tool_result_event_uses_display_view_and_metadata_context(self):
+		tool_call_msg = {
+			"role": "assistant", "content": "",
+			"tool_calls": [{"id": "tc-1", "function": {"name": "big_result", "arguments": "{}"}}],
+		}
+		final_msg = {"role": "assistant", "content": "done"}
+		provider = _mock_llm_provider([tool_call_msg, final_msg])
+		pm = PluginManager([])
+		llm_caller = LLMCaller(primary=provider, fallback=None, plugin_manager=pm)
+		reg = ToolRegistry()
+
+		async def big_result(args, ctx):
+			return ToolOutput.text("x" * 5000, summary="context summary")
+
+		reg.register(ToolDefinition(name="big_result", execute=big_result))
+		ctx = ExecutionContext(config=ExecutionConfig(stream=False), state=ExecutionState())
+		executor = Executor(llm_caller=llm_caller, registry=reg, plugin_manager=pm, ctx=ctx)
+		events = [event async for event in executor.run_stream("call big")]
+		tool_result = next(event for event in events if event.type == EventType.TOOL_RESULT)
+		assert tool_result.content == "x" * 5000
+		assert tool_result.metadata["context_view"] == "context summary"
+		assert tool_result.metadata["display_truncated"] is False
+
+	@pytest.mark.asyncio
 	async def test_tool_validation_failure_in_flow(self):
 		"""LLM sends invalid args, tool returns validation error."""
 		tool_call_msg = {

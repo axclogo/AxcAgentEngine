@@ -123,6 +123,17 @@ class TestInMemorySpanStore:
 		results = await store.query_by_trace("t9")
 		assert len(results) == 1
 
+	@pytest.mark.asyncio
+	async def test_query_by_session_returns_latest_limited_spans(self):
+		store = InMemorySpanStore()
+		for i in range(5):
+			await store.save_span({"trace_id": f"t{i}", "session_id": "s1", "idx": i})
+		await store.save_span({"trace_id": "other", "session_id": "s2", "idx": 99})
+
+		results = await store.query_by_session("s1", limit=2)
+
+		assert [span["idx"] for span in results] == [3, 4]
+
 
 class TestInMemoryVectorStore:
 	@pytest.mark.asyncio
@@ -160,6 +171,23 @@ class TestInMemoryVectorStore:
 			await store.add([f"text{i}"], [[float(i)]], [{}])
 		results = await store.search([4.0], top_k=10)
 		assert len(results) <= 3
+
+	@pytest.mark.asyncio
+	async def test_add_ignores_unpaired_text_embedding_metadata_rows(self):
+		store = InMemoryVectorStore()
+
+		ids = await store.add(["kept", "dropped"], [[1.0]], [{"source": "only-one-meta"}, {"ignored": True}])
+		results = await store.search([1.0], top_k=10)
+
+		assert len(ids) == 1
+		assert [item["text"] for item in results] == ["kept"]
+
+	@pytest.mark.asyncio
+	async def test_search_filters_zero_or_negative_similarity(self):
+		store = InMemoryVectorStore()
+		await store.add(["orthogonal", "negative"], [[0.0, 1.0], [-1.0, 0.0]], [{}, {}])
+
+		assert await store.search([1.0, 0.0], top_k=5) == []
 
 
 class TestCosineSimlarity:
@@ -201,3 +229,50 @@ class TestInMemoryMessageBus:
 		bus = InMemoryMessageBus()
 		# Should not raise
 		await bus.publish("empty", {"data": "hello"})
+
+	@pytest.mark.asyncio
+	async def test_request_round_trip_and_reply_channel_cleanup(self):
+		bus = InMemoryMessageBus()
+		seen = []
+
+		async def responder():
+			async for msg in bus.subscribe("rpc"):
+				seen.append(dict(msg))
+				await bus.publish(msg["_reply_to"], {"ok": True, "echo": msg["value"]})
+				break
+
+		task = asyncio.create_task(responder())
+		while "rpc" not in bus._channels:
+			await asyncio.sleep(0)
+		response = await bus.request("rpc", {"value": 42}, timeout=1)
+		await asyncio.wait_for(task, timeout=1)
+
+		assert response == {"ok": True, "echo": 42}
+		assert seen[0]["_reply_to"].startswith("_reply_")
+		assert seen[0]["_reply_to"] not in bus._channels
+
+	@pytest.mark.asyncio
+	async def test_request_timeout_cleans_reply_channel(self):
+		bus = InMemoryMessageBus()
+
+		with pytest.raises(asyncio.TimeoutError):
+			await bus.request("missing", {"value": 42}, timeout=0.01)
+
+		assert bus._channels == {}
+
+	@pytest.mark.asyncio
+	async def test_subscribe_removes_queue_on_close(self):
+		bus = InMemoryMessageBus(max_idle_rounds=1)
+
+		async def subscriber():
+			async for _ in bus.subscribe("close-me"):
+				pass
+
+		task = asyncio.create_task(subscriber())
+		while "close-me" not in bus._channels:
+			await asyncio.sleep(0)
+		task.cancel()
+		with pytest.raises(asyncio.CancelledError):
+			await task
+
+		assert bus._channels["close-me"] == []

@@ -71,7 +71,7 @@ class TestToolOutputNoLLMInDefaultPath:
 
 	@pytest.mark.asyncio
 	async def test_no_llm_call_for_large_result(self):
-		"""Large tool result uses compact_view, not LLM summarization."""
+		"""Large tool result uses context_view, not LLM summarization."""
 		async def big_tool(args, ctx):
 			return ToolOutput.text("x" * 10000, summary="10000 chars of x")
 
@@ -83,8 +83,8 @@ class TestToolOutputNoLLMInDefaultPath:
 		results = await execute_tool_calls(
 			[{"name": "big", "arguments": {}, "id": "1"}], reg, pm.plugins, ctx)
 		assert results[0].success
-		# compact_view uses summary, no LLM involved
-		assert results[0].compact_view() == "10000 chars of x"
+		# context_view uses summary, no LLM involved
+		assert results[0].context_view() == "10000 chars of x"
 
 
 class TestToolOutputConcurrentExecution:
@@ -143,7 +143,7 @@ class TestToolOutputConcurrentExecution:
 
 
 class TestToolOutputMessageStoreIntegration:
-	"""Test that message_store correctly stores compact views."""
+	"""Test that message_store correctly stores context views."""
 
 	def test_context_not_bloated_by_large_results(self):
 		ms = MessageStore()
@@ -265,4 +265,4 @@ class TestDecoratorWithToolOutput:
 			[{"name": "orch_test", "arguments": {"msg": "hi"}, "id": "1"}],
 			reg, pm.plugins, ctx)
 		assert results[0].success
-		assert "echo: hi" in results[0].compact_view()
+		assert "echo: hi" in results[0].context_view()

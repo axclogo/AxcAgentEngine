@@ -88,12 +88,15 @@ class Event:
 		call_id: str,
 		content: str,
 		artifact_refs: list[dict[str, Any]] | None = None,
+		metadata: dict[str, Any] | None = None,
 	) -> "Event":
 		"""English: Bilingual documentation follows.
 中文：以下为双语文档说明。
 创建 TOOL_RESULT 事件。"""
-		metadata = {"artifacts": artifact_refs or []}
-		return cls(type=EventType.TOOL_RESULT, tool_name=name, tool_call_id=call_id, content=content, metadata=metadata)
+		event_metadata = {"artifacts": artifact_refs or []}
+		if metadata:
+			event_metadata.update(metadata)
+		return cls(type=EventType.TOOL_RESULT, tool_name=name, tool_call_id=call_id, content=content, metadata=event_metadata)
 
 	@classmethod
 	def error(cls, message: str | ErrorEnvelope, metadata: dict[str, Any] | None = None) -> "Event":

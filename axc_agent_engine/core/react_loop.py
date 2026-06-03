@@ -73,11 +73,17 @@ class ToolCallFlow:
 		if emit_events:
 			for result in results:
 				artifact_refs = [a.to_dict() for a in result.output.artifacts] if result.output else []
+				display_content = result.output.display_view() if result.success and result.output else result.error
+				context_content = result.output.context_view() if result.success and result.output else result.error
 				event = Event.tool_result(
 					result.tool_name,
 					result.tool_call_id,
-					result.compact_view() if result.success else result.error,
+					display_content,
 					artifact_refs,
+					metadata={
+						"context_view": context_content,
+						"display_truncated": False,
+					},
 				)
 				event.metadata["duration_ms"] = result.duration_ms
 				_add_event(events, event, event_sink)

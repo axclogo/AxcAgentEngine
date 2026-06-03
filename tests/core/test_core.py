@@ -158,6 +158,42 @@ class TestSessionManager:
 		assert sm.count == 1
 
 	@pytest.mark.asyncio
+	async def test_ttl_positive_evicts_expired_session(self, monkeypatch):
+		sm = SessionManager(ttl=1)
+		times = [100.0, 100.0, 102.0, 102.0]
+		monkeypatch.setattr("axc_agent_engine.core.session_manager.time.time", lambda: times.pop(0) if times else 102.0)
+		await sm.get_or_create("s1")
+		await sm.get_or_create("s2")
+		assert sm.count == 1
+		assert await sm.get("s1") is None
+
+	@pytest.mark.asyncio
+	async def test_persistence_load_save_remove_and_no_session_save(self):
+		class Persistence:
+			def __init__(self):
+				self.saved = []
+				self.deleted = []
+
+			async def load(self, session_id):
+				return [{"role": "user", "content": session_id}]
+
+			async def save(self, session_id, messages):
+				self.saved.append((session_id, list(messages)))
+
+			async def delete(self, session_id):
+				self.deleted.append(session_id)
+
+		persistence = Persistence()
+		sm = SessionManager(persistence=persistence)
+		session = await sm.get_or_create("s1")
+		assert session.messages == [{"role": "user", "content": "s1"}]
+		await sm.save("s1")
+		await sm.save("missing")
+		assert persistence.saved == [("s1", [{"role": "user", "content": "s1"}])]
+		await sm.remove("s1")
+		assert persistence.deleted == ["s1"]
+
+	@pytest.mark.asyncio
 	async def test_restore_context_basic(self):
 		sm = SessionManager()
 		session = Session(session_id="s1", messages=[{"role": "user", "content": "old"}])
@@ -167,6 +203,20 @@ class TestSessionManager:
 		all_msgs = ms.get_all()
 		assert all_msgs[0]["content"] == "old"
 		assert all_msgs[1]["content"] == "new"
+
+	def test_restore_context_after_system_and_session_roundtrip(self):
+		session = Session(session_id="s1", metadata={"tenant": "t"})
+		session.add_message("user", "old")
+		data = session.to_dict()
+		restored = Session.from_dict(data)
+		assert restored.metadata == {"tenant": "t"}
+		ms = MessageStore()
+		ms.append({"role": "system", "content": "sys"})
+		ms.append({"role": "user", "content": "new"})
+		SessionManager().restore_context(restored, ms)
+		assert [message["content"] for message in ms.get_all()] == ["sys", "old", "new"]
+		restored.clear()
+		assert restored.messages == []
 
 class TestLLMCaller:
 	@pytest.mark.asyncio

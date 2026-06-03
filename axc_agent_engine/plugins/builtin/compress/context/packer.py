@@ -78,7 +78,15 @@ def _required_groups(messages: list[dict[str, Any]], groups: list[list[int]]) ->
 		if any(messages[index].get("role") == "user" for index in groups[group_index]):
 			required.add(group_index)
 			break
+	for group_index, group in enumerate(groups):
+		if any(_pinned_message(messages[index]) for index in group):
+			required.add(group_index)
 	return required
+
+
+def _pinned_message(message: dict[str, Any]) -> bool:
+	metadata = message.get("metadata", {})
+	return isinstance(metadata, dict) and bool(metadata.get("durable") or metadata.get("durable_summary"))
 
 
 def _message_tokens(message: dict[str, Any]) -> int:

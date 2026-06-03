@@ -94,6 +94,35 @@ async def test_annotation_matcher_uses_embedding_provider():
 	assert match.reply.answer == "billing answer"
 
 
+async def test_annotation_matcher_empty_candidates_vector_failures_and_helpers():
+	from axc_agent_engine.sidecar.eval.matcher import _cosine, _lexical_score, _normalize, _reply_match_text
+
+	store = InMemoryAnnotationStore()
+	matcher = AnnotationMatcher(store)
+	assert await matcher.match_all("   ") == []
+	assert await matcher.match_all("x") == []
+	assert _normalize("  A   B ") == "a b"
+	assert _lexical_score("", "x") == 0.0
+	assert _cosine([], [1.0]) == 0.0
+	assert _cosine([0.0], [1.0]) == 0.0
+	assert _cosine([1.0], [1.0, 2.0]) == 0.0
+	assert _reply_match_text(AnnotationReply(case_id="c", answer="a", metadata={"query": "q"})) == "q"
+
+	await store.save_reply(AnnotationReply(case_id="c1", answer="a", metadata={"input": "alpha"}))
+
+	class BrokenEmbeddings:
+		async def embed(self, texts):
+			raise RuntimeError("down")
+
+	assert await AnnotationMatcher(store, embedding_provider=BrokenEmbeddings(), threshold=1.1).match_all("beta") == []
+
+	class ShortEmbeddings:
+		async def embed(self, texts):
+			return [[1.0]]
+
+	assert await AnnotationMatcher(store, embedding_provider=ShortEmbeddings(), threshold=1.1).match_all("beta") == []
+
+
 async def test_eval_runner_missing_agent_and_stored_suite_errors():
 	import pytest
 

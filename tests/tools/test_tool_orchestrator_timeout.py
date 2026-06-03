@@ -51,3 +51,23 @@ async def test_step_timeout_bounds_entire_tool_orchestration():
 	assert events[-1].error["code"] == "tool.call_timeout"
 	assert events[-1].error["category"] == "timeout"
 	assert events[-1].error["retryable"] is True
+
+
+async def test_agent_call_requested_timeout_extends_step_timeout():
+	async def agent_call(args, ctx):
+		await asyncio.sleep(0.04)
+		return ToolOutput.text("ok")
+
+	registry = ToolRegistry()
+	registry.register(ToolDefinition(name="agent_call", execute=agent_call, timeout=0, capability="agent_call"))
+	ctx = ExecutionContext(config=ExecutionConfig(step_timeout=0.02, allowed_capabilities=frozenset({"agent_call"})))
+
+	results = await execute_tool_calls(
+		[{"name": "agent_call", "arguments": {"timeout": 0.1}, "id": "call-1"}],
+		registry,
+		[],
+		ctx,
+	)
+
+	assert results[0].success is True
+	assert results[0].context_view() == "ok"

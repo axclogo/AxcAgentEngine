@@ -5,6 +5,14 @@ from contextlib import asynccontextmanager
 import pytest
 
 from axc_agent_engine.plugins.builtin.mcp.support.models import MCPApplicationError
+from axc_agent_engine.plugins.builtin.mcp.support.connection import MCPConnection
+from axc_agent_engine.plugins.builtin.mcp.support.models import MCPTransportError
+from axc_agent_engine.plugins.builtin.mcp.support.normalization import (
+	normalize_call_result,
+	sdk_call_result_to_dict,
+	sdk_tool_to_dict,
+	tool_from_payload,
+)
 from axc_agent_engine.plugins.builtin.mcp.support.transports import build_transport
 from axc_agent_engine.plugins.builtin.mcp.support.transports.base import (
 	call_transport_client,
@@ -211,3 +219,106 @@ async def test_official_sdk_transport_open_streams_and_connect_errors(monkeypatc
 	with pytest.raises(RuntimeError):
 		await broken.connect()
 	assert broken._session is None
+
+
+def test_mcp_normalization_helpers_cover_payload_shapes():
+	tool = tool_from_payload({"name": "t"})
+	assert tool.name == "t"
+	assert tool.input_schema == {"type": "object", "properties": {}}
+	assert normalize_call_result({"content": [{"type": "text", "text": "a"}, {"type": "text", "text": "b"}]}) == "a\nb"
+	assert normalize_call_result({"content": [{"type": "image", "data": "x"}]}) == [{"type": "image", "data": "x"}]
+	assert normalize_call_result({"other": True}) == {"other": True}
+
+	class SDKTool:
+		name = "sdk"
+		description = None
+		input_schema = {"type": "object"}
+		annotations = None
+
+	class Text:
+		type = "text"
+		text = "hello"
+
+	class Result:
+		content = [{"type": "text", "text": "dict"}, Text()]
+
+	assert sdk_tool_to_dict(SDKTool())["inputSchema"] == {"type": "object"}
+	assert sdk_call_result_to_dict(Result()) == {"content": [{"type": "text", "text": "dict"}, {"type": "text", "text": "hello"}]}
+
+
+async def test_mcp_connection_connect_list_call_reconnect_and_close(monkeypatch):
+	class Transport:
+		def __init__(self):
+			self.connected = 0
+			self.closed = 0
+			self.requests = []
+			self.fail_next = False
+
+		async def connect(self):
+			self.connected += 1
+
+		async def request(self, method, params=None):
+			self.requests.append((method, params or {}))
+			if method == "notifications/initialized":
+				raise RuntimeError("ignored")
+			if self.fail_next:
+				self.fail_next = False
+				raise MCPTransportError("broken")
+			if method == "tools/list":
+				return {"tools": [{"name": "tool", "description": "desc"}]}
+			if method == "tools/call":
+				return {"content": [{"type": "text", "text": "ok"}]}
+			return {}
+
+		async def close(self):
+			self.closed += 1
+
+	transport = Transport()
+	monkeypatch.setattr("axc_agent_engine.plugins.builtin.mcp.support.connection.build_transport", lambda config: transport)
+	conn = MCPConnection({"name": "server", "timeout": 1})
+
+	await conn.connect()
+	await conn.connect()
+	tools = await conn.list_tools()
+	transport.fail_next = True
+	result = await conn.call_tool("tool", {"a": 1}, retryable=True)
+	await conn.close()
+
+	assert transport.connected == 2
+	assert transport.closed == 2
+	assert tools[0].name == "tool"
+	assert result == "ok"
+	assert transport.requests[0][0] == "initialize"
+
+
+async def test_mcp_connection_application_error_and_non_retryable_transport_error(monkeypatch):
+	class AppTransport:
+		async def connect(self):
+			pass
+		async def request(self, method, params=None):
+			if method == "initialize":
+				return {}
+			raise MCPApplicationError({"message": "bad"})
+		async def close(self):
+			pass
+
+	class BrokenTransport:
+		async def connect(self):
+			pass
+		async def request(self, method, params=None):
+			if method == "initialize":
+				return {}
+			raise MCPTransportError("broken")
+		async def close(self):
+			self.closed = True
+
+	monkeypatch.setattr("axc_agent_engine.plugins.builtin.mcp.support.connection.build_transport", lambda config: AppTransport())
+	app = MCPConnection({"name": "app", "timeout": 1})
+	with pytest.raises(MCPApplicationError):
+		await app.list_tools()
+
+	broken_transport = BrokenTransport()
+	monkeypatch.setattr("axc_agent_engine.plugins.builtin.mcp.support.connection.build_transport", lambda config: broken_transport)
+	broken = MCPConnection({"name": "broken", "timeout": 1})
+	with pytest.raises(MCPTransportError):
+		await broken.call_tool("tool", {}, retryable=False)

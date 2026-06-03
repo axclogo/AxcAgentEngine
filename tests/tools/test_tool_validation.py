@@ -195,7 +195,7 @@ class TestExecuteToolValidation:
 		)
 		result = await execute_tool(tool, {"msg": "hello"}, "call-2")
 		assert result.success
-		assert "hello" in result.compact_view()
+		assert "hello" in result.context_view()
 
 	@pytest.mark.asyncio
 	async def test_no_execute_function(self):

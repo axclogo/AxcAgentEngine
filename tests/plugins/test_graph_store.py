@@ -5,7 +5,9 @@ from axc_agent_engine.core.context import ExecutionContext, ExecutionServices
 from axc_agent_engine.plugins.builtin.graph.audit import GraphAuditRecorder
 from axc_agent_engine.plugins.builtin.graph.config import GraphConfig
 from axc_agent_engine.plugins.builtin.graph.presenter import GraphPresenter
+from axc_agent_engine.plugins.builtin.graph.policy import GraphPolicy
 from axc_agent_engine.plugins.builtin.graph.service import GraphService
+from axc_agent_engine.plugins.builtin.graph.source_loader import GraphSourceLoader
 from axc_agent_engine.plugins.builtin.graph.support import InMemoryGraphStore
 from axc_agent_engine.plugins.builtin.graph.tool_handlers import GraphToolHandlers
 from axc_agent_engine.plugins import PluginContext
@@ -203,6 +205,89 @@ def test_graph_service_read_source_and_payload_branches(tmp_path):
 	with pytest.raises(ValueError):
 		service.reload_sources(clear_existing=True)
 	assert service.metadata_payload("x")["last_action"] == "x"
+
+
+def test_graph_source_loader_limits_validation_and_store_errors(tmp_path):
+	source = tmp_path / "graph.jsonl"
+	source.write_text("{}", encoding="utf-8")
+	config = GraphConfig.from_dict({
+		"sources": [str(source)],
+		"max_entities": 1,
+		"max_relations": 1,
+		"allowed_entity_types": ["person"],
+		"allowed_relation_types": ["KNOWS"],
+	})
+	class Store:
+		def __init__(self):
+			self.entities = []
+			self.relations = []
+
+		def upsert_entity(self, name, entity_type, aliases, **metadata):
+			entity = {"name": name}
+			self.entities.append(entity)
+			return entity
+
+		def upsert_relation(self, *args, **kwargs):
+			relation = {"id": kwargs.get("external_id", "")}
+			self.relations.append(relation)
+			return relation
+
+	store = Store()
+	errors = []
+	items = {
+		"entities": [
+			{"id": "bad-type", "name": "Secret", "type": "secret"},
+			{"id": "alice", "name": "Alice", "type": "person", "aliases": [" A ", ""], "description": "d"},
+			{"id": "overflow", "name": "Overflow", "type": "person"},
+		],
+		"relations": [
+			{"id": "bad-rel", "source": "Alice", "target": "Bob", "relation_type": "BLOCKED"},
+			{"id": "missing", "relation_type": "KNOWS"},
+			{"id": "r1", "source_id": "alice", "target": "Bob", "relation_type": "KNOWS"},
+			{"id": "r2", "source": "Alice", "target": "Carol", "relation_type": "KNOWS"},
+		],
+	}
+	loader = GraphSourceLoader(
+		config,
+		store,
+		GraphPolicy({"person"}, set(), {"KNOWS"}, set()),
+		errors,
+		lambda path: (items["entities"], items["relations"]),
+		lambda: len(store.entities),
+		lambda: len(store.relations),
+	)
+	stats = loader.load()
+	assert stats == {"entities": 1, "relations": 1, "sources": 1}
+	assert any("not allowed" in item["error"] for item in errors)
+	assert any(item["error"] == "entity limit reached" for item in errors)
+	assert any(item["error"] == "source/target missing" for item in errors)
+	assert any(item["error"] == "relation limit reached" for item in errors)
+
+
+def test_graph_source_loader_records_store_exceptions(tmp_path):
+	source = tmp_path / "graph.jsonl"
+	source.write_text("{}", encoding="utf-8")
+	config = GraphConfig.from_dict({"sources": [str(source)]})
+	errors = []
+
+	class Store:
+		def upsert_entity(self, *args, **kwargs):
+			raise RuntimeError("entity boom")
+
+		def upsert_relation(self, *args, **kwargs):
+			raise RuntimeError("relation boom")
+
+	loader = GraphSourceLoader(
+		config,
+		Store(),
+		GraphPolicy(set(), set(), set(), set()),
+		errors,
+		lambda path: ([{"id": "e", "name": "E"}], [{"id": "r", "source": "A", "target": "B"}]),
+		lambda: 0,
+		lambda: 0,
+	)
+	assert loader.load()["entities"] == 0
+	assert [item["error"] for item in errors] == ["entity boom", "relation boom"]
 
 
 @pytest.mark.asyncio

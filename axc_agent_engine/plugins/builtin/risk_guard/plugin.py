@@ -32,6 +32,8 @@ class RiskGuardPlugin(BasePlugin):
 		risk = classify_risk(tool_name, arguments, custom_rules=self._custom_rules)
 		if risk == RiskLevel.BLOCKED:
 			logger.warning(f"[risk_guard] Blocked tool: {tool_name}")
+			self._last_rejection_reason = f"工具 {tool_name} 命中 blocked 风险规则，参数不允许执行"
+			self._last_rejection_code = "tool.rejected_by_risk_guard"
 			return False, arguments
 		if risk != RiskLevel.SAFE and exec_ctx:
 			exec_ctx.runtime.risk_level = risk.value

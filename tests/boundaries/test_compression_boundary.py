@@ -3,7 +3,11 @@ import pytest
 from axc_agent_engine.core.context import ExecutionConfig, ExecutionContext
 from axc_agent_engine.plugins import PluginContext
 from axc_agent_engine.plugins.builtin.compress.plugin import CompressPlugin
-from axc_agent_engine.plugins.builtin.compress.context.boundary import InMemoryCompressionBoundaryStore
+from axc_agent_engine.plugins.builtin.compress.context.boundary import (
+	CompressionBoundary,
+	InMemoryCompressionBoundaryStore,
+	KVCompressionBoundaryStore,
+)
 from axc_agent_engine.tools.tool_output import ToolOutput
 
 
@@ -104,3 +108,59 @@ async def test_compress_plugin_generates_and_persists_tool_summary():
 	await restored.on_execution_start(exec_ctx)
 	messages = restored.transform_messages([{"role": "user", "content": "continue"}], exec_ctx)
 	assert any("[工具摘要]" in m.get("content", "") for m in messages)
+
+
+@pytest.mark.asyncio
+async def test_boundary_roundtrip_filters_invalid_values_and_store_clones():
+	boundary = CompressionBoundary.from_dict({
+		"agent_name": "a",
+		"session_id": "s",
+		"summary": None,
+		"round_count": "2",
+		"compressed_rounds": "1",
+		"last_message_index": "9",
+		"buffer": ["x", ""],
+		"file_cache": [{"path": "p"}, "bad"],
+		"tool_summaries": ["t", ""],
+		"durable_results": ["d", ""],
+		"updated_at": "3.5",
+	})
+	assert boundary.round_count == 2
+	assert boundary.file_cache == [{"path": "p"}]
+	assert boundary.tool_summaries == ["t"]
+
+	store = InMemoryCompressionBoundaryStore()
+	await store.save(boundary)
+	loaded = await store.load("a", "s")
+	loaded.buffer.append("mutated")
+	assert (await store.load("a", "s")).buffer == ["x"]
+	await store.delete("a", "s")
+	assert await store.load("a", "s") is None
+
+
+@pytest.mark.asyncio
+async def test_kv_boundary_store_noops_and_keyed_roundtrip():
+	class KV:
+		def __init__(self):
+			self.data = {}
+			self.deleted = []
+
+		async def get(self, key):
+			return self.data.get(key)
+
+		async def set(self, key, value):
+			self.data[key] = value
+
+		async def delete(self, key):
+			self.deleted.append(key)
+			self.data.pop(key, None)
+
+	assert await KVCompressionBoundaryStore(None).load("a", "s") is None
+	store = KVCompressionBoundaryStore(KV(), prefix="p:")
+	assert await store.load("a", "") is None
+	await store.save(CompressionBoundary(agent_name="a", session_id=""))
+	assert store.kv_store.data == {}
+	await store.save(CompressionBoundary(agent_name="a", session_id="s", summary="sum"))
+	assert await store.load("a", "s")
+	await store.delete("a", "s")
+	assert store.kv_store.deleted == ["p:a:s"]

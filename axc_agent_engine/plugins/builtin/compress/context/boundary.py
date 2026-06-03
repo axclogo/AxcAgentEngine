@@ -21,6 +21,7 @@ class CompressionBoundary:
 	buffer: list[str] = field(default_factory=list)
 	file_cache: list[dict[str, Any]] = field(default_factory=list)
 	tool_summaries: list[str] = field(default_factory=list)
+	durable_results: list[str] = field(default_factory=list)
 	updated_at: float = field(default_factory=time.time)
 
 	def to_dict(self) -> dict[str, Any]:
@@ -34,6 +35,7 @@ class CompressionBoundary:
 			"buffer": list(self.buffer),
 			"file_cache": list(self.file_cache),
 			"tool_summaries": list(self.tool_summaries),
+			"durable_results": list(self.durable_results),
 			"updated_at": self.updated_at,
 		}
 
@@ -49,6 +51,7 @@ class CompressionBoundary:
 			buffer=[str(item) for item in data.get("buffer", []) if str(item)],
 			file_cache=[dict(item) for item in data.get("file_cache", []) if isinstance(item, dict)],
 			tool_summaries=[str(item) for item in data.get("tool_summaries", []) if str(item)],
+			durable_results=[str(item) for item in data.get("durable_results", []) if str(item)],
 			updated_at=float(data.get("updated_at", time.time())),
 		)
 

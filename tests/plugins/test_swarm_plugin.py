@@ -1,13 +1,21 @@
 """Tests for swarm plugin fan-out governance."""
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
 
 from axc_agent_engine.observability.audit import InMemoryAuditSink
 from axc_agent_engine.core.context import ExecutionContext, ExecutionServices
 from axc_agent_engine.core.dispatcher import AgentEnvelope
 from axc_agent_engine.plugins import PluginContext
-from axc_agent_engine.plugins.builtin.swarm.plugin import SwarmPlugin
+from axc_agent_engine.plugins.builtin.swarm.plugin import (
+	SwarmPlugin,
+	_bounded_timeout,
+	_caller_name,
+	_gather_swarm,
+	_swarm_metadata,
+	_task_result,
+)
 from axc_agent_engine.storage.result_store import InMemoryResultStore
 
 
@@ -170,6 +178,75 @@ def test_swarm_tool_has_capability_and_risk():
 	assert tool.timeout == 0
 	assert tool.capability == "agent_call"
 	assert tool.risk_level == "moderate"
+
+
+def test_swarm_disabled_exposes_no_tools_and_validates_task_edges():
+	plugin = _plugin([SimpleNamespace(name="worker", description="")], RecordingDispatcher(), {"enabled": False})
+	assert plugin.get_tools() == []
+	plugin = _plugin([SimpleNamespace(name="worker", description="")], RecordingDispatcher())
+	normalized, error = plugin._normalize_tasks(["bad"], {"worker": object()}, "caller")
+	assert normalized == []
+	assert error == "task must be object"
+	normalized, error = plugin._normalize_tasks([{"agent_name": "", "description": "d"}], {"worker": object()}, "caller")
+	assert normalized == []
+	assert "不能为空" in error
+	normalized, error = plugin._normalize_tasks([{"agent_name": "missing", "description": "d"}], {"worker": object()}, "caller")
+	assert normalized == []
+	assert "不存在" in error
+
+
+def test_swarm_helpers_cover_metadata_caller_artifact_and_bounds():
+	ctx = ExecutionContext()
+	ctx.state.metadata.update({"agent_name": "state_agent", "session_id": "s1", "run_id": "r1"})
+	assert _caller_name({}, ctx) == "state_agent"
+	assert _caller_name({"agent_name": "ctx_agent"}, ctx) == "ctx_agent"
+	ctx.runtime.agent_info = SimpleNamespace(name="runtime_agent")
+	assert _caller_name({}, ctx) == "runtime_agent"
+	metadata = _swarm_metadata({"tool_call_id": "tc"}, ctx, 2, "sw1", "goal")
+	assert metadata["trace_id"] == "r1"
+	assert metadata["parent_tool_call_id"] == "tc"
+	payload = _task_result({"task_id": "t", "index": 0, "agent_name": "a"}, "success", artifact=SimpleNamespace(
+		id="art", to_dict=lambda: {"id": "art"},
+	))
+	assert payload["artifact_id"] == "art"
+	assert _bounded_timeout("bad", 9) == 9
+	assert _bounded_timeout(0, 9) == 1.0
+	assert _bounded_timeout(99999, 9) == 3600.0
+
+
+async def test_swarm_dispatch_errors_and_total_timeout(monkeypatch):
+	plugin = _plugin([SimpleNamespace(name="worker", description="")], RecordingDispatcher())
+	assert (await plugin._tool_swarm_dispatch({"goal": "g", "tasks": []}, {"agent_name": "caller"})).is_error
+	plugin = _plugin([SimpleNamespace(name="worker", description="")], RecordingDispatcher(), {"timeout": 1})
+	result = await plugin._tool_swarm_dispatch(
+		{"goal": "g", "failure_policy": "bad", "tasks": [{"agent_name": "worker", "description": "d"}]},
+		{"agent_name": "caller"},
+	)
+	assert result.is_error
+
+	async def slow_gather(tasks, runner, failure_policy):
+		await asyncio.sleep(1)
+		return []
+
+	import axc_agent_engine.plugins.builtin.swarm.plugin as swarm_module
+	monkeypatch.setattr(swarm_module, "_gather_swarm", slow_gather)
+	result = await plugin._tool_swarm_dispatch(
+		{"goal": "g", "timeout": 0.01, "tasks": [{"agent_name": "worker", "description": "d"}]},
+		{"agent_name": "caller"},
+	)
+	assert result.content["cancelled"] == 1
+
+
+async def test_gather_swarm_best_effort_and_fail_fast_all_success():
+	async def runner(task):
+		return _task_result(task, "success", result=task["task_id"])
+
+	tasks = [
+		{"task_id": "a", "index": 0, "agent_name": "a"},
+		{"task_id": "b", "index": 1, "agent_name": "b"},
+	]
+	assert [item["result"] for item in await _gather_swarm(tasks, runner, "best_effort")] == ["a", "b"]
+	assert [item["status"] for item in await _gather_swarm(tasks, runner, "fail_fast")] == ["success", "success"]
 
 
 async def test_swarm_dispatch_uses_task_timeout_without_outer_conflict():

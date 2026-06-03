@@ -201,3 +201,139 @@ def test_duplicate_skill_policy_error_reports_conflict(tmp_path):
 
 	assert "demo" in plugin._skills
 	assert any(error.get("error") == "duplicate skill" for error in plugin._load_errors)
+
+
+def test_skill_catalog_accepts_object_tuple_provider_and_filters_invalid_items():
+	from axc_agent_engine.plugins import PluginContext
+	from axc_agent_engine.plugins.builtin.skill.plugin import SkillPlugin
+
+	class Catalog:
+		def list_skills(self):
+			return (
+				{"name": "allowed", "description": "A", "content": "body", "trigger_keywords": "one"},
+				{"name": "", "content": "empty"},
+				"bad",
+				{"name": "denied", "content": "no"},
+			)
+
+	plugin = SkillPlugin()
+	plugin.initialize(
+		{"allowed_skills": ["allowed", "denied"], "denied_skills": ["denied"]},
+		PluginContext(resources={"skill.catalog": Catalog()}),
+	)
+
+	assert sorted(plugin._skills) == ["allowed"]
+	assert plugin._skills["allowed"]["trigger_keywords"] == ["one"]
+	assert any(error["error"] == "empty skill name" for error in plugin._load_errors)
+	assert any(error["error"] == "skill item is not an object" for error in plugin._load_errors)
+
+
+def test_skill_catalog_duplicate_policy_replace_and_skip():
+	from axc_agent_engine.plugins import PluginContext
+	from axc_agent_engine.plugins.builtin.skill.plugin import SkillPlugin
+
+	catalog = {"skills": {
+		"first": {"name": "demo", "description": "old", "content": "old"},
+		"second": {"name": "demo", "description": "new", "content": "new"},
+	}}
+	replace = SkillPlugin()
+	replace.initialize({"duplicate_policy": "replace"}, PluginContext(resources={"skill.catalog": catalog}))
+	skip = SkillPlugin()
+	skip.initialize({"duplicate_policy": "skip"}, PluginContext(resources={"skill.catalog": catalog}))
+
+	assert replace._skills["demo"]["description"] == "new"
+	assert skip._skills["demo"]["description"] == "old"
+	assert any(error["error"] == "duplicate skill skipped" for error in skip._load_errors)
+
+
+def test_skill_frontmatter_parse_and_extension_normalization(tmp_path):
+	from axc_agent_engine.plugins.builtin.skill.plugin import SkillPlugin, _normalize_extensions, _parse_frontmatter
+
+	meta, body = _parse_frontmatter("---\n: bad yaml\n---\nbody")
+	assert meta == {}
+	assert body == "body"
+	assert _parse_frontmatter("plain body") == ({}, "plain body")
+	assert _normalize_extensions(["py", ".sh", "exe", ""]) == {".py", ".sh"}
+	assert _normalize_extensions("bad") == {".py", ".sh"}
+
+	(skill_dir := tmp_path / "plain").mkdir()
+	(skill_dir / "skill.md").write_text("plain body", encoding="utf-8")
+	plugin = SkillPlugin()
+	plugin.initialize({"paths": [str(tmp_path)], "allowed_extensions": ["py"]}, None)
+
+	assert plugin._skills["plain"]["name"] == "plain"
+	assert plugin._skills["plain"]["content"] == "plain body"
+
+
+@pytest.mark.asyncio
+async def test_list_load_skill_filter_not_found_and_metadata(tmp_path):
+	from axc_agent_engine.plugins.builtin.skill.plugin import SkillPlugin
+
+	_create_skill(tmp_path, "demo")
+	plugin = SkillPlugin()
+	plugin.initialize({"paths": [str(tmp_path)]}, None)
+	ctx = ExecutionContext()
+
+	listed = await plugin._tool_list_skills({"query": "docs"}, {"exec_ctx": ctx})
+	filtered = await plugin._tool_list_skills({"query": "missing"}, {"exec_ctx": ctx})
+	missing = await plugin._tool_load_skill({"skill_name": "missing"}, {"exec_ctx": ctx})
+
+	assert listed.content["total"] == 1
+	assert filtered.content["total"] == 0
+	assert missing.is_error
+	assert ctx.state.metadata["skill"]["last_action"] == "list"
+
+
+@pytest.mark.asyncio
+async def test_run_skill_script_rejects_missing_no_scripts_extension_and_path_escape(tmp_path):
+	from axc_agent_engine.plugins.builtin.skill.plugin import SkillPlugin
+
+	_create_skill(tmp_path, "demo")
+	(tmp_path / "demo" / "scripts" / "note.txt").write_text("x", encoding="utf-8")
+	plugin = SkillPlugin()
+	plugin.initialize({"paths": [str(tmp_path)]}, None)
+	plugin._skills["noscripts"] = {**plugin._skills["demo"], "name": "noscripts", "scripts_path": None}
+
+	assert (await plugin._tool_run_script({"skill_name": "missing", "script_name": "run.py"}, {})).is_error
+	assert (await plugin._tool_run_script({"skill_name": "noscripts", "script_name": "run.py"}, {})).is_error
+	assert (await plugin._tool_run_script({"skill_name": "demo", "script_name": "note.txt"}, {})).is_error
+	assert (await plugin._tool_run_script({"skill_name": "demo", "script_name": "../SKILL.md"}, {})).is_error
+
+
+@pytest.mark.asyncio
+async def test_run_skill_script_bad_args_execution_error_and_failed_exit(tmp_path):
+	from axc_agent_engine.plugins.builtin.skill.plugin import SkillPlugin
+
+	class BadArgsExecutor:
+		async def run(self, spec):
+			raise ValueError("bad quote")
+
+	class FailingExecutor:
+		async def run(self, spec):
+			return CommandResult(exit_code=2, stdout="", stderr="boom", timed_out=True)
+
+	class CrashingExecutor:
+		async def run(self, spec):
+			raise RuntimeError("crashed")
+
+	_create_skill(tmp_path, "demo")
+	plugin = SkillPlugin()
+	plugin.initialize({"paths": [str(tmp_path)]}, None)
+
+	bad_args = await plugin._tool_run_script(
+		{"skill_name": "demo", "script_name": "run.py", "args": "'unterminated"},
+		{"command_executor": BadArgsExecutor()},
+	)
+	failed = await plugin._tool_run_script(
+		{"skill_name": "demo", "script_name": "run.py"},
+		{"command_executor": FailingExecutor()},
+	)
+	crashed = await plugin._tool_run_script(
+		{"skill_name": "demo", "script_name": "run.py"},
+		{"command_executor": CrashingExecutor()},
+	)
+
+	assert bad_args.is_error
+	assert failed.content["returncode"] == 2
+	assert failed.content["timed_out"] is True
+	assert crashed.is_error

@@ -138,6 +138,25 @@ class TestLLMCallerRetry:
 		assert primary.chat.called
 
 	@pytest.mark.asyncio
+	async def test_provider_messages_strip_engine_internal_fields(self):
+		primary = MagicMock()
+		primary.chat = AsyncMock(return_value=_make_response("ok"))
+		pm = PluginManager([])
+		caller = LLMCaller(primary=primary, fallback=None, plugin_manager=pm)
+		ctx = _make_ctx(stream=False)
+		await caller.call(ctx, [{
+			"role": "tool",
+			"tool_call_id": "tc-1",
+			"name": "agent_call",
+			"content": "result",
+			"metadata": {"durable": True},
+			"round": 1,
+			"token_estimate": 1,
+		}], None)
+		sent = primary.chat.call_args.args[0][0]
+		assert sent == {"role": "tool", "tool_call_id": "tc-1", "name": "agent_call", "content": "result"}
+
+	@pytest.mark.asyncio
 	async def test_post_llm_call_receives_delta_and_total_usage(self):
 		class UsagePlugin:
 			name = "usage"

@@ -10,10 +10,16 @@ from axc_agent_engine.core.errors import ErrorEnvelope
 from axc_agent_engine.plugins import AgentInfo, ModelInfo, PluginContext
 from axc_agent_engine.core.schema import ToolDefinition
 from axc_agent_engine.plugins.builtin.tracing.plugin import (
+	RedactionService,
 	TraceSampler,
+	_bounded_float,
+	_bounded_int,
+	_current_tool_runtime,
 	_error_payload,
 	_log_span,
+	_resource_name,
 	_sampled,
+	_span_metadata,
 	_trace_summary,
 	_truncate,
 )
@@ -410,6 +416,155 @@ def test_tracing_helpers_and_logging(caplog):
 			{"type": "llm_call", "duration_ms": 2, "round": 1, "trace_id": "tr"},
 			{"type": "execution", "success": False, "duration_ms": 4, "input_tokens": 1, "output_tokens": 1, "trace_id": "tr"},
 			{"type": "error", "name": "RuntimeError", "trace_id": "tr"},
-		]:
-			_log_span(span)
+			]:
+				_log_span(span)
 	assert "[trace]" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_tracing_disabled_plugin_is_noop():
+	p = _plugin({"enabled": False})
+	ctx = ExecutionContext()
+
+	assert p.get_tools() == []
+	await p.on_execution_start(ctx)
+	await p.on_execution_end(ctx, "done", "err")
+	assert p.pre_llm_call(ctx, [{"role": "user", "content": "x"}], None) == ([{"role": "user", "content": "x"}], None)
+	await p.post_llm_call(ctx, [], {}, 1)
+	await p.on_error(ctx, RuntimeError("ignored"))
+	assert await p.pre_tool_call(ctx, "tool", {"x": 1}) == (True, {"x": 1})
+	result = ToolOutput.text("ok")
+	assert await p.post_tool_call(ctx, "tool", {}, result, 1) is result
+	await p.on_tool_call_failed(ctx, "tool", {}, {}, 1)
+	await p.on_round_end(ctx, "u", "a", [])
+	assert "tracing" not in ctx.state.metadata
+
+
+@pytest.mark.asyncio
+async def test_tracing_llm_round_and_execution_error_spans():
+	spans = []
+	p = _plugin({"enabled": True, "output": "callback"})
+	p.set_callback(spans.append)
+	ctx = ExecutionContext()
+	ctx.state.current_round = 3
+	ctx.state.total_input_tokens = 11
+	ctx.state.total_output_tokens = 7
+
+	await p.on_execution_start(ctx)
+	messages, tools = p.pre_llm_call(ctx, [{"role": "user", "content": "x"}], [{"type": "function"}])
+	await p.post_llm_call(
+		ctx,
+		messages,
+		{"usage": {"input_tokens": 2, "output_tokens": 4}, "total_usage": {"input_tokens": 9, "output_tokens": 10}},
+		12,
+	)
+	await p.on_round_end(ctx, "u", "a", [{"name": "tool"}])
+	await p.on_execution_end(ctx, "result", "fatal")
+
+	llm = next(span for span in spans if span["type"] == "llm_call")
+	round_end = next(span for span in spans if span["type"] == "round_end")
+	root = next(span for span in spans if span["type"] == "execution")
+	assert tools == [{"type": "function"}]
+	assert llm["message_count"] == 1
+	assert llm["tool_schema_count"] == 1
+	assert llm["input_tokens"] == 2
+	assert llm["total_output_tokens"] == 10
+	assert round_end["tool_count"] == 1
+	assert root["success"] is False
+	assert root["error"]["message"] == "fatal"
+
+
+@pytest.mark.asyncio
+async def test_tracing_post_llm_without_span_and_execution_end_without_root_are_noops():
+	p = _plugin({"enabled": True, "output": "callback"})
+	ctx = ExecutionContext()
+
+	await p.post_llm_call(ctx, [], "not-dict", 1)
+	await p.on_execution_end(ctx, "done", "")
+
+	assert p._stats["emitted"] == 0
+
+
+@pytest.mark.asyncio
+async def test_tracing_manual_tool_hooks_cover_generated_id_missing_runtime_and_failure_default_error():
+	spans = []
+	p = _plugin({"enabled": True, "output": "callback", "include_arguments": True, "include_result": True})
+	p.set_callback(spans.append)
+	ctx = ExecutionContext()
+	await p.on_execution_start(ctx)
+
+	await p.pre_tool_call(ctx, "manual", {"long": "abcdef", "items": list(range(105))})
+	state = ctx.runtime.plugin_states["tracing"]
+	tool_call_id = next(key for key in state["active_spans"])
+	await p.post_tool_call(ctx, "manual", {}, ToolOutput.text("ok"), 5)
+	state["active_spans"].pop(tool_call_id)
+	ctx.runtime.plugin_states["_tool_runtime_contexts"] = {
+		id(asyncio.current_task()): {"tool_call_id": "failed-id"}
+	}
+	await p.pre_tool_call(ctx, "failed", {})
+	await p.on_tool_call_failed(ctx, "failed", {}, {}, 9)
+
+	failed = next(span for span in spans if span["name"] == "failed")
+	assert len(tool_call_id) == 12
+	assert not any(span["name"] == "manual" for span in spans)
+	assert failed["tool_call_id"] == "failed-id"
+	assert failed["error"]["code"] == "tool.execution_failed"
+
+
+@pytest.mark.asyncio
+async def test_tracing_save_span_failure_exporter_sync_failure_and_background_failure():
+	class FailingSpanStore:
+		async def save_span(self, span):
+			raise RuntimeError("store down")
+
+	def bad_exporter(span):
+		raise RuntimeError("export down")
+
+	async def bad_task():
+		raise RuntimeError("task down")
+
+	from axc_agent_engine.plugins.builtin.tracing.plugin import TracingPlugin
+	p = TracingPlugin()
+	p.initialize({"enabled": True, "output": "callback"}, PluginContext(
+		span_store=FailingSpanStore(),
+		resources={"tracing.exporter": bad_exporter},
+	))
+	ctx = ExecutionContext()
+
+	await p.on_execution_start(ctx)
+	await p.on_execution_end(ctx, "done", "")
+	p._schedule(bad_task())
+	await p.close()
+
+	assert p._stats["failed"] >= 2
+
+
+def test_tracing_schedule_without_running_loop_closes_coroutine_and_counts_drop():
+	async def never():
+		return None
+
+	p = _plugin({"enabled": True, "output": "callback"})
+	p._schedule(never())
+	assert p._stats["dropped"] == 1
+
+
+@pytest.mark.asyncio
+async def test_tracing_redaction_metadata_bounds_and_resource_helpers():
+	stats = {"redacted": 0}
+	redaction = RedactionService({"secret"}, 3, stats)
+	value = redaction.redact({"secret": "x", "nested": [{"text": "abcdef"}], "plain": object()})
+
+	assert value["secret"] == "[REDACTED]"
+	assert value["nested"][0]["text"] == "abc...[省略 3 个字符]"
+	assert stats["redacted"] == 1
+	assert isinstance(value["plain"], object)
+	assert _span_metadata({"a": object(), "b": (1, {"x": object()})})["b"][1]["x"].startswith("<object")
+	assert _bounded_int("bad", 2, 5) == 2
+	assert _bounded_int(99, 2, 5) == 5
+	assert _bounded_float("bad", 0.0, 1.0) == 1.0
+	assert _bounded_float(-1, 0.0, 1.0) == 0.0
+	assert _resource_name(None, "default") == "default"
+	assert _resource_name(True, "default") == "default"
+	assert _resource_name(False, "default") == ""
+	assert _resource_name(123, "default") == "123"
+	assert _current_tool_runtime(ExecutionContext()) == {}

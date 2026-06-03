@@ -9,8 +9,15 @@ from axc_agent_engine.sidecar.simulation import (
 	AgentAction,
 	AgentProfile,
 	Scenario,
+	SimulationReport,
 	WorldState,
 	get_simulation_mode_adapter,
+)
+from axc_agent_engine.sidecar.simulation.report import (
+	GeneratedSimulationReport,
+	LLMSimulationReportGenerator,
+	_parse_generated_report,
+	apply_generated_report,
 )
 
 
@@ -52,6 +59,33 @@ def test_action_parser_rejects_missing_json():
 		assert "No JSON object" in str(exc)
 	else:
 		raise AssertionError("expected ActionParseError")
+
+
+def test_action_parser_rejects_missing_actor_type_and_bad_parameters():
+	parser = ActionParser()
+	for text, error in [
+		('{"type":"wait"}', "actor"),
+		('{"actor":"red"}', "type"),
+		('{"actor":"red","type":"wait","parameters":["bad"]}', "parameters"),
+	]:
+		try:
+			parser.parse(text)
+		except ActionParseError as exc:
+			assert error in str(exc)
+		else:
+			raise AssertionError(f"expected ActionParseError for {text}")
+
+
+def test_action_parser_defaults_unknown_type_and_clamps_confidence():
+	action = ActionParser().parse(
+		'{"type":"invented","intent":"x","parameters":null,"confidence":"bad","metadata":[]}',
+		default_actor="blue",
+	)
+	assert action.actor == "blue"
+	assert action.type == ActionType.CUSTOM
+	assert action.parameters == {}
+	assert action.confidence == 0.0
+	assert action.metadata == {}
 
 
 async def test_simulation_session_uses_agent_chat_policy():
@@ -111,3 +145,38 @@ def test_simulation_mode_adapter_supports_interview():
 	scenario = adapter.build_scenario("Discovery interview")
 	assert [agent.name for agent in scenario.agents] == ["interviewer", "candidate"]
 	assert "一问一答推进访谈" in scenario.rules
+
+
+def test_generated_report_parser_handles_empty_invalid_and_fences():
+	assert _parse_generated_report("", fallback="base").summary == "base"
+	assert _parse_generated_report("not json", fallback="base").summary == "base"
+	assert _parse_generated_report("[1, 2]", fallback="base").summary == "base"
+	report = _parse_generated_report(
+		'```json\n{"summary":"s","key_findings":[" a ",""],"risks":"bad","recommendations":[3]}\n```',
+		fallback="base",
+	)
+	assert report.summary == "s"
+	assert report.key_findings == ["a"]
+	assert report.risks == []
+	assert report.recommendations == ["3"]
+
+
+async def test_llm_report_generator_no_model_and_failure_paths():
+	report = SimulationReport(scenario_id="r", title="Report", final_state=WorldState(), timeline=[], summary="base")
+	assert (await LLMSimulationReportGenerator(None).generate(report)).summary == report.summary
+
+	class BrokenModel:
+		async def ask(self, prompt):
+			raise RuntimeError("down")
+
+	assert (await LLMSimulationReportGenerator(BrokenModel()).generate(report)).summary == report.summary
+
+
+def test_apply_generated_report_overwrites_summary_and_metrics():
+	report = SimulationReport(scenario_id="r", title="Report", final_state=WorldState(), timeline=[], summary="base")
+	result = apply_generated_report(
+		report,
+		GeneratedSimulationReport(summary="new", key_findings=["k"], risks=["r"], recommendations=["do"]),
+	)
+	assert result.summary == "new"
+	assert result.metrics["key_findings"] == ["k"]

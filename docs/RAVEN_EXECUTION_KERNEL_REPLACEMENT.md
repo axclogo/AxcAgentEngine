@@ -388,7 +388,7 @@ ToolCallResult.duration_ms
   -> ToolOutput.metadata["duration_ms"]
 
 ToolCallResult.result 大于 2000 字符
-  -> summary 用旧 _compress_result 或 AxcAgentEngine ToolOutput.compact_view
+  -> summary 用旧 _compress_result 或 AxcAgentEngine ToolOutput.context_view
 ```
 
 验收：
@@ -544,7 +544,7 @@ engine_artifacts:
   created_at
 ```
 
-不要把大工具结果写入 conversation message content。conversation message 只写 compact view。
+不要把大工具结果写入 conversation message content。conversation message 只写 context view。
 
 ### 8. 实现 RavenEventBridge
 

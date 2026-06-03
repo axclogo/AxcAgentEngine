@@ -94,3 +94,43 @@ async def test_hitl_queue_approval_response():
 	allowed, _ = await plugin.pre_tool_call(ctx, "shell_command", {"command": "rm file"})
 	await task
 	assert allowed is True
+
+
+async def test_hitl_queue_rejection_timeout_listener_and_resolve_paths():
+	plugin = HumanInTheLoopPlugin()
+	plugin.initialize({"timeout": 0.01}, None)
+	ctx = ExecutionContext()
+	ctx.runtime.approval_queue = asyncio.Queue()
+
+	allowed, _ = await plugin.pre_tool_call(ctx, "shell_command", {"command": "rm -rf /"})
+	assert allowed is False
+	assert plugin._last_rejection_code == "tool.rejected_by_human_in_the_loop"
+
+	plugin.initialize({"timeout": 1}, None)
+	ctx.runtime.approval_queue = asyncio.Queue()
+
+	async def reject():
+		req = await ctx.runtime.approval_queue.get()
+		await ctx.runtime.approval_queue.put({"type": "response", "request_id": req["request_id"], "approved": False, "reason": "no"})
+
+	task = asyncio.create_task(reject())
+	allowed, _ = await plugin.pre_tool_call(ctx, "shell_command", {"command": "rm file"})
+	await task
+	assert allowed is False
+	assert plugin._last_rejection_reason == "no"
+
+	future = asyncio.get_running_loop().create_future()
+	plugin._pending_approvals["manual"] = future
+	plugin.resolve_approval("manual", True)
+	assert future.result()["approved"] is True
+	plugin.resolve_approval("missing", True)
+
+
+async def test_hitl_ask_human_timeout():
+	plugin = HumanInTheLoopPlugin()
+	plugin.initialize({"timeout": 0.01}, None)
+	request_q = asyncio.Queue()
+	response_q = asyncio.Queue()
+	result = await plugin._ask_human({"question": "Continue?"}, {"request_queue": request_q, "response_queue": response_q})
+	assert result.is_error
+	assert (await request_q.get())["question"] == "Continue?"

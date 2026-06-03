@@ -34,8 +34,8 @@ AxcAgentEngine adds **POR (Plan-Observe-Replan)** on top of ReAct: the agent pro
 ```bash
 pip install axc-agent-engine
 
-# Pin the current 2.0 release
-pip install axc-agent-engine==2.0
+# Pin the current 2.3 release
+pip install axc-agent-engine==2.3.0
 
 # Optional extras
 pip install "axc-agent-engine[api]"
@@ -82,7 +82,8 @@ async for event in agent.stream("Build a REST API for user management"):
 - **Tool protocol** - every tool returns `ToolOutput`; read-only runs concurrent, write serial; safe function-name mapping
 - **Durable workflow** - `WorkflowRuntime` + `CheckpointStore` + Agent resume API; Burr is optional via `axc-agent-engine[workflow]`
 - **OpenAI compatible** - provider protocol + OpenAI-compatible HTTP client and API subset
-- **Memory & knowledge** - four-layer memory (KV, dedup, decay, graph hooks) + semantic chunking + vector/BM25 hybrid retrieval
+- **Memory & knowledge** - four-layer memory (KV, dedup, decay, graph hooks) + plugin-owned hybrid retrieval
+- **Runtime binding** - models, mounted resources, request metadata, and YAML overrides stay in separate channels
 - **MCP** - stdio, JSON-RPC HTTP, official SDK transports
 - **Human-in-the-loop** - approval queue and `ask_human` tool
 - **Sidecar suite** - multi-agent, simulation, eval, cost, failure mining, trace distillation
@@ -102,7 +103,7 @@ async for event in agent.stream("Build a REST API for user management"):
 | Tool name mapping | provider-side model-safe mapping |
 | Context compression | built-in `compress` plugin |
 | Memory | four layers + KV persistence + dedup + decay |
-| Knowledge | plugin-owned hybrid retrieval over local sources and mounted resources |
+| Knowledge | plugin-owned retrieval over local sources or mounted indexes/resources |
 | MCP | stdio / JSON-RPC HTTP / official SDK |
 | Human approval | approval queue + `ask_human` |
 | Sidecar | multi-agent / simulation / eval / cost / failure mining / distillation |
@@ -119,7 +120,7 @@ async for event in agent.stream("Build a REST API for user management"):
 | [Plugin development](docs/PLUGIN_DEVELOPMENT.md) | Build your own plugin |
 | [Security model](docs/SECURITY_MODEL.md) | Capabilities, risk, workspace |
 | [Examples](examples/README.md) | 7 end-to-end demos |
-| [Contributing](CONTRIBUTING.md) / [Security](SECURITY.md) / [Changelog](CHANGELOG.md) / [LICENSE](LICENSE) | Apache-2.0 |
+| [Contributing](CONTRIBUTING.md) / [Security](SECURITY.md) / [LICENSE](LICENSE) | Apache-2.0 |
 
 ## Agent YAML
 
@@ -158,7 +159,11 @@ plugins:
 
   compress:
     enabled: true
-    summary_after_rounds: 8
+    summary:
+      after_rounds: 8
+    durable_tools:
+      names: ["agent_call", "knowledge_search"]
+      keep: 12
 
   risk_guard:
     enabled: true
@@ -171,7 +176,7 @@ Notes:
 - Tools with a non-empty capability are denied by default; list them in `runtime.allowed_capabilities`.
 - File and command tools require `runtime.workspace` by default.
 - LLM configuration is provided in code, not in Agent YAML.
-- Official builtin plugins do not configure external endpoints, API keys, or client objects in YAML. External resources are mounted in code.
+- Official builtin plugin YAML is for behavior parameters only. External endpoints, API keys, client objects, indexes, stores, and catalogs are mounted in code.
 
 ## Provider Configuration
 
@@ -208,7 +213,7 @@ Tool-name mapping is the provider's job. Internal tool names are encoded to mode
 
 ## Runtime Binding
 
-Agent YAML describes stable behavior. Per-run objects are bound in code when the template is instantiated:
+Agent YAML describes stable behavior. Runtime objects are bound in code when the template is instantiated:
 
 ```python
 agent = template.instantiate(
@@ -218,9 +223,7 @@ agent = template.instantiate(
         fallback=backup_provider,
     ),
     mounts={
-        "knowledge.embedding": tenant_embedding_provider,
-        "knowledge.vector_store": tenant_kb_vector_store,
-        "knowledge.documents": tenant_document_store,
+        "knowledge.index": tenant_knowledge_index,
         "graph.store": tenant_graph_store,
         "skill.catalog": tenant_skill_catalog,
     },
@@ -239,7 +242,40 @@ agent = template.instantiate(
 - `metadata` attaches instance metadata; request metadata can still override it inside a single chat/stream call.
 - `overrides` patches validated Agent YAML fields before plugins are initialized. It only accepts YAML-serializable values and cannot bind runtime resources.
 
-Official resource slots include `knowledge.embedding`, `knowledge.vector_store`, `knowledge.documents`, `knowledge.index`, `knowledge.reranker`, `graph.store`, `skill.catalog`, and `tracing.exporter`. Do not set these through `overrides`; bind them with `mounts`.
+Preferred official resource slots are `knowledge.index`, `graph.store`, `skill.catalog`, and `tracing.exporter`. Advanced knowledge slots such as `knowledge.documents`, `knowledge.embedding`, `knowledge.vector_store`, and `knowledge.reranker` are also supported by the current plugin, but they are still runtime mounts, not YAML or `overrides` values.
+
+## Request Metadata and Tracing
+
+Run-level metadata is passed through the public Agent entry points and reaches `ExecutionContext.state.metadata`. The tracing plugin copies this metadata into every span, while keeping top-level `run_id`, `session_id`, `span_id`, and `parent_span_id`.
+
+```python
+async for event in agent.stream_with_messages(
+    messages,
+    session_id="123",
+    llm_options={"temperature": 0.2},
+    run_options={"run_id": "run_abc"},
+    metadata={
+        "exec_log_id": 1001,
+        "conversation_id": 123,
+        "agent_config_id": 9,
+    },
+):
+    ...
+```
+
+Use this for host execution-log correlation. Do not encode execution IDs in prompts, tool arguments, or fake tool messages.
+
+## Durable Tool Results and Sub-Agent Events
+
+The `compress` plugin preserves assistant tool calls and their matching tool results as atomic groups. Durable tool results are also saved into the compression boundary and reinjected after context packing. By default, `agent_call` and `knowledge_search` are durable; business tools can opt in with `compress.durable_tools.names`, `compress.durable_tools.capabilities`, or `ToolOutput.with_metadata({"durable": True, "durable_summary": "..."})`.
+
+`collaboration.agent_call` streams child Agent activity back to the parent run as standard events:
+
+- `sub_agent_start`
+- `sub_agent_step`
+- `sub_agent_complete`
+
+Frontends should render these events directly. They should not parse `agent_call` tool results to invent a child execution timeline.
 
 ## API
 
@@ -304,6 +340,7 @@ Sidecars live under `axc_agent_engine.sidecar` and are invoked explicitly by the
 | `sidecar.cost_optimizer` | Cost estimation and optimization findings |
 
 ```python
+from axc_agent_engine import AgentModels, Engine
 from axc_agent_engine.sidecar import OrchestrationTaskService
 from axc_agent_engine.storage.in_memory import InMemoryMessageBus
 
@@ -333,36 +370,50 @@ task = await service.run_task(
 
 ```mermaid
 flowchart TD
-    A["Application creates Engine"] --> B["Inject providers and services"]
+    A["Application creates Engine"] --> B["Inject shared services and PluginRegistry"]
     B --> C["Engine.load_agent_template(agent.yaml)"]
-    C --> D["AgentTemplate.instantiate(models, mounts)"]
-    D --> E["Build PluginContext"]
-    E --> F["Load enabled plugins"]
-    F --> G["Plugin.initialize()"]
-    G --> H["Plugin.get_tools()"]
-    H --> I["Register ToolDefinition"]
-    I --> J["Create Agent"]
+    C --> D["Validate Agent YAML"]
+    D --> E["AgentTemplate.instantiate(models, mounts, metadata, overrides)"]
+    E --> F["Apply YAML overrides"]
+    F --> G["Merge Engine resources + mounts"]
+    G --> H["Build PluginContext"]
+    H --> I["Load enabled plugins from registry"]
+    I --> J["Plugin.initialize(config, ctx)"]
+    J --> K["Plugin.get_tools()"]
+    K --> L["Register ToolDefinition"]
+    L --> M["Create Agent and dispatcher consumer"]
 ```
 
 ### One agent run
 
 ```mermaid
 flowchart TD
-    A["User message"] --> B["Agent.chat() / Agent.stream()"]
-    B --> C["ExecutionContext"]
-    C --> D["Executor"]
-    D --> E["ExecutionRunLifecycle + checkpoints"]
-    D --> F["ReActKernel"]
-    F --> G["MessageStore"]
-    F --> H["Plugin hooks"]
-    F --> I["LLMCaller"]
-    I --> J["TransactionRouter"]
-    J -->|final answer| K["done event"]
-    J -->|tool calls| L["Tool pipeline"]
-    L --> G
-    J -->|plan or por_first| M["PORRunner"]
-    M --> N["PORGraphRuntime (pydantic_graph)"]
-    N --> K
+    A["Agent.chat / stream / *_with_messages / resume"] --> B["RunRequest.create"]
+    B --> C["Merge run_options.run_id and request metadata"]
+    C --> D["Create ExecutionContext"]
+    D --> E["ExecutionRunLifecycle.on_execution_start"]
+    E --> F["MessageStore initializes system/user/plugin context"]
+    F --> G{"Routing mode"}
+    G -->|react_only or auto ReAct| H["ReActKernel round"]
+    G -->|por_first or POR handoff| I["PORRunner / PORGraphRuntime"]
+    H --> J["Plugin.transform_messages"]
+    J --> K["compress: recent window + durable results + atomic tool groups"]
+    K --> L["LLMCaller"]
+    L --> M["Plugin.pre_llm_call"]
+    M --> N["Strip engine-only message fields"]
+    N --> O["LLM provider chat/stream"]
+    O --> P{"LLM response"}
+    P -->|final answer| Q["on_round_end -> on_execution_complete -> done"]
+    P -->|tool_calls| R["Tool orchestrator"]
+    R --> S["pre_tool_call / execute / post_tool_call"]
+    S --> T["ToolOutput -> MessageStore role=tool"]
+    T --> U["tool_result event"]
+    U --> H
+    S -->|agent_call / swarm| V["Child Agent dispatcher"]
+    V --> W["sub_agent_start / sub_agent_step / sub_agent_complete"]
+    W --> H
+    I --> Q
+    Q --> X["tracing spans saved with metadata and parent_span_id"]
 ```
 
 ## Plugin Development
@@ -452,6 +503,10 @@ CLI logging flags are global and must be placed before the subcommand.
 - **Tool definitions must be `ToolDefinition`.** No dicts.
 - **Business protocols stay out.** Internal APIs, private DBs, company auth belong in private plugins.
 - **LLM config lives in code.** Agent YAML describes runtime limits, capabilities, and plugins.
+- **Fatal errors are not hidden by fallback logic.** Invalid configuration, invalid runtime resources, broken tool contracts, and flow errors must fail clearly.
+- **Official plugins stay lean.** They may strengthen Agent behavior, but they do not own host network clients, business API keys, private services, or deployment-specific protocols.
+- **Runtime resources use mounts.** Do not pass resources through YAML or `overrides`.
+- **Request correlation uses metadata.** Hosts pass execution-log identifiers through `metadata`; tracing spans persist it directly.
 - **The API is a subset.** Request-level `tools`, `tool_choice`, `n > 1` are rejected.
 
 ## Tests

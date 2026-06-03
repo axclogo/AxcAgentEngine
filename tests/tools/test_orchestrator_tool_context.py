@@ -112,7 +112,33 @@ class TestExecuteToolCalls:
 		pm = PluginManager([RejectPlugin()])
 		results = await execute_tool_calls([{"name": "t", "arguments": {}, "id": "x"}], reg, pm.plugins, ctx)
 		assert not results[0].success
-		assert "rejected" in results[0].error.lower()
+		assert "reject" in results[0].error
+		assert "未提供具体原因" in results[0].error
+
+	@pytest.mark.asyncio
+	async def test_plugin_rejection_preserves_reason(self):
+		from axc_agent_engine.plugins.base import BasePlugin
+
+		class RejectPlugin(BasePlugin):
+			name = "reject_guard"
+			async def pre_tool_call(self, exec_ctx, tool_name, arguments):
+				return False, arguments, "job_id 参数缺失，必须先查询岗位发布者 user_id", "tool.rejected_by_test"
+
+		async def noop(args, ctx):
+			return ToolOutput.text("ok")
+
+		reg = ToolRegistry()
+		reg.register(ToolDefinition(name="t", execute=noop,
+			parameters={"type": "object", "properties": {}}))
+		ctx = ExecutionContext()
+		pm = PluginManager([RejectPlugin()])
+
+		results = await execute_tool_calls([{"name": "t", "arguments": {}, "id": "x"}], reg, pm.plugins, ctx)
+
+		assert not results[0].success
+		assert "reject_guard" in results[0].error
+		assert "job_id 参数缺失" in results[0].error
+		assert results[0].error != "Operation rejected by plugin"
 
 	@pytest.mark.asyncio
 	async def test_result_store_accessible_via_context(self):

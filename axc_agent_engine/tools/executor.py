@@ -48,16 +48,11 @@ class ToolResult:
 	success: bool = True
 	duration_ms: int = 0
 
-	def compact_view(self) -> str:
-		"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-返回写入上下文或消息的紧凑字符串表示。
-
-		English: Return the compact string representation stored in context/messages.
-		"""
+	def context_view(self) -> str:
+		"""English: Return the LLM context view. 中文：返回写入 LLM 上下文的视图。"""
 		if self.output is None:
 			return ""
-		return self.output.compact_view()
+		return self.output.context_view()
 
 
 class ToolArgumentValidator:

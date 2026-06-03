@@ -43,14 +43,15 @@ class ToolOutput:
 	metadata: dict[str, Any] = field(default_factory=dict)
 	is_error: bool = False
 
-	def compact_view(self, max_chars: int = 2000) -> str:
-		"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-生成写入 message_store 的紧凑视图，不写入大原文。"""
+	def context_view(self, max_chars: int = 2000) -> str:
+		"""English: LLM context view. 中文：写入 LLM 上下文的紧凑视图。"""
 		if self.is_error:
 			content_str = self._content_as_str()
 			return f"[错误] {content_str[:max_chars]}"
-		if self.summary:
+		durable = self.durable_summary()
+		if durable:
+			view = durable
+		elif self.summary:
 			view = self.summary
 		else:
 			view = self._content_as_str()
@@ -63,6 +64,44 @@ class ToolOutput:
 			refs = ", ".join(f"{a.kind}:{a.id}({a.size}B)" for a in self.artifacts)
 			view += f"\n[附件：{refs}]"
 		return view
+
+	def display_view(self, max_chars: int = 0) -> str:
+		"""English: UI/event display view. 中文：用于事件和 UI 展示的结果视图。"""
+		view = self._content_as_str()
+		if max_chars and max_chars > 0 and len(view) > max_chars:
+			head = view[:int(max_chars * 0.75)]
+			tail = view[-(max_chars - len(head)):]
+			omitted = len(view) - len(head) - len(tail)
+			view = f"{head}\n...[省略 {omitted} 个字符]...\n{tail}"
+		return view
+
+	def durable_summary(self, max_chars: int = 4000) -> str:
+		"""English: Return long-lived tool facts. 中文：返回后续轮次必须保留的工具结果摘要。"""
+		value = self.metadata.get("durable_summary", "")
+		if not value:
+			return ""
+		text = str(value)
+		if len(text) <= max_chars:
+			return text
+		head = text[:int(max_chars * 0.75)]
+		tail = text[-(max_chars - len(head)):]
+		omitted = len(text) - len(head) - len(tail)
+		return f"{head}\n...[省略 {omitted} 个字符]...\n{tail}"
+
+	def is_durable(self) -> bool:
+		"""English: Whether this result should survive compression. 中文：结果是否应跨压缩保留。"""
+		return bool(self.metadata.get("durable") or self.metadata.get("durable_summary"))
+
+	def with_metadata(self, metadata: dict[str, Any]) -> "ToolOutput":
+		"""English: Return a copy with merged metadata. 中文：返回合并 metadata 的副本。"""
+		return ToolOutput(
+			content=self.content,
+			content_type=self.content_type,
+			summary=self.summary,
+			artifacts=list(self.artifacts),
+			metadata={**self.metadata, **metadata},
+			is_error=self.is_error,
+		)
 
 	def _content_as_str(self) -> str:
 		if isinstance(self.content, str):

@@ -62,6 +62,30 @@ class TestCreatePlan:
 		message = {"content": '{"goal":"g","steps":[{"step_id":1,"description":"a","depends_on":[2]}]}'}
 		assert PlanningService.detect_plan(message) is None
 
+	def test_detect_plan_rejects_missing_content_and_empty_steps(self):
+		assert PlanningService.detect_plan({}) is None
+		assert PlanningService.detect_plan({"content": ""}) is None
+		assert PlanningService.detect_plan({"content": '{"goal":"g","steps":[]}'}) is None
+		assert PlanningService.detect_plan({"content": '{"goal":"","steps":[{"step_id":1,"description":"x"}]}'}) is None
+
+	@pytest.mark.asyncio
+	async def test_generate_plan_uses_non_stream_context_and_falls_back_on_empty_plan(self):
+		class Caller:
+			def __init__(self):
+				self.stream_flags = []
+
+			async def call(self, ctx, messages, tools):
+				self.stream_flags.append(ctx.config.stream)
+				assert "不要调用工具" in messages[1]["content"]
+				return {"content": '{"goal":"g","steps":[]}'}, []
+
+		ctx = ExecutionContext(config=ExecutionConfig(stream=True))
+		caller = Caller()
+		plan = await PlanningService.generate_plan(caller, ctx, "ship")
+		assert caller.stream_flags == [False]
+		assert plan.goal == "ship"
+		assert plan.steps[0].description == "ship"
+
 
 class TestScheduler:
 	def test_get_next_steps_no_deps(self):

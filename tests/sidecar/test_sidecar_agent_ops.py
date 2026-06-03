@@ -80,6 +80,32 @@ def test_failure_miner_clusters_and_suggests_actions():
 	assert "timeout" in report.clusters[0].suggested_action.lower()
 
 
+def test_failure_miner_infers_categories_filters_min_count_and_limits_examples():
+	from axc_agent_engine.sidecar.failure_miner import infer_failure_category, suggest_action
+
+	messages = {
+		"permission denied": "policy",
+		"schema parse failed": "format",
+		"subprocess exit code 1": "tool",
+		"rate limit 429": "provider_limit",
+		"context token maximum": "context_budget",
+		"unknown": "unknown",
+	}
+	for message, category in messages.items():
+		assert infer_failure_category(message) == category
+	records = [
+		FailureRecord(record_id=f"f{i}", agent_name=f"a{i}", message="permission denied", severity=i / 10)
+		for i in range(7)
+	]
+	records.append(FailureRecord(record_id="single", message="schema bad"))
+	report = FailureReportBuilder().build(records, min_count=2)
+	assert len(report.clusters) == 1
+	assert len(report.clusters[0].examples) == 5
+	assert report.clusters[0].affected_agents == {f"a{i}" for i in range(7)}
+	assert suggest_action("tool", "shell").endswith("tool 'shell'.")
+	assert "Inspect" in suggest_action("other")
+
+
 def test_cost_optimizer_estimates_and_flags_large_uncompressed_context():
 	estimator = CostEstimator(prices={"big": ModelPrice(input_per_1k=0.01, output_per_1k=0.03)})
 	builder = CostReportBuilder(estimator)

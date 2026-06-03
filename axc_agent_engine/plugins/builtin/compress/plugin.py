@@ -39,6 +39,10 @@ if TYPE_CHECKING:
 	from axc_agent_engine.tools.tool_output import ToolOutput
 
 
+DEFAULT_DURABLE_TOOLS = {"agent_call", "knowledge_search"}
+DEFAULT_DURABLE_CAPABILITIES = {"agent_call", "knowledge_search"}
+
+
 class ContextCompressionPipeline:
 	def __init__(self, plugin: "CompressPlugin") -> None:
 		self.plugin = plugin
@@ -74,6 +78,7 @@ class CompressionBoundaryService:
 		plugin._conversation_buffer = list(boundary.buffer)
 		plugin._file_cache.load(boundary.file_cache)
 		plugin._tool_summaries = list(boundary.tool_summaries)
+		plugin._durable_results = list(boundary.durable_results)
 
 	async def save(self, exec_ctx: "ExecutionContext") -> None:
 		plugin = self.plugin
@@ -93,6 +98,7 @@ class CompressionBoundaryService:
 			buffer=list(plugin._conversation_buffer),
 			file_cache=plugin._file_cache.dump(),
 			tool_summaries=list(plugin._tool_summaries),
+			durable_results=list(plugin._durable_results),
 		)
 		await plugin._boundary_store.save(boundary)
 
@@ -175,6 +181,14 @@ class CompressPlugin(BasePlugin):
 		)
 		self._pending_tool_observations: list[ToolObservation] = []
 		self._tool_summaries: list[str] = []
+		durable_config = config.get("durable_tools", {})
+		self._durable_tool_names = set(DEFAULT_DURABLE_TOOLS)
+		self._durable_tool_names.update(str(name) for name in _nested(durable_config, "", "names", []))
+		self._durable_capabilities = set(DEFAULT_DURABLE_CAPABILITIES)
+		self._durable_capabilities.update(str(name) for name in _nested(durable_config, "", "capabilities", []))
+		self._durable_results: list[str] = []
+		self._durable_keep = int(_nested(durable_config, "", "keep", 12))
+		self._durable_max_chars = int(_nested(durable_config, "", "max_chars", 4000))
 		self._recall_config = config.get("recall", {})
 		self._boundary_enabled = _nested(config, "boundary", "enabled", True)
 		self._boundary_resource = _nested(config, "boundary", "resource", "")
@@ -218,6 +232,7 @@ class CompressPlugin(BasePlugin):
 			self._file_cache.update_from_tool(tool_name, arguments, result)
 			if self._tool_summary_enabled:
 				self._pending_tool_observations.append(observation_from_output(tool_name, arguments, result, duration_ms))
+			self._record_durable_result(tool_name, result)
 			return await externalize_large_tool_output(
 				result,
 				exec_ctx.services.result_store,
@@ -250,6 +265,9 @@ class CompressPlugin(BasePlugin):
 		tool_summary = tool_summaries_message(self._tool_summaries)
 		if tool_summary:
 			extra.append(tool_summary)
+		durable_summary = _durable_results_message(self._durable_results)
+		if durable_summary:
+			extra.append(durable_summary)
 		if self._summary and self._file_restore_enabled:
 			file_cache = self._file_cache.message()
 			if file_cache:
@@ -296,6 +314,24 @@ class CompressPlugin(BasePlugin):
 		for call in tool_calls:
 			self._conversation_buffer.append(f"Tool call: {call.get('name', '')}")
 
+	def _record_durable_result(self, tool_name: str, result: "ToolOutput") -> None:
+		if not result or result.is_error or not self._is_durable_tool(tool_name, result):
+			return
+		content = result.durable_summary(self._durable_max_chars) or result.context_view(self._durable_max_chars)
+		if not content:
+			return
+		entry = f"{tool_name}: {content}"
+		self._durable_results.append(entry)
+		self._conversation_buffer.append(f"Tool result: {entry}")
+		if self._durable_keep > 0 and len(self._durable_results) > self._durable_keep:
+			self._durable_results = self._durable_results[-self._durable_keep:]
+
+	def _is_durable_tool(self, tool_name: str, result: "ToolOutput") -> bool:
+		if result.is_durable() or tool_name in self._durable_tool_names:
+			return True
+		capability = str(result.metadata.get("capability", ""))
+		return bool(capability and capability in self._durable_capabilities)
+
 	@property
 	def _recall_top_k(self) -> int:
 		return int(self._recall_config.get("top_k", 12))
@@ -326,3 +362,10 @@ def _format_recall_item(item, full_threshold: float, compressed_threshold: float
 	if item.score >= compressed_threshold:
 		return f"- {item.text[:300]} [压缩召回]"
 	return ""
+
+
+def _durable_results_message(results: list[str]) -> dict[str, str] | None:
+	lines = [item.strip() for item in results if item and item.strip()]
+	if not lines:
+		return None
+	return {"role": "system", "content": "[持久工具结果]\n" + "\n\n".join(f"- {item}" for item in lines)}

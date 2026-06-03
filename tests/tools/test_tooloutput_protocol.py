@@ -78,16 +78,38 @@ class TestToolOutputSerialization:
 		assert len(restored.artifacts) == 5
 		assert restored.metadata == {"version": 2}
 
+	def test_views_handle_durable_summary_artifacts_and_tiny_limits(self):
+		ref = ArtifactRef(id="a1", kind="text", size=12)
+		out = ToolOutput(
+			content="full content",
+			summary="summary",
+			artifacts=[ref],
+			metadata={"durable_summary": "D" * 20},
+		)
+		assert out.context_view(max_chars=5).startswith("DDD")
+		assert "text:a1(12B)" in out.context_view(max_chars=5)
+		assert out.display_view(max_chars=4).startswith("ful")
+		assert out.is_durable() is True
+		assert out.durable_summary(max_chars=3).startswith("DD")
+
+	def test_error_context_view_and_from_dict_defaults(self):
+		out = ToolOutput.error("boom" * 100)
+		assert out.context_view(max_chars=8) == "[错误] boomboom"
+		restored = ToolOutput.from_dict({"content": "x"})
+		assert restored.content_type == "text"
+		assert restored.artifacts == []
+		assert restored.metadata == {}
+
 
 class TestToolResultProperties:
 	def test_result_property_with_output(self):
 		out = ToolOutput.text("hello")
 		tr = ToolResult(tool_call_id="1", tool_name="t", arguments={}, output=out, success=True)
-		assert tr.compact_view() == "hello"
+		assert tr.context_view() == "hello"
 
 	def test_result_property_without_output(self):
 		tr = ToolResult(tool_call_id="1", tool_name="t", arguments={}, success=False, error="err")
-		assert tr.compact_view() == ""
+		assert tr.context_view() == ""
 
 	def test_duration_ms(self):
 		tr = ToolResult(tool_call_id="1", tool_name="t", arguments={}, success=True, duration_ms=150)
@@ -176,23 +198,23 @@ class TestAllBuiltinToolsReturnToolOutput:
 		assert result.is_error
 
 
-class TestCompactViewDoesNotCallLLM:
-	"""Verify compact_view is pure computation, no LLM calls."""
+class TestContextViewDoesNotCallLLM:
+	"""Verify context_view is pure computation, no LLM calls."""
 
-	def test_compact_view_is_deterministic(self):
+	def test_context_view_is_deterministic(self):
 		out = ToolOutput.text("x" * 5000)
-		view1 = out.compact_view()
-		view2 = out.compact_view()
+		view1 = out.context_view()
+		view2 = out.context_view()
 		assert view1 == view2
 
-	def test_compact_view_with_summary_is_instant(self):
+	def test_context_view_with_summary_is_instant(self):
 		out = ToolOutput.text("x" * 100000, summary="short")
-		view = out.compact_view()
+		view = out.context_view()
 		assert view == "short"
 
-	def test_compact_view_json_is_deterministic(self):
+	def test_context_view_json_is_deterministic(self):
 		data = {"items": list(range(1000))}
 		out = ToolOutput.json_output(data)
-		view1 = out.compact_view(max_chars=500)
-		view2 = out.compact_view(max_chars=500)
+		view1 = out.context_view(max_chars=500)
+		view2 = out.context_view(max_chars=500)
 		assert view1 == view2

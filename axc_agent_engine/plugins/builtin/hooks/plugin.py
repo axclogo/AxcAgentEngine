@@ -38,6 +38,8 @@ class HooksPlugin(BasePlugin):
 			if action == "reject":
 				msg = rule.get("params", {}).get("message", "Operation rejected by rule")
 				logger.info(f"[hooks] REJECT: {msg}")
+				self._last_rejection_reason = msg
+				self._last_rejection_code = "tool.rejected_by_hooks"
 				return False, arguments
 			if action == "transform":
 				set_fields = rule.get("params", {}).get("set", {})
@@ -115,7 +117,7 @@ class HooksPlugin(BasePlugin):
 			if rule.get("event") != "post_tool_call":
 				continue
 			condition = rule.get("condition", "")
-			result_str = result.compact_view() if result else ""
+			result_str = result.context_view() if result else ""
 			eval_ctx = {"tool_name": tool_name, "arguments": arguments, "result": result_str}
 			if condition and not _safe_eval_condition(condition, eval_ctx):
 				continue

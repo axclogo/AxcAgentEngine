@@ -65,6 +65,8 @@ class HumanInTheLoopPlugin(BasePlugin):
 		#English: Bilingual note. 中文：需要审批但没有 approval_queue 时直接拒绝
 		if not approval_queue:
 			logger.warning(f"[hitl] Tool {tool_name} risk={risk}, no approval queue, rejecting")
+			self._last_rejection_reason = f"工具风险等级为 {risk}，但当前运行环境没有配置人工审批队列"
+			self._last_rejection_code = "tool.rejected_by_human_in_the_loop"
 			return False, arguments
 		#English: Bilingual note. 中文：通过 Future 等待审批结果
 		request_id = f"{tool_name}_{id(arguments)}"
@@ -81,27 +83,34 @@ class HumanInTheLoopPlugin(BasePlugin):
 		logger.info(f"[hitl] Awaiting approval: {tool_name} (risk={risk})")
 		try:
 			await approval_queue.put(approval_request)
-			asyncio.ensure_future(self._listen_approval(exec_ctx, request_id))
+			asyncio.ensure_future(self._listen_approval(exec_ctx, request_id, initial_delay=0.01))
 			response = await asyncio.wait_for(future, timeout=self._timeout)
 			if response.get("approved"):
 				logger.info(f"[hitl] Approved: {tool_name}")
 				return True, arguments
 			else:
 				logger.info(f"[hitl] Rejected: {tool_name}")
+				reason = response.get("reason") or "人工审批拒绝"
+				self._last_rejection_reason = reason
+				self._last_rejection_code = "tool.rejected_by_human_in_the_loop"
 				return False, arguments
 		except asyncio.TimeoutError:
 			logger.warning(f"[hitl] Approval timeout: {tool_name}")
+			self._last_rejection_reason = f"等待人工审批超时({self._timeout}s)"
+			self._last_rejection_code = "tool.rejected_by_human_in_the_loop"
 			return False, arguments
 		finally:
 			self._pending_approvals.pop(request_id, None)
 
-	async def _listen_approval(self, exec_ctx: "ExecutionContext", request_id: str) -> None:
+	async def _listen_approval(self, exec_ctx: "ExecutionContext", request_id: str, initial_delay: float = 0.0) -> None:
 		"""English: Bilingual documentation follows.
 中文：以下为双语文档说明。
 监听审批队列并完成匹配的 Future。"""
 		queue = exec_ctx.runtime.approval_queue
 		if not queue:
 			return
+		if initial_delay > 0:
+			await asyncio.sleep(initial_delay)
 		while request_id in self._pending_approvals:
 			try:
 				item = await asyncio.wait_for(queue.get(), timeout=1.0)
@@ -113,6 +122,7 @@ class HumanInTheLoopPlugin(BasePlugin):
 					future.set_result(item)
 				return
 			await queue.put(item)
+			await asyncio.sleep(0.01)
 
 	def resolve_approval(self, request_id: str, approved: bool) -> None:
 		"""English: Bilingual documentation follows.

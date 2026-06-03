@@ -68,7 +68,7 @@ def observation_from_output(
 	return ToolObservation(
 		name=tool_name,
 		arguments=dict(arguments),
-		result=output.compact_view(max_result_chars),
+		result=output.context_view(max_result_chars),
 		duration_ms=int(duration_ms),
 		is_error=output.is_error,
 	)

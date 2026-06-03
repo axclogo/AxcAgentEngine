@@ -378,7 +378,7 @@ class TracingPlugin(BasePlugin):
 		tool_runtime = _current_tool_runtime(exec_ctx)
 		tool_call_id = str(tool_runtime.get("tool_call_id") or "")
 		span = state.setdefault("active_spans", {}).pop(tool_call_id, None) if tool_call_id else None
-		result_str = result.compact_view() if result else ""
+		result_str = result.context_view() if result else ""
 		success = not result.is_error if result else True
 		error = (
 			_error_payload(result_str, self._max_error_length, code="tool.output_error")

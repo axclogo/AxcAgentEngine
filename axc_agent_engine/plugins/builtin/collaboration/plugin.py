@@ -223,9 +223,12 @@ class CollaborationPlugin(BasePlugin):
 			duration_ms = int((time.time() - start) * 1000)
 			if reply.type == "error":
 				return ToolOutput.error(reply.content)
+			durable_summary = _agent_call_durable_summary(agent_name, reply.content)
 			return ToolOutput.json_output(
 				{"agent": agent_name, "result": reply.content, "duration_ms": duration_ms},
-				summary=f"Agent '{agent_name}' 已回复",
+				summary=durable_summary,
+			).with_metadata(
+				{"durable": True, "durable_summary": durable_summary, "agent_name": agent_name},
 			)
 		except ValueError as e:
 			return ToolOutput.error(str(e))
@@ -300,6 +303,11 @@ def _collaboration_metadata(context: dict, exec_ctx: Any, depth: int) -> dict[st
 		"caller_session_id": context.get("session_id", ""),
 	})
 	return metadata
+
+
+def _agent_call_durable_summary(agent_name: str, result: Any) -> str:
+	text = str(result)
+	return f"Agent '{agent_name}' result:\n{text}"
 
 
 def _task_status(task: Any) -> str:

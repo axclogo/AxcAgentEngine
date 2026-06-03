@@ -1,11 +1,22 @@
 """Tests for builtin tools returning ToolOutput — file_read, file_write, shell, etc."""
 import pytest
 from axc_agent_engine.plugins.builtin.builtin_tools.plugin import BuiltinToolsPlugin
+from axc_agent_engine.plugins.builtin.builtin_tools.command_tools import (
+	BuiltinCommandTools,
+	ensure_venv,
+	get_command_executor,
+	store_command_artifacts,
+)
+from axc_agent_engine.plugins.builtin.builtin_tools.file_tools import BuiltinFileTools
+from axc_agent_engine.plugins.builtin.builtin_tools.path_policy import BuiltinPathPolicy, PathValidationError
+from axc_agent_engine.plugins.builtin.builtin_tools.support import bounded_int, truncate_by_bytes
 from axc_agent_engine.plugins.builtin.builtin_tools.tool_definitions import (
 	_file_read, _file_write, _file_append, _file_edit, _file_list, _file_glob, _file_info, _get_time,
 	_http_request, _pip_install, _python_exec, _shell,
 	_result_read, _result_search, _result_page,
 )
+from axc_agent_engine.plugins.builtin.builtin_tools.http_tools import BuiltinHttpPolicy, is_blocked_ip
+from axc_agent_engine.core.context import ExecutionContext
 from axc_agent_engine.runtime.sandbox_models import CommandResult
 from axc_agent_engine.tools.tool_output import ToolOutput
 from axc_agent_engine.storage.result_store import InMemoryResultStore
@@ -111,6 +122,17 @@ class TestFileRead:
 		assert result.is_error
 		assert "too large" in result.content.lower()
 
+	@pytest.mark.asyncio
+	async def test_start_line_clamps_and_end_line_limits_to_total(self, tmp_path):
+		f = tmp_path / "clamp.txt"
+		f.write_text("a\nb\nc")
+		result = await _file_read(
+			{"path": "clamp.txt", "start_line": -10, "end_line": 999},
+			{"workspace": str(tmp_path)},
+		)
+		assert result.content["start_line"] == 1
+		assert result.content["end_line"] == 3
+
 
 class TestFileList:
 	@pytest.mark.asyncio
@@ -147,6 +169,13 @@ class TestFileList:
 		workspace.mkdir()
 		result = await _file_list({"path": "../outside"}, {"workspace": str(workspace)})
 		assert result.is_error
+
+	@pytest.mark.asyncio
+	async def test_list_rejects_file_path(self, tmp_path):
+		(tmp_path / "file.txt").write_text("x")
+		result = await _file_list({"path": "file.txt"}, {"workspace": str(tmp_path)})
+		assert result.is_error
+		assert "Not a directory" in result.content
 
 
 class TestFileInfo:
@@ -201,6 +230,16 @@ class TestFileGlob:
 		result = await _file_glob({"pattern": "../*.txt"}, {"workspace": str(tmp_path)})
 		assert result.is_error
 
+	@pytest.mark.asyncio
+	async def test_glob_can_include_directories_and_clamps_limit(self, tmp_path):
+		(tmp_path / "pkg").mkdir()
+		(tmp_path / "pkg" / "a.py").write_text("x")
+		result = await _file_glob({"pattern": "**", "include_dirs": True, "limit": 0}, {"workspace": str(tmp_path)})
+		assert not result.is_error
+		assert len(result.content["matches"]) >= 1
+		assert result.content["limit"] == 200
+		assert any(item["type"] == "directory" for item in result.content["matches"])
+
 
 class TestFileWrite:
 	@pytest.mark.asyncio
@@ -229,6 +268,11 @@ class TestFileWrite:
 		result = await _file_write({"path": "s.txt", "content": "abc"}, {"workspace": str(tmp_path)})
 		assert "3" in result.summary
 
+	@pytest.mark.asyncio
+	async def test_write_rejects_workspace_escape(self, tmp_path):
+		result = await _file_write({"path": "../out.txt", "content": "x"}, {"workspace": str(tmp_path)})
+		assert result.is_error
+
 
 class TestFileAppend:
 	@pytest.mark.asyncio
@@ -252,6 +296,11 @@ class TestFileAppend:
 			{"path": "missing.txt", "content": "x", "create": False},
 			{"workspace": str(tmp_path)},
 		)
+		assert result.is_error
+
+	@pytest.mark.asyncio
+	async def test_append_rejects_empty_path(self):
+		result = await _file_append({"path": "", "content": "x"}, {})
 		assert result.is_error
 
 
@@ -303,6 +352,20 @@ class TestFileEdit:
 	async def test_file_not_found(self):
 		result = await _file_edit({"path": "no-such-file.txt", "old_string": "a", "new_string": "b"}, {"workspace": "/tmp"})
 		assert result.is_error
+
+	@pytest.mark.asyncio
+	async def test_edit_rejects_empty_path_and_normalizes_smart_quotes(self, tmp_path):
+		empty = await _file_edit({"path": "", "old_string": "a", "new_string": "b"}, {"workspace": str(tmp_path)})
+		f = tmp_path / "smart.txt"
+		f.write_text("say \u201chello\u201d")
+		normalized = await _file_edit(
+			{"path": "smart.txt", "old_string": '"hello"', "new_string": '"hi"'},
+			{"workspace": str(tmp_path)},
+		)
+
+		assert empty.is_error
+		assert not normalized.is_error
+		assert f.read_text() == 'say "hi"'
 
 
 class TestPythonExec:
@@ -443,6 +506,49 @@ class TestHttpRequest:
 		assert result.content["body_preview"] == "abc"
 		assert result.content["truncated"] is True
 
+	@pytest.mark.asyncio
+	async def test_empty_url_invalid_scheme_and_dns_failure(self):
+		assert (await _http_request({"url": ""}, {})).is_error
+		assert (await BuiltinHttpPolicy().validate_url("ftp://example.com")) == "Only http and https URLs are allowed"
+		assert (await BuiltinHttpPolicy().validate_url("https:///missing-host")) == "URL hostname is required"
+		assert await BuiltinHttpPolicy().validate_url("http://metadata.google.internal") is not None
+		assert await BuiltinHttpPolicy().validate_url("http://example.local") is not None
+		assert is_blocked_ip("not-an-ip") is True
+
+	@pytest.mark.asyncio
+	async def test_http_request_externalizes_large_body(self, monkeypatch):
+		class FakeResponse:
+			status_code = 201
+			text = "abcdef"
+			headers = {"content-type": "text/plain"}
+
+		class FakeClient:
+			def __init__(self, timeout):
+				self.timeout = timeout
+
+			async def __aenter__(self):
+				return self
+
+			async def __aexit__(self, exc_type, exc, tb):
+				return None
+
+			async def request(self, method, url, headers, json):
+				assert method == "POST"
+				assert json == {"x": 1}
+				return FakeResponse()
+
+		import axc_agent_engine.plugins.builtin.builtin_tools.tool_definitions as builtin_tools
+		store = InMemoryResultStore()
+		monkeypatch.setattr(builtin_tools.httpx, "AsyncClient", FakeClient)
+		result = await _http_request(
+			{"url": "https://example.com", "method": "post", "body": {"x": 1}, "max_bytes": 3},
+			{"result_store": store},
+		)
+
+		assert not result.is_error
+		assert result.content["body_artifact_id"]
+		assert await store.get(result.content["body_artifact_id"], 0, 20) == "abcdef"
+
 
 class TestPipInstall:
 	@pytest.mark.asyncio
@@ -464,6 +570,20 @@ class TestPipInstall:
 		assert result.content["returncode"] == 0
 		assert executor.spec is not None
 		assert executor.spec.argv[-2:] == ["install", "example-package"]
+
+	@pytest.mark.asyncio
+	async def test_empty_invalid_package_and_executor_failure(self, tmp_path):
+		class FailingExecutor:
+			async def run(self, spec):
+				raise RuntimeError("pip down")
+
+		assert (await _pip_install({"package": ""}, {"workspace": str(tmp_path)})).is_error
+		assert (await _pip_install({"package": "bad;rm"}, {"workspace": str(tmp_path)})).is_error
+		result = await _pip_install(
+			{"package": "pkg"},
+			{"workspace": str(tmp_path), "command_executor": FailingExecutor()},
+		)
+		assert result.is_error
 
 
 class TestResultRead:
@@ -568,3 +688,142 @@ class TestBuiltinToolsPluginDefaults:
 		plugin = BuiltinToolsPlugin()
 		plugin.initialize({"load": ["file_list", "file_glob", "file_info", "file_append"]}, None)
 		assert {tool.name for tool in plugin.get_tools()} == {"file_list", "file_glob", "file_info", "file_append"}
+
+	@pytest.mark.asyncio
+	async def test_deferred_tool_search_activates_and_post_call_deactivates(self):
+		plugin = BuiltinToolsPlugin()
+		plugin.initialize({"load": ["get_time", "file_read"], "defer": ["file_read"]}, None)
+		ctx = ExecutionContext()
+		await plugin.on_execution_start(ctx)
+		tools = {tool.name: tool for tool in plugin.get_tools()}
+
+		assert tools["file_read"].deferred is True
+		search = await tools["tool_search"].execute({"query": "read"}, {"exec_ctx": ctx})
+		messages, schemas = plugin.pre_llm_call(ctx, [], [tools["get_time"].to_openai_schema()])
+		await plugin.post_tool_call(ctx, "file_read", {}, ToolOutput.json_output({}), 1)
+		_, cleared = plugin.pre_llm_call(ctx, [], [tools["get_time"].to_openai_schema()])
+
+		assert search.content["tools"][0]["name"] == "file_read"
+		assert messages == []
+		assert any(schema["function"]["name"] == "file_read" for schema in schemas)
+		assert not any(schema["function"]["name"] == "file_read" for schema in cleared)
+
+	@pytest.mark.asyncio
+	async def test_tool_search_without_exec_ctx_reports_no_match(self):
+		plugin = BuiltinToolsPlugin()
+		plugin.initialize({"defer": ["file_read"]}, None)
+		tool = {tool.name: tool for tool in plugin.get_tools()}["tool_search"]
+
+		result = await tool.execute({"query": "missing"}, {})
+
+		assert result.content["tools"] == []
+
+
+class TestBuiltinPathPolicy:
+	def test_workspace_required_and_unsafe_path_resolution(self, tmp_path):
+		policy = BuiltinPathPolicy()
+
+		assert policy.get_workspace({}, "tool").is_error
+		assert policy.get_workspace({"allow_unsafe_workspace": True}, "tool") == ""
+		assert policy.resolve_workspace_path(str(tmp_path / "x"), {"allow_unsafe_workspace": True}).endswith("x")
+		with pytest.raises(PathValidationError):
+			policy.resolve_workspace_path("../x", {"workspace": str(tmp_path)})
+
+
+class TestBuiltinCommandHelpers:
+	@pytest.mark.asyncio
+	async def test_python_exec_workspace_error_and_runtime_error(self):
+		class Policy:
+			def get_workspace(self, context, tool_name):
+				return ToolOutput.error("no workspace")
+
+		class FailingPolicy:
+			def get_workspace(self, context, tool_name):
+				return ""
+
+		class Presenter:
+			async def store_artifacts(self, result, context):
+				raise RuntimeError("present failed")
+
+		no_workspace = await BuiltinCommandTools(path_policy=Policy()).python_exec({"code": "print(1)"}, {})
+		failing = await BuiltinCommandTools(path_policy=FailingPolicy(), presenter=Presenter()).python_exec(
+			{"code": "print(1)"},
+			{"command_executor": object()},
+		)
+
+		assert no_workspace.is_error
+		assert failing.is_error
+
+	@pytest.mark.asyncio
+	async def test_shell_workspace_error_powershell_and_executor_error(self):
+		class Policy:
+			def get_workspace(self, context, tool_name):
+				return ToolOutput.error("no workspace")
+
+		class FailingExecutor:
+			async def run(self, spec):
+				raise RuntimeError("shell down")
+
+		no_workspace = await BuiltinCommandTools(path_policy=Policy()).shell({"command": "echo x"}, {})
+		failing = await _shell(
+			{"command": "echo x", "shell_type": "powershell", "timeout": "bad"},
+			{"allow_unsafe_workspace": True, "command_executor": FailingExecutor()},
+		)
+
+		assert no_workspace.is_error
+		assert failing.is_error
+
+	@pytest.mark.asyncio
+	async def test_ensure_venv_existing_failure_and_helpers(self, tmp_path):
+		venv = tmp_path / "venv"
+		python_path = venv / "bin" / "python"
+		python_path.parent.mkdir(parents=True)
+		python_path.write_text("", encoding="utf-8")
+		assert await ensure_venv(str(venv), {}) == str(python_path)
+
+		class FailingExecutor:
+			async def run(self, spec):
+				return CommandResult(exit_code=1, stderr="venv failed")
+
+		with pytest.raises(RuntimeError, match="venv failed"):
+			await ensure_venv(str(tmp_path / "badvenv"), {"command_executor": FailingExecutor()})
+		assert get_command_executor({"command_executor": "x"}) == "x"
+		content, artifacts = await store_command_artifacts(
+			CommandResult(exit_code=0, stdout="abcdef", stderr="ghijkl", stdout_truncated=True, stderr_truncated=True),
+			{"result_store": InMemoryResultStore()},
+			stdout_limit=3,
+			stderr_limit=3,
+		)
+		assert content["stdout_artifact_id"]
+		assert content["stderr_artifact_id"]
+		assert len(artifacts) == 2
+		assert bounded_int("bad", 1, 3, 2) == 2
+		assert bounded_int(9, 1, 3, 2) == 3
+		assert truncate_by_bytes("你好abc", 4) == "你"
+
+
+class TestBuiltinFileToolExceptionBranches:
+	@pytest.mark.asyncio
+	async def test_path_policy_and_filesystem_exceptions(self, tmp_path, monkeypatch):
+		class BadPolicy:
+			def resolve_workspace_path(self, path, context):
+				raise PathValidationError("bad path")
+
+			def file_entry(self, full, context):
+				raise RuntimeError("entry failed")
+
+		tools = BuiltinFileTools(path_policy=BadPolicy())
+		assert (await tools.read({"path": "x"}, {})).is_error
+		assert (await tools.list({"path": "."}, {})).is_error
+		assert (await tools.glob({"pattern": "*"}, {})).is_error
+		assert (await tools.info({"path": "x"}, {})).is_error
+		assert (await tools.write({"path": "x"}, {})).is_error
+		assert (await tools.append({"path": "x"}, {})).is_error
+		assert (await tools.edit({"path": "x", "old_string": "a"}, {})).is_error
+
+		file_path = tmp_path / "readonly.txt"
+		file_path.write_text("a", encoding="utf-8")
+		monkeypatch.setattr("axc_agent_engine.plugins.builtin.builtin_tools.file_tools.os.replace", lambda src, dst: (_ for _ in ()).throw(RuntimeError("replace failed")))
+		result = await _file_edit({"path": "readonly.txt", "old_string": "a", "new_string": "b"}, {"workspace": str(tmp_path)})
+		assert result.is_error
+		assert not (tmp_path / "readonly.txt.tmp").exists()

@@ -74,17 +74,19 @@ class MessageStore:
 中文：以下为双语文档说明。
 把工具执行结果追加到消息列表。
 
-		成功结果使用 ToolOutput.compact_view()，确保大内容不会撑爆上下文。
+		成功结果使用 ToolOutput.context_view()，避免 UI 展示内容污染 LLM 上下文。
 		"""
 		for r in results:
 			if r.success and r.output:
-				content = r.output.compact_view()
+				content = r.output.context_view()
 			else:
 				content = f"[错误] {r.error}"
 			self._messages.append({
 				"role": "tool",
 				"tool_call_id": r.tool_call_id,
+				"name": r.tool_name,
 				"content": content,
+				"metadata": dict(r.output.metadata) if r.output else {},
 			})
 
 	def snapshot(self) -> int:

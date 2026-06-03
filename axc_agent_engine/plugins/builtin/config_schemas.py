@@ -67,6 +67,12 @@ COMPRESS_CONFIG_SCHEMA = config_schema(
 			config_field("max_chars", "最大字符", "integer", "单次工具摘要最大字符数。", label_en="Max chars", default=1200),
 			config_field("max_observations", "最大观察数", "integer", "一次摘要最多纳入的工具观察数量。", label_en="Max observations", default=20),
 		], label_en="Tool summary"),
+		object_field("durable_tools", "持久工具结果", "压缩后仍必须保留的关键工具结果。", [
+			array_field("names", "工具名", "按工具名保留关键结果。", _string_item(), label_en="Tool names", default=["agent_call", "knowledge_search"]),
+			array_field("capabilities", "能力", "按 capability 保留关键结果。", _string_item(), label_en="Capabilities", default=["agent_call", "knowledge_search"]),
+			config_field("keep", "保留条数", "integer", "最多保留的持久工具结果数量。", label_en="Keep", default=12),
+			config_field("max_chars", "最大字符", "integer", "每条持久结果最大字符数。", label_en="Max chars", default=4000),
+		], label_en="Durable tools"),
 		object_field("recall", "召回", "从资源或历史消息召回相关上下文。", [
 			config_field("enabled", "启用召回", "boolean", "是否启用上下文召回。", label_en="Enabled", default=True),
 			config_field("resource", "资源名", "string", "召回资源名称；为空时使用本地回退召回。", label_en="Resource", default=""),

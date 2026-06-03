@@ -34,8 +34,8 @@ AxcAgentEngine 在 ReAct 之外加了 **POR（Plan-Observe-Replan）**：先生�
 ```bash
 pip install axc-agent-engine
 
-# 固定安装当前 2.0 版本
-pip install axc-agent-engine==2.0
+# 固定安装当前 2.3 版本
+pip install axc-agent-engine==2.3.0
 
 # 可选能力
 pip install "axc-agent-engine[api]"
@@ -83,7 +83,8 @@ async for event in agent.stream("Build a REST API for user management"):
 - **工具协议** —— 所有工具返回 `ToolOutput`；只读并发，写串行；模型函数名安全映射
 - **中断恢复** —— `WorkflowRuntime` + `CheckpointStore` + Agent resume API；Burr 通过 `axc-agent-engine[workflow]` 可选启用
 - **OpenAI API 子集** —— Provider 协议 + OpenAI-compatible HTTP 客户端 / API 子集
-- **记忆与知识** —— 四层记忆（KV、去重、衰减、图 hook）+ 语义分块 + 向量/BM25 混合检索
+- **记忆与知识** —— 四层记忆（KV、去重、衰减、图 hook）+ 插件自管混合检索
+- **运行时绑定** —— 模型、挂载资源、请求 metadata、YAML overrides 分通道传入
 - **MCP** —— stdio、JSON-RPC HTTP、官方 SDK transport
 - **人工介入** —— 审批队列、`ask_human` 工具
 - **Sidecar 套件** —— 多 Agent、仿真、评测、成本统计、失败挖掘、轨迹蒸馏
@@ -103,7 +104,7 @@ async for event in agent.stream("Build a REST API for user management"):
 | 工具名映射 | Provider 负责模型安全映射 |
 | 上下文压缩 | 内置 `compress` 插件 |
 | 记忆 | 四层 + KV 持久化 + 去重 + 衰减 |
-| 知识库 | 插件自管混合检索，支持本地 sources 和运行时注入资源 |
+| 知识库 | 插件自管检索，支持本地 sources 或挂载索引/资源 |
 | MCP | stdio / JSON-RPC HTTP / 官方 SDK |
 | 人工审批 | 审批队列 + `ask_human` |
 | Sidecar | 多 Agent / 仿真 / 评测 / 成本 / 失败挖掘 / 蒸馏 |
@@ -120,7 +121,7 @@ async for event in agent.stream("Build a REST API for user management"):
 | [插件开发](docs/PLUGIN_DEVELOPMENT.md) | 写自己的插件 |
 | [安全模型](docs/SECURITY_MODEL.md) | 能力、风险、workspace |
 | [示例](examples/README.md) | 7 个端到端 demo |
-| [贡献](CONTRIBUTING.md) · [安全](SECURITY.md) · [变更](CHANGELOG.md) · [LICENSE](LICENSE) | Apache-2.0 |
+| [贡献](CONTRIBUTING.md) · [安全](SECURITY.md) · [LICENSE](LICENSE) | Apache-2.0 |
 
 ## Agent YAML
 
@@ -159,7 +160,11 @@ plugins:
 
   compress:
     enabled: true
-    summary_after_rounds: 8
+    summary:
+      after_rounds: 8
+    durable_tools:
+      names: ["agent_call", "knowledge_search"]
+      keep: 12
 
   risk_guard:
     enabled: true
@@ -172,7 +177,7 @@ plugins:
 - 带非空 capability 的工具默认拒绝，必须写入 `runtime.allowed_capabilities`。
 - 文件和命令类工具默认要求配置 `runtime.workspace`。
 - LLM 配置由代码提供，不写在 Agent YAML。
-- 官方内置插件不在 YAML 里配置外部 endpoint、API key 或 client 对象；外部资源必须在代码里通过 `mounts` 注入。
+- 官方内置插件的 YAML 只配置行为参数。外部 endpoint、API key、client 对象、索引、store、catalog 都必须在代码里通过 `mounts` 注入。
 
 ## Provider 配置
 
@@ -209,7 +214,7 @@ agent = engine.load_agent_template("./agents/my_agent.yaml").instantiate(
 
 ## 运行时绑定
 
-Agent YAML 描述稳定行为。每次 Agent 运行需要绑定的对象，在模板实例化时由代码传入：
+Agent YAML 描述稳定行为。运行时对象在模板实例化时由代码传入：
 
 ```python
 agent = template.instantiate(
@@ -219,9 +224,7 @@ agent = template.instantiate(
         fallback=backup_provider,
     ),
     mounts={
-        "knowledge.embedding": tenant_embedding_provider,
-        "knowledge.vector_store": tenant_kb_vector_store,
-        "knowledge.documents": tenant_document_store,
+        "knowledge.index": tenant_knowledge_index,
         "graph.store": tenant_graph_store,
         "skill.catalog": tenant_skill_catalog,
     },
@@ -240,7 +243,40 @@ agent = template.instantiate(
 - `metadata` 注入实例元数据；单次 chat/stream 请求的 metadata 仍可覆盖它。
 - `overrides` 在插件初始化前 patch 并重新校验 Agent YAML 字段。它只接受 YAML 可序列化值，不能绑定运行时资源。
 
-官方资源槽位包括 `knowledge.embedding`、`knowledge.vector_store`、`knowledge.documents`、`knowledge.index`、`knowledge.reranker`、`graph.store`、`skill.catalog`、`tracing.exporter`。不要通过 `overrides` 设置这些槽位，运行时对象统一使用 `mounts`。
+推荐使用的官方资源槽位是 `knowledge.index`、`graph.store`、`skill.catalog`、`tracing.exporter`。当前知识库插件也支持 `knowledge.documents`、`knowledge.embedding`、`knowledge.vector_store`、`knowledge.reranker` 等高级槽位，但它们仍然是运行时 mounts，不是 YAML 或 `overrides` 值。
+
+## 请求 Metadata 与 Tracing
+
+运行级 metadata 可以通过公开 Agent 入口传入，并进入 `ExecutionContext.state.metadata`。tracing 插件会把这些 metadata 安全复制到每个 span，同时保留 span 顶层的 `run_id`、`session_id`、`span_id`、`parent_span_id`。
+
+```python
+async for event in agent.stream_with_messages(
+    messages,
+    session_id="123",
+    llm_options={"temperature": 0.2},
+    run_options={"run_id": "run_abc"},
+    metadata={
+        "exec_log_id": 1001,
+        "conversation_id": 123,
+        "agent_config_id": 9,
+    },
+):
+    ...
+```
+
+宿主应使用这个机制关联执行日志。不要把执行日志 ID 塞进 prompt、tool args 或伪造 tool message。
+
+## 持久工具结果与子 Agent 事件
+
+`compress` 插件会把 assistant `tool_calls` 和对应的 tool result 当作原子组保留。持久工具结果还会写入压缩边界，并在上下文打包后重新注入。默认 `agent_call` 和 `knowledge_search` 是持久工具；业务工具可以通过 `compress.durable_tools.names`、`compress.durable_tools.capabilities` 或 `ToolOutput.with_metadata({"durable": True, "durable_summary": "..."})` 标记。
+
+`collaboration.agent_call` 会把子 Agent 活动转发到父运行事件流：
+
+- `sub_agent_start`
+- `sub_agent_step`
+- `sub_agent_complete`
+
+前端应直接渲染这些事件，不要解析 `agent_call` tool result 来伪造子 Agent 执行明细。
 
 ## API
 
@@ -311,36 +347,50 @@ agent = engine.load_agent_template("./agents/my_agent.yaml").instantiate(models=
 
 ```mermaid
 flowchart TD
-    A["应用创建 Engine"] --> B["注入 Provider 和服务"]
+    A["应用创建 Engine"] --> B["注入共享服务和 PluginRegistry"]
     B --> C["Engine.load_agent_template(agent.yaml)"]
-    C --> D["AgentTemplate.instantiate(models, mounts)"]
-    D --> E["构造 PluginContext"]
-    E --> F["加载启用插件"]
-    F --> G["Plugin.initialize()"]
-    G --> H["Plugin.get_tools()"]
-    H --> I["注册 ToolDefinition"]
-    I --> J["创建 Agent"]
+    C --> D["校验 Agent YAML"]
+    D --> E["AgentTemplate.instantiate(models, mounts, metadata, overrides)"]
+    E --> F["应用 YAML overrides"]
+    F --> G["合并 Engine resources 和 mounts"]
+    G --> H["构造 PluginContext"]
+    H --> I["从 registry 加载启用插件"]
+    I --> J["Plugin.initialize(config, ctx)"]
+    J --> K["Plugin.get_tools()"]
+    K --> L["注册 ToolDefinition"]
+    L --> M["创建 Agent 和 dispatcher consumer"]
 ```
 
 ### 单次运行
 
 ```mermaid
 flowchart TD
-    A["用户消息"] --> B["Agent.chat() / Agent.stream()"]
-    B --> C["ExecutionContext"]
-    C --> D["Executor"]
-    D --> E["ExecutionRunLifecycle + checkpoints"]
-    D --> F["ReActKernel"]
-    F --> G["MessageStore"]
-    F --> H["Plugin hooks"]
-    F --> I["LLMCaller"]
-    I --> J["TransactionRouter"]
-    J -->|最终回答| K["done event"]
-    J -->|工具调用| L["工具流水线"]
-    L --> G
-    J -->|plan 或 por_first| M["PORRunner"]
-    M --> N["PORGraphRuntime (pydantic_graph)"]
-    N --> K
+    A["Agent.chat / stream / *_with_messages / resume"] --> B["RunRequest.create"]
+    B --> C["合并 run_options.run_id 和请求 metadata"]
+    C --> D["创建 ExecutionContext"]
+    D --> E["ExecutionRunLifecycle.on_execution_start"]
+    E --> F["MessageStore 初始化 system/user/plugin context"]
+    F --> G{"路由模式"}
+    G -->|react_only 或 auto ReAct| H["ReActKernel 轮次"]
+    G -->|por_first 或 POR handoff| I["PORRunner / PORGraphRuntime"]
+    H --> J["Plugin.transform_messages"]
+    J --> K["compress: recent window + durable results + 原子工具组"]
+    K --> L["LLMCaller"]
+    L --> M["Plugin.pre_llm_call"]
+    M --> N["剥离引擎内部 message 字段"]
+    N --> O["LLM provider chat/stream"]
+    O --> P{"LLM 响应"}
+    P -->|最终回答| Q["on_round_end -> on_execution_complete -> done"]
+    P -->|tool_calls| R["工具编排器"]
+    R --> S["pre_tool_call / execute / post_tool_call"]
+    S --> T["ToolOutput -> MessageStore role=tool"]
+    T --> U["tool_result event"]
+    U --> H
+    S -->|agent_call / swarm| V["子 Agent dispatcher"]
+    V --> W["sub_agent_start / sub_agent_step / sub_agent_complete"]
+    W --> H
+    I --> Q
+    Q --> X["tracing span 携带 metadata 和 parent_span_id 落库"]
 ```
 
 ## 插件开发
@@ -424,11 +474,16 @@ CLI 日志参数是全局参数，需要放在子命令前。
 - **推演是旁路。** 多 Agent session、simulation kernel、mode adapter 是宿主驱动 SDK 能力。
 - **评测是旁路。** EvalRunner、EvalStore、AnnotationStore、AnnotationMatcher 和 report 是宿主驱动测试框架。
 - **注册 ≠ 加载。** 内置 spec 注册表是完整插件表；Agent 只加载 YAML 中 enabled 的插件。
+- **插件 schema 必须声明。** 没有 `config_schema` 的插件不能注册。
 - **工具来自插件。** Engine 核心不内置业务工具。
 - **工具必须返回 `ToolOutput`。** 非 `ToolOutput` 返回会被拒绝。
 - **工具定义必须是 `ToolDefinition`。** 不接受 dict。
 - **业务协议不进入开源引擎。** 内部 API、私有数据库、公司鉴权、服务发现属于私有插件。
 - **LLM 配置在代码中。** Agent YAML 只描述运行时限制、能力和插件。
+- **致命错误不做兜底隐藏。** 配置错误、运行时资源错误、工具协议错误、流程错误都必须明确失败。
+- **官方插件保持精简。** 可以强化 Agent 能力，但不持有宿主网络 client、业务 API key、私有服务或部署协议。
+- **运行时资源走 mounts。** 不要通过 YAML 或 `overrides` 传资源对象。
+- **请求关联走 metadata。** 宿主通过 `metadata` 传执行日志标识，tracing span 原样携带落库。
 - **API 是明确子集。** 请求级 `tools`、`tool_choice`、`n > 1` 会被拒绝。
 
 ## 测试

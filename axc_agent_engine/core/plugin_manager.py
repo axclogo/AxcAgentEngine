@@ -1,11 +1,22 @@
 """PluginManager — 统一分发插件 hook。"""
 import logging
+from dataclasses import dataclass
 from typing import Any
 
 from axc_agent_engine.core.context import ExecutionContext
 from axc_agent_engine.plugins.base import BasePlugin
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class PreToolCallDecision:
+	allowed: bool
+	arguments: dict
+	plugin_name: str = ""
+	reason: str = ""
+	code: str = "tool.rejected_by_plugin"
+	details: dict | None = None
 
 
 class PluginHookRunner:
@@ -24,12 +35,14 @@ class PluginHookRunner:
 		ctx: ExecutionContext,
 		tool_name: str,
 		arguments: dict,
-	) -> tuple[bool, dict]:
+	) -> PreToolCallDecision:
 		for p in plugins:
-			allowed, arguments = await p.pre_tool_call(ctx, tool_name, arguments)
-			if not allowed:
-				return False, arguments
-		return True, arguments
+			raw = await p.pre_tool_call(ctx, tool_name, arguments)
+			decision = _normalize_pre_tool_decision(raw, p, arguments)
+			arguments = decision.arguments
+			if not decision.allowed:
+				return decision
+		return PreToolCallDecision(True, arguments)
 
 	async def apply_post_tool_call(
 		self,
@@ -114,10 +127,11 @@ class PluginManager:
 		for p in self._plugins:
 			await self._safe_call_async(p, "post_llm_call", ctx, messages, response, duration_ms)
 
-	async def apply_pre_tool_call(self, ctx: ExecutionContext, tool_name: str, arguments: dict) -> tuple[bool, dict]:
+	async def apply_pre_tool_call(self, ctx: ExecutionContext, tool_name: str,
+								  arguments: dict) -> PreToolCallDecision:
 		"""English: Bilingual documentation follows.
 中文：以下为双语文档说明。
-执行所有插件的 pre_tool_call hooks，返回 (是否允许, 修改后的参数)。"""
+执行所有插件的 pre_tool_call hooks，返回带拒绝原因的决策。"""
 		return await self._hook_runner.apply_pre_tool_call(self._plugins, ctx, tool_name, arguments)
 
 	async def apply_post_tool_call(
@@ -213,3 +227,49 @@ class PluginManager:
 	中文：以下为双语文档说明。
 	调用异步插件方法；插件异常直接抛出。"""
 		await self._hook_runner.safe_call_async(plugin, method, *args)
+
+
+def _normalize_pre_tool_decision(raw: Any, plugin: BasePlugin,
+								 previous_arguments: dict) -> PreToolCallDecision:
+	plugin_name = str(getattr(plugin, "name", "") or plugin.__class__.__name__)
+	if isinstance(raw, PreToolCallDecision):
+		return raw
+	if isinstance(raw, dict):
+		return PreToolCallDecision(
+			allowed=bool(raw.get("allowed", True)),
+			arguments=dict(raw.get("arguments") or previous_arguments),
+			plugin_name=str(raw.get("plugin_name") or plugin_name),
+			reason=str(raw.get("reason") or raw.get("message") or ""),
+			code=str(raw.get("code") or "tool.rejected_by_plugin"),
+			details=dict(raw.get("details") or {}),
+		)
+	if isinstance(raw, tuple):
+		allowed = bool(raw[0]) if len(raw) > 0 else True
+		arguments = dict(raw[1] if len(raw) > 1 and raw[1] is not None else previous_arguments)
+		reason = str(raw[2]) if len(raw) > 2 and raw[2] else _plugin_rejection_reason(plugin)
+		code = str(raw[3]) if len(raw) > 3 and raw[3] else _plugin_rejection_code(plugin)
+		return PreToolCallDecision(
+			allowed=allowed,
+			arguments=arguments,
+			plugin_name=plugin_name if not allowed else "",
+			reason=reason,
+			code=code,
+		)
+	return PreToolCallDecision(bool(raw), previous_arguments, plugin_name=plugin_name)
+
+
+def _plugin_rejection_reason(plugin: BasePlugin) -> str:
+	return str(
+		getattr(plugin, "last_rejection_reason", "")
+		or getattr(plugin, "_last_rejection_reason", "")
+		or getattr(plugin, "_stop_reason", "")
+		or ""
+	)
+
+
+def _plugin_rejection_code(plugin: BasePlugin) -> str:
+	return str(
+		getattr(plugin, "last_rejection_code", "")
+		or getattr(plugin, "_last_rejection_code", "")
+		or "tool.rejected_by_plugin"
+	)

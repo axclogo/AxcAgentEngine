@@ -40,13 +40,19 @@ async def externalize_large_tool_output(
 	if estimate_tokens(content) <= artifact_threshold_tokens:
 		return output
 	artifact = await result_store.put(content, {"kind": output.content_type, **output.metadata})
-	summary = output.summary or _compact_text(content, 300)
+	summary = output.durable_summary() or output.summary or _compact_text(content, 300)
+	metadata = dict(output.metadata)
+	metadata.update({
+		"externalized": True,
+		"original_size": len(content),
+		"artifact_id": artifact.id,
+	})
 	return ToolOutput(
 		content=summary,
 		content_type=output.content_type,
 		summary=summary,
 		artifacts=[*output.artifacts, artifact],
-		metadata=output.metadata,
+		metadata=metadata,
 	)
 
 

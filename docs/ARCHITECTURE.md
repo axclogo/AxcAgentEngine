@@ -150,7 +150,7 @@ orchestrator.execute_tool_calls
       4. build ToolContext (workspace + ExecutionServices)
       5. executor.execute_tool (validate → retry → timeout → enforce ToolOutput)
       6. post_tool_call hooks (receive/return ToolOutput)
-  → message_store.append_tool_results uses ToolOutput.compact_view()
+  → message_store.append_tool_results uses ToolOutput.context_view()
 ```
 
 Large results stored via ResultStore, retrievable via result_read/result_search/result_page tools.

@@ -50,6 +50,39 @@ class TestCompressPluginPostToolCall:
 		assert result.artifacts
 		assert await store.get(result.artifacts[0].id, limit=5) == "xxxxx"
 
+	@pytest.mark.asyncio
+	async def test_externalized_large_output_keeps_summary_and_artifact_refs_for_context(self):
+		p = CompressPlugin()
+		p.initialize({"tool_result": {"artifact_threshold_tokens": 10}}, PluginContext())
+		store = InMemoryResultStore()
+		ctx = ExecutionContext()
+		ctx.services.result_store = store
+		output = ToolOutput.text("raw payload " * 1000, summary="query succeeded with 42 rows")
+
+		result = await p.post_tool_call(ctx, "business_query", {}, output, 30)
+
+		assert result.artifacts
+		assert result.context_view().startswith("query succeeded with 42 rows")
+		assert result.artifacts[0].id in result.context_view()
+		assert result.metadata["externalized"] is True
+		assert await store.get(result.artifacts[0].id, limit=11) == "raw payload"
+
+	@pytest.mark.asyncio
+	async def test_records_durable_tool_result_for_boundary_and_context(self):
+		p = CompressPlugin()
+		p.initialize({"durable_tools": {"names": ["business_query"]}}, PluginContext())
+		ctx = ExecutionContext()
+		output = ToolOutput.text(
+			"full result",
+			summary="short",
+		).with_metadata({"durable_summary": "岗位需求分析报告"})
+
+		await p.post_tool_call(ctx, "business_query", {}, output, 100)
+		result = p.transform_messages([{"role": "user", "content": "next"}], ctx, "next")
+
+		assert any("岗位需求分析报告" in item for item in p._conversation_buffer)
+		assert any("岗位需求分析报告" in msg.get("content", "") for msg in result)
+
 
 class TestCompressPluginTransformMessages:
 	def test_snip_compact_still_works(self):
@@ -80,6 +113,29 @@ class TestCompressPluginTransformMessages:
 		result = p.transform_messages(messages, ctx)
 		users = [m["content"] for m in result if m["role"] == "user"]
 		assert users == ["q3", "q4"]
+
+	def test_pinned_tool_result_survives_small_context_budget(self):
+		p = CompressPlugin()
+		p.initialize({
+			"context_window": {"max_input_tokens": 120, "reserve_output_tokens": 20},
+			"recent_window": {"rounds": 1},
+			"tool_result": {"max_inline_tokens": 1000},
+		}, PluginContext())
+		ctx = ExecutionContext()
+		messages = [{"role": "system", "content": "sys"}]
+		for i in range(10):
+			messages.append({"role": "user", "content": f"q{i}"})
+			messages.append({
+				"role": "assistant",
+				"content": "",
+				"tool_calls": [{"id": f"tc{i}", "function": {"name": "agent_call", "arguments": "{}"}}],
+			})
+			metadata = {"durable": True, "durable_summary": "关键阶段报告"} if i == 0 else {}
+			messages.append({"role": "tool", "tool_call_id": f"tc{i}", "content": f"result{i}", "metadata": metadata})
+
+		result = p.transform_messages(messages, ctx)
+
+		assert any(msg.get("role") == "tool" and "result0" in msg.get("content", "") for msg in result)
 
 	def test_empty_messages(self):
 		p = CompressPlugin()

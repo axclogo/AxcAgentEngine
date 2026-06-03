@@ -1,17 +1,25 @@
-"""Tests for MessageStore with ToolOutput compact_view integration."""
+"""Tests for MessageStore with ToolOutput context_view integration."""
 from axc_agent_engine.core.message_store import MessageStore
 from axc_agent_engine.tools.executor import ToolResult
 from axc_agent_engine.tools.tool_output import ToolOutput, ArtifactRef
 
 
 class TestMessageStoreToolOutput:
-	def test_append_success_uses_compact_view(self):
+	def test_append_success_uses_context_view(self):
 		ms = MessageStore()
 		output = ToolOutput.text("hello world")
 		results = [ToolResult(tool_call_id="1", tool_name="t", arguments={}, output=output, success=True)]
 		ms.append_tool_results(results)
 		assert ms.count == 1
 		assert ms.get_all()[0]["content"] == "hello world"
+
+	def test_append_uses_context_view_not_display_view(self):
+		ms = MessageStore()
+		output = ToolOutput.text("full result", summary="context summary")
+		results = [ToolResult(tool_call_id="1", tool_name="t", arguments={}, output=output, success=True)]
+		ms.append_tool_results(results)
+		assert output.display_view() == "full result"
+		assert ms.get_all()[0]["content"] == "context summary"
 
 	def test_append_error_uses_error_message(self):
 		ms = MessageStore()
@@ -91,4 +99,4 @@ class TestMessageStoreToolOutput:
 		results = [ToolResult(tool_call_id="1", tool_name="t", arguments={}, output=output, success=True)]
 		ms.append_tool_results(results)
 		content = ms.get_all()[0]["content"]
-		assert len(content) <= 2100  # compact_view default 2000 + some overhead
+		assert len(content) <= 2100  # context_view default 2000 + marker overhead

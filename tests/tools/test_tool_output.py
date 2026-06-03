@@ -66,37 +66,47 @@ class TestToolOutput:
 		assert out.content_type == "error"
 		assert out.is_error is True
 
-	def test_compact_view_short_text(self):
+	def test_context_view_short_text(self):
 		out = ToolOutput.text("short")
-		assert out.compact_view() == "short"
+		assert out.context_view() == "short"
 
-	def test_compact_view_uses_summary(self):
+	def test_context_view_prefers_durable_summary_then_summary(self):
+		out = ToolOutput.text("full", summary="summary").with_metadata({"durable_summary": "durable"})
+		assert out.context_view() == "durable"
+		assert ToolOutput.text("full", summary="summary").context_view() == "summary"
+
+	def test_display_view_returns_full_content(self):
+		long_text = "x" * 5000
+		out = ToolOutput.text(long_text, summary="summary")
+		assert out.display_view() == long_text
+
+	def test_context_view_uses_summary(self):
 		out = ToolOutput.text("very long " * 500, summary="brief summary")
-		assert out.compact_view() == "brief summary"
+		assert out.context_view() == "brief summary"
 
-	def test_compact_view_truncates_long(self):
+	def test_context_view_truncates_long(self):
 		long_text = "x" * 5000
 		out = ToolOutput.text(long_text)
-		view = out.compact_view(max_chars=200)
+		view = out.context_view(max_chars=200)
 		assert len(view) <= 250  # some overhead for marker
 		assert "省略" in view
 
-	def test_compact_view_error(self):
+	def test_context_view_error(self):
 		out = ToolOutput.error("oops")
-		view = out.compact_view()
+		view = out.context_view()
 		assert "[错误]" in view
 		assert "oops" in view
 
-	def test_compact_view_with_artifacts(self):
+	def test_context_view_with_artifacts(self):
 		ref = ArtifactRef(id="abc", kind="text", size=5000)
 		out = ToolOutput(content="data", content_type="text", artifacts=[ref])
-		view = out.compact_view()
+		view = out.context_view()
 		assert "abc" in view
 		assert "附件" in view
 
-	def test_compact_view_json_content(self):
+	def test_context_view_json_content(self):
 		out = ToolOutput.json_output({"status": 200, "body": "ok"})
-		view = out.compact_view()
+		view = out.context_view()
 		assert "200" in view
 
 	def test_to_dict(self):
@@ -297,18 +307,18 @@ class TestInMemoryResultStore:
 		assert isinstance(store, ResultStore)
 
 
-class TestToolOutputCompactViewEdgeCases:
+class TestToolOutputContextViewEdgeCases:
 	def test_empty_content(self):
 		out = ToolOutput.text("")
-		assert out.compact_view() == ""
+		assert out.context_view() == ""
 
 	def test_none_like_content(self):
 		out = ToolOutput(content="", content_type="text")
-		assert out.compact_view() == ""
+		assert out.context_view() == ""
 
 	def test_max_chars_zero(self):
 		out = ToolOutput.text("hello")
-		view = out.compact_view(max_chars=0)
+		view = out.context_view(max_chars=0)
 		assert "省略" in view or view == ""
 
 	def test_multiple_artifacts(self):
@@ -317,6 +327,6 @@ class TestToolOutputCompactViewEdgeCases:
 			ArtifactRef(id="a2", kind="file", size=200),
 		]
 		out = ToolOutput(content="data", content_type="text", artifacts=refs)
-		view = out.compact_view()
+		view = out.context_view()
 		assert "a1" in view
 		assert "a2" in view

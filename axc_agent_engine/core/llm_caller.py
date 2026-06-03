@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from copy import deepcopy
 from typing import Any, TYPE_CHECKING
 
 from axc_agent_engine.core.context import ExecutionContext
@@ -24,6 +25,7 @@ if TYPE_CHECKING:
 	from axc_agent_engine.llm.provider import LLMProvider
 
 logger = logging.getLogger(__name__)
+PROVIDER_MESSAGE_KEYS = {"role", "content", "name", "tool_call_id", "tool_calls", "function_call"}
 
 
 class StreamEventEmitter:
@@ -130,6 +132,7 @@ class LLMCaller:
 中文：以下为双语文档说明。
 统一入口：按 ctx.config.stream 分发到流式或非流式调用。"""
 		messages, tools = self._pm.apply_pre_llm_call(ctx, messages, tools)
+		messages = _provider_messages(messages)
 		before_input_tokens = ctx.state.total_input_tokens
 		before_output_tokens = ctx.state.total_output_tokens
 		start = time.time()
@@ -284,3 +287,8 @@ class LLMCaller:
 			self._primary, self._fallback, getattr(ctx, "utility_model", None), self._fallback)
 		ctx.runtime.model_info = model_info
 		ctx.state.metadata["model"] = model_info.to_dict()
+
+
+def _provider_messages(messages: list[dict]) -> list[dict]:
+	"""English: Strip engine-only message fields. 中文：剥离仅供引擎内部使用的消息字段。"""
+	return [{key: deepcopy(value) for key, value in message.items() if key in PROVIDER_MESSAGE_KEYS} for message in messages]

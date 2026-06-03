@@ -155,7 +155,7 @@ class TestPluginPostToolCallToolOutput:
 
 class TestRepetitionGuardWithToolOutput:
 	@pytest.mark.asyncio
-	async def test_tracks_compact_view(self):
+	async def test_tracks_context_view(self):
 		from axc_agent_engine.plugins.builtin.repetition_guard.plugin import RepetitionGuardPlugin
 		p = RepetitionGuardPlugin()
 		p.initialize({"rules": [{"type": "same_call", "limit": 3}]}, None)

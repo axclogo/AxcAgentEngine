@@ -6,6 +6,13 @@ from types import SimpleNamespace
 from axc_agent_engine.core.dispatcher import AgentEnvelope
 from axc_agent_engine.plugins import PluginContext
 from axc_agent_engine.plugins.builtin.collaboration.plugin import CollaborationPlugin
+from axc_agent_engine.plugins.builtin.collaboration.plugin import (
+	_agent_call_durable_summary,
+	_bounded_timeout,
+	_collaboration_metadata,
+	_task_status,
+	_task_to_dict,
+)
 from axc_agent_engine.runtime.resources import ResourceRegistry
 
 
@@ -157,6 +164,20 @@ async def test_agent_call_uses_collaboration_timeout_config():
 	assert dispatcher.timeout == 300
 
 
+async def test_agent_call_tool_output_contains_durable_result_summary():
+	dispatcher = RecordingDispatcher()
+	plugin = _plugin([SimpleNamespace(name="worker", description="")], dispatcher)
+	result = await plugin._tool_agent_call(
+		{"agent_name": "worker", "message": "do it"},
+		{"agent_name": "caller"},
+	)
+
+	assert not result.is_error
+	assert result.metadata["durable"] is True
+	assert "worker reply" in result.summary
+	assert "worker reply" in result.context_view()
+
+
 def test_agent_call_tool_disables_outer_timeout():
 	plugin = _plugin([SimpleNamespace(name="worker", description="")], RecordingDispatcher(), {"timeout": 300})
 	tool = next(item for item in plugin.get_tools() if item.name == "agent_call")
@@ -284,3 +305,130 @@ async def test_collaboration_plugin_awaits_async_get_task():
 	status = await plugin._tool_orchestration_task_get({"task_id": "task-1"}, {})
 
 	assert status.content["task_id"] == "task-1"
+
+
+def test_collaboration_disabled_plugin_exposes_no_tools():
+	plugin = _plugin([], RecordingDispatcher(), {"enabled": False})
+
+	assert plugin.get_tools() == []
+
+
+async def test_agent_call_rejects_missing_fields_depth_and_missing_dispatcher():
+	plugin = _plugin([SimpleNamespace(name="worker", description="")], RecordingDispatcher(), {"max_depth": 1})
+	deep_ctx = SimpleNamespace(runtime=SimpleNamespace(agent_call_depth=1), state=SimpleNamespace(metadata={}))
+	no_dispatcher = _plugin([SimpleNamespace(name="worker", description="")], None)
+
+	missing = await plugin._tool_agent_call({"agent_name": "", "message": ""}, {})
+	depth = await plugin._tool_agent_call(
+		{"agent_name": "worker", "message": "x"},
+		{"agent_name": "caller", "exec_ctx": deep_ctx},
+	)
+	no_bus = await no_dispatcher._tool_agent_call({"agent_name": "worker", "message": "x"}, {"agent_name": "caller"})
+
+	assert missing.is_error
+	assert depth.is_error
+	assert no_bus.is_error
+
+
+async def test_agent_call_reply_error_value_error_and_exception_restore_depth():
+	class ErrorDispatcher(RecordingDispatcher):
+		async def request(self, envelope, timeout=60.0, event_callback=None):
+			return AgentEnvelope(type="error", content="child failed")
+
+	class ValueErrorDispatcher(RecordingDispatcher):
+		async def request(self, envelope, timeout=60.0, event_callback=None):
+			raise ValueError("bad dispatch")
+
+	class CrashDispatcher(RecordingDispatcher):
+		async def request(self, envelope, timeout=60.0, event_callback=None):
+			raise RuntimeError("boom")
+
+	for dispatcher, expected in [
+		(ErrorDispatcher(), "child failed"),
+		(ValueErrorDispatcher(), "bad dispatch"),
+		(CrashDispatcher(), "Agent 调用失败: boom"),
+	]:
+		plugin = _plugin([SimpleNamespace(name="worker", description="")], dispatcher)
+		exec_ctx = SimpleNamespace(runtime=SimpleNamespace(agent_call_depth=0), state=SimpleNamespace(metadata={}))
+		result = await plugin._tool_agent_call(
+			{"agent_name": "worker", "message": "x", "timeout": "bad"},
+			{"agent_name": "caller", "exec_ctx": exec_ctx},
+		)
+		assert result.is_error
+		assert expected in result.content
+		assert exec_ctx.runtime.agent_call_depth == 0
+
+
+async def test_orchestration_create_validates_service_args_and_exceptions():
+	class FailingCreate:
+		async def create_task(self, **kwargs):
+			raise RuntimeError("create down")
+
+	plugin = CollaborationPlugin()
+	plugin.initialize({"enabled": True}, PluginContext(resources=ResourceRegistry({"orchestration": FailingCreate()})))
+	no_service = _plugin([], RecordingDispatcher())
+
+	assert (await no_service._tool_orchestration_task_create({}, {})).is_error
+	assert (await plugin._tool_orchestration_task_create({"agent_names": "bad", "topic": "x"}, {})).is_error
+	result = await plugin._tool_orchestration_task_create({"agent_names": ["a"], "topic": "x", "persona": "bad"}, {})
+
+	assert result.is_error
+	assert "create down" in result.content
+
+
+async def test_orchestration_get_and_cancel_error_boundaries():
+	class NoMethods:
+		pass
+
+	class SyncCancelService:
+		def __init__(self):
+			self.tasks = {"task": SimpleNamespace(task_id="task", status="running", agent_names=[], events=list(range(30)))}
+
+		def get_task(self, task_id):
+			return self.tasks.get(task_id)
+
+		def cancel_task(self, task_id):
+			return task_id == "task"
+
+	plugin = CollaborationPlugin()
+	plugin.initialize({"enabled": True}, PluginContext(resources=ResourceRegistry({"orchestration": NoMethods()})))
+	sync = CollaborationPlugin()
+	sync.initialize({"enabled": True}, PluginContext(resources=ResourceRegistry({"orchestration": SyncCancelService()})))
+
+	assert (await plugin._tool_orchestration_task_get({"task_id": ""}, {})).is_error
+	assert (await plugin._tool_orchestration_task_get({"task_id": "x"}, {})).is_error
+	assert (await plugin._tool_orchestration_task_cancel({"task_id": ""}, {})).is_error
+	assert (await plugin._tool_orchestration_task_cancel({"task_id": "x"}, {})).is_error
+	assert (await sync._tool_orchestration_task_get({"task_id": "missing"}, {})).is_error
+	status = await sync._tool_orchestration_task_get({"task_id": "task"}, {})
+	cancelled = await sync._tool_orchestration_task_cancel({"task_id": "task"}, {})
+	assert len(status.content["events"]) == 20
+	assert cancelled.content["cancelled"] is True
+
+
+def test_collaboration_helper_boundaries():
+	exec_ctx = SimpleNamespace(state=SimpleNamespace(metadata={"trace_id": "t", "tenant": "x"}))
+	task = SimpleNamespace(
+		task_id="id",
+		status="done",
+		mode="m",
+		topic="t",
+		agent_names=("a", "b"),
+		events=list(range(25)),
+		result={"ok": True},
+		error="",
+	)
+
+	assert _bounded_timeout("bad", 7) == 7
+	assert _bounded_timeout(0, 7) == 1.0
+	assert _bounded_timeout(9999, 7) == 3600.0
+	assert _collaboration_metadata({"agent_name": "caller", "session_id": "s"}, exec_ctx, 2) == {
+		"trace_id": "t",
+		"tenant": "x",
+		"agent_call_depth": 2,
+		"caller_agent": "caller",
+		"caller_session_id": "s",
+	}
+	assert _agent_call_durable_summary("a", {"x": 1}).startswith("Agent 'a' result")
+	assert _task_status(task) == "done"
+	assert _task_to_dict(task)["events"] == list(range(5, 25))

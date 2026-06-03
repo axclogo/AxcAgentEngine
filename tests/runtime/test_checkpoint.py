@@ -63,6 +63,19 @@ async def test_delete_run_and_stats():
 	assert store.stats()["checkpoints"] == 1
 
 
+async def test_checkpoint_filters_and_unbounded_limits():
+	store = InMemoryCheckpointStore(max_runs=0, max_checkpoints_per_run=0)
+	await store.save(Checkpoint(run_id="run-1", sequence=1, status=CheckpointStatus.RUNNING, kind="round"))
+	await store.save(Checkpoint(run_id="run-1", sequence=2, status=CheckpointStatus.COMPLETED, kind="por"))
+	await store.save(Checkpoint(run_id="run-2", sequence=1, status=CheckpointStatus.FAILED, kind="round"))
+	assert await store.latest("missing") is None
+	assert await store.list("missing") == []
+	assert await store.list_runs(status=CheckpointStatus.COMPLETED) == ["run-1"]
+	assert await store.list_runs(kind="round") == ["run-2"]
+	assert await store.list_runs(status=CheckpointStatus.RUNNING) == []
+	assert len(await store.list("run-1")) == 2
+
+
 async def test_requires_run_id():
 	store = InMemoryCheckpointStore()
 	with pytest.raises(ValueError, match="run_id"):

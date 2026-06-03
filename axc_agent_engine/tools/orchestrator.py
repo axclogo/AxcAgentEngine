@@ -5,7 +5,7 @@
 把工具调用划分为批次：连续只读工具并发执行，写工具串行执行。
 每次调用流程：pre_hooks → execute → post_hooks。
 
-ToolOutput.compact_view() 负责上下文安全序列化。"""
+ToolOutput.context_view() 负责上下文安全序列化。"""
 import asyncio
 from typing import Any
 
@@ -66,13 +66,13 @@ async def _execute_single_with_timeout(
 	"""English: Bilingual documentation follows.
 中文：以下为双语文档说明。
 执行单个工具调用，并用 step_timeout 约束完整编排耗时。"""
-	timeout = step_timeout(ctx)
+	runtime = tool_runtime(tc, ctx, registry)
+	timeout = _effective_orchestration_timeout(ctx, runtime)
 	if timeout <= 0:
-		return await _execute_single(tc, registry, plugin_manager, ctx)
+		return await _execute_single_runtime(runtime, plugin_manager, ctx)
 	try:
-		return await asyncio.wait_for(_execute_single(tc, registry, plugin_manager, ctx), timeout=timeout)
+		return await asyncio.wait_for(_execute_single_runtime(runtime, plugin_manager, ctx), timeout=timeout)
 	except asyncio.TimeoutError:
-		runtime = tool_runtime(tc, ctx, registry)
 		return await _fail_tool_call(
 			ctx, runtime, AuditEventType.TOOL_CALL_FAILED, plugin_manager,
 			code="tool.call_timeout",
@@ -86,20 +86,35 @@ async def _execute_single_with_timeout(
 async def _execute_single(
 	tc: dict, registry: ToolRegistry, plugin_manager: PluginManager, ctx: ExecutionContext,
 ) -> ToolResult:
+	return await _execute_single_runtime(tool_runtime(tc, ctx, registry), plugin_manager, ctx)
+
+
+async def _execute_single_runtime(
+	runtime: ToolCallRuntime, plugin_manager: PluginManager, ctx: ExecutionContext,
+) -> ToolResult:
 	"""English: Bilingual documentation follows.
 中文：以下为双语文档说明。
 执行单个工具调用：pre_hooks → resolve → execute → post_hooks。"""
-	runtime = tool_runtime(tc, ctx, registry)
 	tool_context_key = 0
 	try:
 		tool_context_key = push_current_tool_runtime(ctx, runtime)
-		allowed, runtime.arguments = await plugin_manager.apply_pre_tool_call(ctx, runtime.name, runtime.arguments)
-		if not allowed:
+		decision = await plugin_manager.apply_pre_tool_call(ctx, runtime.name, runtime.arguments)
+		runtime.arguments = decision.arguments
+		if not decision.allowed:
+			reason = decision.reason or "工具调用被插件拒绝，但插件未提供具体原因"
+			plugin_name = decision.plugin_name or "unknown"
+			message = f"工具调用被插件 {plugin_name} 拒绝: {reason}"
 			return await _fail_tool_call(
 				ctx, runtime, AuditEventType.TOOL_CALL_REJECTED, plugin_manager,
-				code="tool.rejected_by_plugin",
-				message="Operation rejected by plugin",
+				code=decision.code or "tool.rejected_by_plugin",
+				message=message,
 				category=ErrorCategory.POLICY,
+				details={
+					"tool_name": runtime.name,
+					"plugin_name": plugin_name,
+					"reason": reason,
+					**(decision.details or {}),
+				},
 			)
 		if not runtime.tool_def:
 			return await _fail_tool_call(
@@ -140,6 +155,21 @@ async def _execute_single(
 		)
 	finally:
 		pop_current_tool_runtime(ctx, tool_context_key)
+
+
+def _effective_orchestration_timeout(ctx: ExecutionContext, runtime: ToolCallRuntime) -> float:
+	timeout = step_timeout(ctx)
+	if runtime.name not in {"agent_call", "swarm_dispatch"}:
+		return timeout
+	requested = _argument_timeout(runtime.arguments)
+	return max(timeout, requested) if requested > 0 else timeout
+
+
+def _argument_timeout(arguments: dict) -> float:
+	try:
+		return float(arguments.get("timeout", 0) or 0)
+	except (TypeError, ValueError):
+		return 0.0
 
 
 async def _fail_tool_call(

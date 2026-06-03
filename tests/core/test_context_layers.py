@@ -16,6 +16,12 @@ from axc_agent_engine.plugins.builtin.compress.context.tool_result import (
 	compact_tool_messages,
 	externalize_large_tool_output,
 )
+from axc_agent_engine.plugins.builtin.compress.context.tool_summary import (
+	ToolObservation,
+	ToolSummaryService,
+	observation_from_output,
+	tool_summaries_message,
+)
 from axc_agent_engine.storage.result_store import InMemoryResultStore
 from axc_agent_engine.tools.tool_output import ToolOutput
 
@@ -147,6 +153,15 @@ class TestRecall:
 		result = fallback_recall(messages, "python", top_k=3, token_limit=100)
 		assert result[0].text == "python testing details"
 
+	def test_fallback_recall_skips_system_and_token_overflow(self):
+		messages = normalize_messages([
+			{"role": "system", "content": "python"},
+			{"role": "assistant", "content": "python", "token_estimate": 100},
+			{"role": "user", "content": "python durable", "pinned": True, "token_estimate": 1},
+		])
+		result = fallback_recall(messages, "python", top_k=5, token_limit=2)
+		assert [item.text for item in result] == ["python durable"]
+
 	def test_read_sync_recall_resource(self):
 		class Resource:
 			def search(self, query, top_k=1):
@@ -154,6 +169,19 @@ class TestRecall:
 
 		result = read_recall_resource(Resource(), "hello", top_k=1)
 		assert result[0].text == "hello"
+
+	def test_read_recall_resource_handles_none_missing_and_raw_items(self):
+		assert read_recall_resource(None, "q", 1) == []
+		assert read_recall_resource(object(), "q", 1) == []
+
+		class Resource:
+			def search(self, query, top_k=1):
+				return [{"content": "c", "score": "0.2", "metadata": {"m": 1}}, "raw"]
+
+		result = read_recall_resource(Resource(), "q", 2)
+		assert result[0].text == "c"
+		assert result[0].metadata == {"m": 1}
+		assert result[1].text == "raw"
 
 	def test_read_async_recall_resource(self):
 		class Resource:
@@ -184,6 +212,49 @@ class TestRecall:
 		resource = Resource()
 		await write_recall_resource(resource, ["text"], [{"round": 1}])
 		assert resource.written == [(["text"], [{"round": 1}])]
+
+	@pytest.mark.asyncio
+	async def test_write_recall_resource_noops_without_resource_method_or_texts(self):
+		await write_recall_resource(None, ["text"], [])
+		await write_recall_resource(object(), ["text"], [])
+
+		class Resource:
+			def __init__(self):
+				self.called = False
+
+			def add_texts(self, texts, metadata):
+				self.called = True
+
+		resource = Resource()
+		await write_recall_resource(resource, [], [])
+		assert resource.called is False
+
+
+class TestToolSummary:
+	@pytest.mark.asyncio
+	async def test_tool_summary_empty_utility_failure_and_truncation(self):
+		service = ToolSummaryService(max_chars=10, max_observations=1)
+		assert await service.summarize(None, []) == ""
+
+		class BrokenLLM:
+			async def ask(self, prompt):
+				raise RuntimeError("down")
+
+		summary = await service.summarize(BrokenLLM(), [
+			ToolObservation(name="old", arguments={}, result="old"),
+			ToolObservation(name="tool", arguments={"x": "y" * 500}, result="r" * 500, duration_ms=7, is_error=True),
+		])
+		assert "tool" in summary
+		assert len(summary) > 10
+
+	def test_tool_summary_message_filters_blank_and_observation_from_output(self):
+		assert tool_summaries_message(["", " a "]) == {"role": "system", "content": "[工具摘要]\n- a"}
+		assert tool_summaries_message(["", "  "]) is None
+		output = ToolOutput.text("large", summary="short").with_metadata({"durable_summary": "durable"})
+		obs = observation_from_output("agent_call", {"q": 1}, output, 9)
+		assert obs.name == "agent_call"
+		assert obs.result == "durable"
+		assert "[ok, 9ms]" in obs.compact()
 
 
 class TestSummarizer:

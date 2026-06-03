@@ -317,7 +317,7 @@ class TestOrchestrator:
 		results = await execute_tool_calls(calls, tool_registry, [], ctx)
 		assert len(results) == 1
 		assert results[0].success is True
-		assert "hi" in results[0].compact_view()
+		assert "hi" in results[0].context_view()
 
 	@pytest.mark.asyncio
 	async def test_execute_unknown_tool(self, tool_registry):
@@ -339,7 +339,8 @@ class TestOrchestrator:
 		ctx = ExecutionContext(config=ExecutionConfig(stream=True))
 		results = await execute_tool_calls(calls, tool_registry, [RejectPlugin()], ctx)
 		assert results[0].success is False
-		assert "rejected" in results[0].error.lower()
+		assert "reject" in results[0].error
+		assert "未提供具体原因" in results[0].error
 
 
 class TestToolDecorator:
