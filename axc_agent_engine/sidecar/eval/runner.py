@@ -11,6 +11,8 @@ from axc_agent_engine.core.events import EventType
 
 logger = logging.getLogger(__name__)
 
+CaseOptionsFactory = Callable[["EvalCase", int], dict]
+
 if TYPE_CHECKING:
 	from axc_agent_engine.sidecar.eval.store import AnnotationStore, EvalStore
 	from axc_agent_engine.sidecar.eval.judge import LLMJudge
@@ -68,7 +70,14 @@ class EvalCaseExecutor:
 	Runs one eval case and records output, tools, usage, and error.
 	"""
 
-	async def run(self, agent: Any, case: EvalCase, case_id: str) -> EvalResult:
+	async def run(
+		self,
+		agent: Any,
+		case: EvalCase,
+		case_id: str,
+		run_options: dict | None = None,
+		metadata: dict | None = None,
+	) -> EvalResult:
 		start = time.time()
 		actual_tools: list[str] = []
 		actual_output = ""
@@ -76,7 +85,12 @@ class EvalCaseExecutor:
 		input_tokens = 0
 		output_tokens = 0
 		try:
-			async for event in agent.stream(case.input):
+			kwargs = {}
+			if run_options is not None:
+				kwargs["run_options"] = run_options
+			if metadata is not None:
+				kwargs["metadata"] = metadata
+			async for event in agent.stream(case.input, **kwargs):
 				if event.type == EventType.TOOL_CALL:
 					actual_tools.append(event.tool_name)
 				elif event.type == EventType.DONE:
@@ -167,6 +181,10 @@ class EvalRunner:
 		judge_llm: Any = None,
 		custom_judge: Callable[[EvalCase, EvalResult], float] | None = None,
 		run_id: str = "",
+		run_options: dict | None = None,
+		metadata: dict | None = None,
+		case_run_options: CaseOptionsFactory | None = None,
+		case_metadata: CaseOptionsFactory | None = None,
 	) -> list[EvalResult]:
 		"""English: Bilingual documentation follows.
 中文：以下为双语文档说明。
@@ -178,12 +196,23 @@ class EvalRunner:
 			raise ValueError(f"Agent '{self._agent_name}' 未找到")
 		from axc_agent_engine.sidecar.eval.judge import LLMJudge
 		judge = LLMJudge(judge_llm) if judge_llm else None
-		run_id = run_id or uuid.uuid4().hex[:12]
+		base_run_options = _dict_or_empty(run_options, "run_options")
+		base_metadata = _dict_or_empty(metadata, "metadata")
+		run_id = run_id or str(base_run_options.get("run_id") or "") or uuid.uuid4().hex[:12]
 		results = []
 		for i, case in enumerate(cases):
 			case_id = case.case_id or f"case_{i}"
 			case = await self._apply_annotation(case, case_id)
-			result = await self._run_single(agent, case, case_id)
+			effective_options, effective_metadata = self._case_request_context(
+				case,
+				i,
+				case_id,
+				base_run_options,
+				base_metadata,
+				case_run_options,
+				case_metadata,
+			)
+			result = await self._run_single(agent, case, case_id, effective_options, effective_metadata)
 			await self._scorer.score(case, result, judge, custom_judge)
 			results.append(result)
 			if self._store:
@@ -196,11 +225,24 @@ class EvalRunner:
 		judge_llm: Any = None,
 		custom_judge: Callable[[EvalCase, EvalResult], float] | None = None,
 		run_id: str = "",
+		run_options: dict | None = None,
+		metadata: dict | None = None,
+		case_run_options: CaseOptionsFactory | None = None,
+		case_metadata: CaseOptionsFactory | None = None,
 	) -> list[EvalResult]:
 		if self._store:
 			for case in dataset.cases:
 				await self._store.save_case(dataset.suite_id, case)
-		return await self.run_cases(dataset.cases, judge_llm=judge_llm, custom_judge=custom_judge, run_id=run_id or dataset.suite_id)
+		return await self.run_cases(
+			dataset.cases,
+			judge_llm=judge_llm,
+			custom_judge=custom_judge,
+			run_id=run_id or dataset.suite_id,
+			run_options=run_options,
+			metadata=metadata,
+			case_run_options=case_run_options,
+			case_metadata=case_metadata,
+		)
 
 	async def run_suite(
 		self,
@@ -208,19 +250,39 @@ class EvalRunner:
 		judge_llm: Any = None,
 		custom_judge: Callable[[EvalCase, EvalResult], float] | None = None,
 		run_id: str = "",
+		run_options: dict | None = None,
+		metadata: dict | None = None,
+		case_run_options: CaseOptionsFactory | None = None,
+		case_metadata: CaseOptionsFactory | None = None,
 	) -> list[EvalResult]:
 		if not self._store:
 			raise ValueError("EvalStore is required to run a stored suite")
 		cases = await self._store.list_cases(suite_id)
-		return await self.run_cases(cases, judge_llm=judge_llm, custom_judge=custom_judge, run_id=run_id or suite_id)
+		return await self.run_cases(
+			cases,
+			judge_llm=judge_llm,
+			custom_judge=custom_judge,
+			run_id=run_id or suite_id,
+			run_options=run_options,
+			metadata=metadata,
+			case_run_options=case_run_options,
+			case_metadata=case_metadata,
+		)
 
-	async def _run_single(self, agent: Any, case: EvalCase, case_id: str) -> EvalResult:
+	async def _run_single(
+		self,
+		agent: Any,
+		case: EvalCase,
+		case_id: str,
+		run_options: dict,
+		metadata: dict,
+	) -> EvalResult:
 		"""English: Bilingual documentation follows.
 中文：以下为双语文档说明。
 执行单个用例。
 		Run one evaluation case.
 		"""
-		return await self._case_executor.run(agent, case, case_id)
+		return await self._case_executor.run(agent, case, case_id, run_options=run_options, metadata=metadata)
 
 	@staticmethod
 	def _auto_score(case: EvalCase, result: EvalResult) -> float:
@@ -249,3 +311,68 @@ class EvalRunner:
 			metadata=metadata,
 			case_id=case_id,
 		)
+
+	def _case_request_context(
+		self,
+		case: EvalCase,
+		index: int,
+		case_id: str,
+		base_run_options: dict,
+		base_metadata: dict,
+		case_run_options: CaseOptionsFactory | None,
+		case_metadata: CaseOptionsFactory | None,
+	) -> tuple[dict, dict]:
+		options = self._case_run_options(case, index, case_id, base_run_options, case_run_options)
+		metadata = self._case_metadata(case, index, case_id, base_metadata, case_metadata)
+		_validate_run_request_context(case.input, options, metadata)
+		return options, metadata
+
+	def _case_run_options(
+		self,
+		case: EvalCase,
+		index: int,
+		case_id: str,
+		base_run_options: dict,
+		case_run_options: CaseOptionsFactory | None,
+	) -> dict:
+		case_options = _call_case_dict(case_run_options, case, index, "case_run_options")
+		options = {**base_run_options, **case_options}
+		batch_run_id = str(base_run_options.get("run_id") or "")
+		case_run_id = str(case_options.get("run_id") or "")
+		if batch_run_id and not case_run_id:
+			options["run_id"] = f"{batch_run_id}:{case_id}"
+		return options
+
+	def _case_metadata(
+		self,
+		case: EvalCase,
+		index: int,
+		case_id: str,
+		base_metadata: dict,
+		case_metadata: CaseOptionsFactory | None,
+	) -> dict:
+		case_meta = _call_case_dict(case_metadata, case, index, "case_metadata")
+		defaults = {"sidecar": "eval", "eval_case_id": case_id, "eval_case_index": index}
+		return {**base_metadata, **defaults, **case_meta}
+
+
+def _dict_or_empty(value: dict | None, name: str) -> dict:
+	if value is None:
+		return {}
+	if not isinstance(value, dict):
+		raise TypeError(f"{name} must be a dict")
+	return dict(value)
+
+
+def _call_case_dict(factory: CaseOptionsFactory | None, case: EvalCase, index: int, name: str) -> dict:
+	if not factory:
+		return {}
+	value = factory(case, index)
+	if not isinstance(value, dict):
+		raise TypeError(f"{name} must return a dict")
+	return dict(value)
+
+
+def _validate_run_request_context(user_message: str, run_options: dict, metadata: dict) -> None:
+	from axc_agent_engine.core.run_request import RunRequest
+	RunRequest.create(user_message=user_message, run_options=run_options, metadata=metadata)

@@ -15,7 +15,11 @@ from axc_agent_engine.core.events import Event
 
 
 class FakeAgent:
-	async def stream(self, message):
+	def __init__(self):
+		self.calls = []
+
+	async def stream(self, message, **kwargs):
+		self.calls.append({"message": message, **kwargs})
 		from axc_agent_engine.core.events import Event
 		yield Event.done(f"answer:{message}")
 
@@ -41,6 +45,47 @@ async def test_eval_store_annotation_and_dataset_runner():
 	assert results[0].score == 1.0
 	assert (await store.list_cases("suite"))[0].case_id == "c1"
 	assert (await store.list_results("run"))[0].actual_output == "answer:hello"
+
+
+async def test_eval_runner_passes_run_request_context_per_case():
+	engine = FakeEngine()
+	runner = EvalRunner(engine, "agent")
+	cases = [
+		EvalCase(input="a", case_id="c1", metadata={"judge_only": True}),
+		EvalCase(input="b"),
+	]
+
+	await runner.run_cases(
+		cases,
+		run_options={"run_id": "batch", "stream_idle_timeout": 9},
+		metadata={"exec_log_id": 1001, "tenant": "t1"},
+		case_run_options=lambda case, index: {"run_id": "explicit-c1"} if index == 0 else {"stream": False},
+		case_metadata=lambda case, index: {"eval_case_id": "override-c1"} if index == 0 else {"case_tag": "second"},
+	)
+
+	first, second = engine.agent.calls
+	assert first["run_options"] == {"run_id": "explicit-c1", "stream_idle_timeout": 9}
+	assert first["metadata"]["exec_log_id"] == 1001
+	assert first["metadata"]["sidecar"] == "eval"
+	assert first["metadata"]["eval_case_id"] == "override-c1"
+	assert "judge_only" not in first["metadata"]
+	assert second["run_options"]["run_id"] == "batch:case_1"
+	assert second["run_options"]["stream"] is False
+	assert second["metadata"]["eval_case_id"] == "case_1"
+	assert second["metadata"]["eval_case_index"] == 1
+	assert second["metadata"]["case_tag"] == "second"
+
+
+async def test_eval_runner_rejects_conflicting_run_ids():
+	import pytest
+
+	runner = EvalRunner(FakeEngine(), "agent")
+	with pytest.raises(ValueError, match="run_options.run_id conflicts with metadata.run_id"):
+		await runner.run_cases(
+			[EvalCase(input="a", case_id="c1")],
+			run_options={"run_id": "batch"},
+			metadata={"run_id": "other"},
+		)
 
 
 async def test_eval_store_replaces_results_by_case_id():
