@@ -203,7 +203,7 @@ class SkillPlugin(BasePlugin):
 		self._allow_scripts = bool(config.get("allow_scripts", True))
 		self._allowed_script_names = {_normalize_relpath(name) for name in config.get("allowed_script_names", [])}
 		self._allowed_extensions = _normalize_extensions(config.get("allowed_extensions", list(_SCRIPT_RUNNERS)))
-		self._duplicate_policy = str(config.get("duplicate_policy", "skip")).lower()
+		self._duplicate_policy = str(config.get("duplicate_policy", "error")).lower()
 		if self._duplicate_policy not in {"skip", "replace", "error"}:
 			raise ValueError("skill.duplicate_policy must be one of skip, replace, error")
 		self._timeout = strict_bounded_int(config.get("timeout", 60), 1, 3600, "skill.timeout")
@@ -330,6 +330,8 @@ class SkillPlugin(BasePlugin):
 				if not skill_md:
 					continue
 				self._load_skill_dir(skill_dir, skill_md)
+		if not self._skills:
+			raise ValueError("skill plugin loaded no skills; check paths, skill.catalog, allowed_skills, and denied_skills")
 		logger.info(f"[skill] Loaded {len(self._skills)} skills")
 
 	def _load_catalog_skills(self) -> None:

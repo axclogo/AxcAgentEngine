@@ -358,6 +358,8 @@ class KnowledgePlugin(BasePlugin):
 	def _build_query_rewriter(self):
 		if not self._query_rewrite_config.get("enabled", False):
 			return NoopQueryRewriter()
+		if not self._plugin_ctx.utility_model:
+			raise RuntimeError("knowledge.query_rewrite requires mounted utility model")
 		return LLMQueryRewriter(self._plugin_ctx.utility_model)
 
 	def _bm25_search(self, query: str, top_k: int = 30, filters: KnowledgeFilter | dict | None = None) -> list[int]:
@@ -448,7 +450,7 @@ def _normalize_result(raw: Any, fallback_id: str) -> RetrievalResult:
 	if isinstance(raw, KnowledgeDocument):
 		return RetrievalResult(id=raw.id, text=raw.text, score=1.0, retrieval="document", source=raw.source, metadata=raw.metadata)
 	if not isinstance(raw, dict):
-		return RetrievalResult(id=fallback_id, text=str(raw), score=0.0, retrieval="unknown")
+		raise RuntimeError(f"unsupported knowledge search result: {type(raw).__name__}")
 	metadata = dict(raw.get("metadata") or {})
 	score = float(raw.get("score", raw.get("relevance", 0.0)) or 0.0)
 	text = str(raw.get("text") or raw.get("content") or metadata.get("text") or "")
@@ -469,7 +471,7 @@ def _normalize_document(raw: Any, index: int) -> KnowledgeDocument:
 	if isinstance(raw, KnowledgeDocument):
 		return raw
 	if not isinstance(raw, dict):
-		return KnowledgeDocument(id=str(index), text=str(raw), metadata={"chunk_id": index})
+		raise RuntimeError(f"unsupported knowledge document: {type(raw).__name__}")
 	metadata = dict(raw.get("metadata") or {})
 	metadata.setdefault("chunk_id", index)
 	if raw.get("namespace") and "namespace" not in metadata:

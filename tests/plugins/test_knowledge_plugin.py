@@ -129,6 +129,11 @@ async def test_knowledge_fail_fast_resource_contract_edges(tmp_path):
 		KnowledgePlugin().initialize({}, PluginContext())
 	with pytest.raises(RuntimeError, match="source load failed"):
 		KnowledgePlugin().initialize({"sources": ["missing.md"]}, PluginContext(workspace=str(tmp_path)))
+	with pytest.raises(RuntimeError, match="query_rewrite requires"):
+		KnowledgePlugin().initialize(
+			{"query_rewrite": {"enabled": True}},
+			PluginContext(resources={"knowledge.index": MountedIndex([])}),
+		)
 
 	plugin = KnowledgePlugin()
 	plugin.initialize({}, PluginContext(resources={"knowledge.index": NoSearchIndex()}))
@@ -168,7 +173,7 @@ async def test_knowledge_mounted_documents_sequence_and_provider_errors():
 		def list_documents(self):
 			return [
 				{"id": "a", "text": "alpha beta", "namespace": "n1", "metadata": {"source": "p"}},
-				"plain beta",
+				{"id": "b", "text": "plain beta"},
 			]
 
 	plugin = KnowledgePlugin()
@@ -178,11 +183,15 @@ async def test_knowledge_mounted_documents_sequence_and_provider_errors():
 	payload = await plugin._hybrid_search_payload("beta", top_k=5, include_trace=True)
 	bad = KnowledgePlugin()
 	bad.initialize({}, PluginContext(resources={"knowledge.documents": object()}))
+	malformed = KnowledgePlugin()
+	malformed.initialize({}, PluginContext(resources={"knowledge.documents": ["plain beta"]}))
 
 	assert len(payload["results"]) == 2
 	assert payload["trace"]["sources"][0]["source"] == "local"
 	with pytest.raises(RuntimeError, match="list_documents"):
 		await bad._hybrid_search_payload("x")
+	with pytest.raises(RuntimeError, match="unsupported knowledge document"):
+		await malformed._hybrid_search_payload("x")
 
 
 @pytest.mark.asyncio
@@ -238,8 +247,11 @@ def test_knowledge_normalizers_filters_tokenize_and_highlights():
 		_normalize_response(object(), request, "idx")
 
 	assert _normalize_result(RetrievalResult(id="r", text="x", score=1, retrieval="test"), "fb").id == "r"
-	assert _normalize_result("raw", "fb").text == "raw"
+	with pytest.raises(RuntimeError, match="unsupported knowledge search result"):
+		_normalize_result("raw", "fb")
 	assert _normalize_document(KnowledgeDocument(id="d", text="x"), 3).id == "d"
+	with pytest.raises(RuntimeError, match="unsupported knowledge document"):
+		_normalize_document("raw", 3)
 	assert _normalize_document({"content": "x", "namespace": "n"}, 3).metadata["namespace"] == "n"
 	assert _normalize_trace(RetrievalTrace(query="q"), request, 1).query == "q"
 	assert _normalize_trace({}, request, 3).returned_count == 3

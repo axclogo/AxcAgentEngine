@@ -377,7 +377,7 @@ SKILL_CONFIG_SCHEMA = config_schema(
 		config_field("allow_scripts", "允许脚本", "boolean", "是否允许运行技能脚本。", label_en="Allow scripts", default=True),
 		array_field("allowed_script_names", "允许脚本名", "允许执行的脚本相对路径列表。", _string_item(), label_en="Allowed script names"),
 		array_field("allowed_extensions", "允许扩展名", "允许执行的脚本扩展名。", _string_item(), label_en="Allowed extensions", default=[".py", ".sh"]),
-		config_field("duplicate_policy", "重复策略", "string", "遇到重复技能名时的处理策略。", label_en="Duplicate policy", default="skip", enum=["skip", "replace", "error"]),
+		config_field("duplicate_policy", "重复策略", "string", "遇到重复技能名时的处理策略。", label_en="Duplicate policy", default="error", enum=["skip", "replace", "error"]),
 		config_field("timeout", "脚本超时", "integer", "脚本执行超时秒数。", label_en="Timeout", default=60),
 		config_field("stdout_limit", "标准输出上限", "integer", "脚本 stdout 捕获字符上限。", label_en="Stdout limit", default=1500),
 		config_field("stderr_limit", "标准错误上限", "integer", "脚本 stderr 捕获字符上限。", label_en="Stderr limit", default=500),

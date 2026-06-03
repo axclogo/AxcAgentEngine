@@ -188,7 +188,7 @@ def test_duplicate_skill_policy_error_reports_conflict(tmp_path):
 	plugin = SkillPlugin()
 
 	with pytest.raises(ValueError, match="Duplicate skill"):
-		plugin.initialize({"paths": [str(tmp_path / "first"), str(tmp_path / "second")], "duplicate_policy": "error"}, None)
+		plugin.initialize({"paths": [str(tmp_path / "first"), str(tmp_path / "second")]}, None)
 
 
 def test_skill_catalog_rejects_invalid_items():
@@ -278,8 +278,8 @@ async def test_skill_fail_fast_and_catalog_edges(tmp_path):
 	empty_dir = tmp_path / "empty"
 	empty_dir.mkdir()
 	loader = SkillPlugin()
-	loader.initialize({"paths": [str(tmp_path)], "allowed_skills": ["missing"]}, None)
-	assert loader._skills == {}
+	with pytest.raises(ValueError, match="loaded no skills"):
+		loader.initialize({"paths": [str(tmp_path)], "allowed_skills": ["missing"]}, None)
 
 
 @pytest.mark.asyncio
