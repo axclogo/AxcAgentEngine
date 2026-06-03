@@ -35,7 +35,7 @@ AxcAgentEngine adds **POR (Plan-Observe-Replan)** on top of ReAct: the agent pro
 pip install axc-agent-engine
 
 # Pin the current 2.3 release
-pip install axc-agent-engine==2.3.0
+pip install axc-agent-engine==2.3.1
 
 # Optional extras
 pip install "axc-agent-engine[api]"
@@ -265,6 +265,54 @@ async for event in agent.stream_with_messages(
 
 Use this for host execution-log correlation. Do not encode execution IDs in prompts, tool arguments, or fake tool messages.
 
+## Cancellation and Usage
+
+Every run receives a `run_id` through `run_options.run_id`, `metadata.run_id`, or engine generation. Hosts should cancel a run through the Engine so nested `agent_call`, swarm, sidecar-owned Agent runs, and active tools share the same cancellation signal:
+
+```python
+engine.cancel_run("run_abc", reason="user_cancelled")
+```
+
+Streaming callers receive a terminal `cancelled` event. Non-streaming callers receive `CancelledError`. Terminal `done` and `cancelled` events include aggregated usage in `event.metadata["usage"]`:
+
+```python
+{
+    "input_tokens": 1200,
+    "output_tokens": 380,
+    "total_tokens": 1580,
+}
+```
+
+Hosts should read this aggregate instead of summing scattered LLM or sub-Agent events.
+
+## Multimodal Messages
+
+The host owns uploads, authorization, OCR, image recognition, media URLs, and base64 generation. The engine only accepts normalized message content parts and passes them through the input/provider boundary:
+
+```python
+messages = [{
+    "role": "user",
+    "content": [
+        {"type": "text", "text": "Explain this screenshot."},
+        {"type": "image_url", "image_url": {"url": "https://example.com/screen.png"}},
+        {"type": "image_base64", "media_type": "image/png", "data": "..."},
+        {"type": "file_ref", "ref": "artifact:123", "metadata": {"name": "report.pdf"}},
+    ],
+}]
+```
+
+Unsupported part types fail immediately. Official plugins do not fetch host media services or perform deployment-specific multimodal preprocessing.
+
+## Tool Output Views
+
+`ToolOutput` separates the LLM context view from the UI display view:
+
+- `context_view(max_chars=2000)` is written into `MessageStore` for the next LLM round. It prefers `durable_summary`, then `summary`, then compact content, and preserves artifact refs.
+- `display_view(max_chars=0)` is used by `tool_result` events for host/UI display. It can expose full content or artifact refs without polluting LLM context.
+- `compact_view()` is not a UI contract. New code should call `context_view()` or `display_view()` explicitly.
+
+Hosts should not monkey patch `ToolOutput` to change LLM context behavior.
+
 ## Durable Tool Results and Sub-Agent Events
 
 The `compress` plugin preserves assistant tool calls and their matching tool results as atomic groups. Durable tool results are also saved into the compression boundary and reinjected after context packing. By default, `agent_call` and `knowledge_search` are durable; business tools can opt in with `compress.durable_tools.names`, `compress.durable_tools.capabilities`, or `ToolOutput.with_metadata({"durable": True, "durable_summary": "..."})`.
@@ -275,7 +323,7 @@ The `compress` plugin preserves assistant tool calls and their matching tool res
 - `sub_agent_step`
 - `sub_agent_complete`
 
-Frontends should render these events directly. They should not parse `agent_call` tool results to invent a child execution timeline.
+Stable fields include `parent_tool_call_id`, `sub_run_id`, `agent_name`, `agent_id`, `step.type`, `tool_call_id`, `tool_name`, `content`, `artifacts`, `error`, and `duration_ms`. Frontends should render these events directly. They should not parse `agent_call` tool results to invent a child execution timeline.
 
 ## API
 
@@ -364,6 +412,14 @@ task = await service.run_task(
 )
 ```
 
+Sidecar components that create internal Agent runs accept standard run context:
+
+- `EvalRunner.run_cases(..., run_options, metadata, case_run_options, case_metadata)`
+- `MultiAgentSession.run/stream(..., run_options, metadata, agent_run_options, agent_metadata)`
+- `SimulationRunner.run/stream(..., run_options, metadata, actor_run_options, actor_metadata)`
+
+Factory metadata supplements the base metadata for each case, agent, or actor. `EvalCase.metadata` remains evaluation/scoring metadata and is not request metadata.
+
 ## Runtime Flow
 
 ### Load time
@@ -413,7 +469,8 @@ flowchart TD
     V --> W["sub_agent_start / sub_agent_step / sub_agent_complete"]
     W --> H
     I --> Q
-    Q --> X["tracing spans saved with metadata and parent_span_id"]
+    Q --> X["done/cancelled event with usage"]
+    X --> Y["tracing spans saved with metadata and parent_span_id"]
 ```
 
 ## Plugin Development
@@ -516,4 +573,4 @@ python3 -m pytest -q
 python3 -m pytest --cov --cov-report=term-missing:skip-covered -q
 ```
 
-The release gate requires at least 90% total coverage.
+The release gate requires at least 95% total coverage.

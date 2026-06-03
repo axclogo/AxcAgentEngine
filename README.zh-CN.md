@@ -35,7 +35,7 @@ AxcAgentEngine 在 ReAct 之外加了 **POR（Plan-Observe-Replan）**：先生�
 pip install axc-agent-engine
 
 # 固定安装当前 2.3 版本
-pip install axc-agent-engine==2.3.0
+pip install axc-agent-engine==2.3.1
 
 # 可选能力
 pip install "axc-agent-engine[api]"
@@ -266,6 +266,54 @@ async for event in agent.stream_with_messages(
 
 宿主应使用这个机制关联执行日志。不要把执行日志 ID 塞进 prompt、tool args 或伪造 tool message。
 
+## 取消与 Usage
+
+每次运行都会通过 `run_options.run_id`、`metadata.run_id` 或引擎生成得到 `run_id`。宿主停止运行时应调用 Engine，让嵌套 `agent_call`、swarm、sidecar 内部 Agent run 和正在执行的工具共享同一个取消信号：
+
+```python
+engine.cancel_run("run_abc", reason="user_cancelled")
+```
+
+流式调用方会收到终态 `cancelled` 事件。非流式调用方会收到 `CancelledError`。终态 `done` 和 `cancelled` 事件都会在 `event.metadata["usage"]` 中携带聚合 usage：
+
+```python
+{
+    "input_tokens": 1200,
+    "output_tokens": 380,
+    "total_tokens": 1580,
+}
+```
+
+宿主应读取这个聚合值，不要从零散 LLM 事件或子 Agent 事件里自行累加。
+
+## 多模态消息
+
+上传、鉴权、OCR、图片识别、媒体 URL、base64 生成都属于宿主职责。引擎只接收标准化 message content parts，并通过 input/provider 边界传递：
+
+```python
+messages = [{
+    "role": "user",
+    "content": [
+        {"type": "text", "text": "Explain this screenshot."},
+        {"type": "image_url", "image_url": {"url": "https://example.com/screen.png"}},
+        {"type": "image_base64", "media_type": "image/png", "data": "..."},
+        {"type": "file_ref", "ref": "artifact:123", "metadata": {"name": "report.pdf"}},
+    ],
+}]
+```
+
+不支持的 part type 会直接失败。官方插件不访问宿主媒体服务，也不做部署相关的多模态预处理。
+
+## ToolOutput 视图
+
+`ToolOutput` 明确分离 LLM 上下文视图和 UI 展示视图：
+
+- `context_view(max_chars=2000)` 写入 `MessageStore`，供下一轮 LLM 使用。它优先使用 `durable_summary`，其次 `summary`，最后才压缩 content，并保留 artifact refs。
+- `display_view(max_chars=0)` 用于 `tool_result` 事件和宿主/UI 展示，可以暴露完整内容或 artifact refs，但不会污染 LLM 上下文。
+- `compact_view()` 不是 UI 协议。新代码应显式调用 `context_view()` 或 `display_view()`。
+
+宿主不要 monkey patch `ToolOutput` 来改变 LLM 上下文行为。
+
 ## 持久工具结果与子 Agent 事件
 
 `compress` 插件会把 assistant `tool_calls` 和对应的 tool result 当作原子组保留。持久工具结果还会写入压缩边界，并在上下文打包后重新注入。默认 `agent_call` 和 `knowledge_search` 是持久工具；业务工具可以通过 `compress.durable_tools.names`、`compress.durable_tools.capabilities` 或 `ToolOutput.with_metadata({"durable": True, "durable_summary": "..."})` 标记。
@@ -276,7 +324,7 @@ async for event in agent.stream_with_messages(
 - `sub_agent_step`
 - `sub_agent_complete`
 
-前端应直接渲染这些事件，不要解析 `agent_call` tool result 来伪造子 Agent 执行明细。
+稳定字段包括 `parent_tool_call_id`、`sub_run_id`、`agent_name`、`agent_id`、`step.type`、`tool_call_id`、`tool_name`、`content`、`artifacts`、`error`、`duration_ms`。前端应直接渲染这些事件，不要解析 `agent_call` tool result 来伪造子 Agent 执行明细。
 
 ## API
 
@@ -341,6 +389,14 @@ agent = engine.load_agent_template("./agents/my_agent.yaml").instantiate(models=
 | `sidecar.failure_miner` | 聚类失败并建议修复/eval 覆盖 |
 | `sidecar.cost_optimizer` | 成本估算和优化建议 |
 
+会创建内部 Agent run 的 sidecar 入口支持标准运行上下文：
+
+- `EvalRunner.run_cases(..., run_options, metadata, case_run_options, case_metadata)`
+- `MultiAgentSession.run/stream(..., run_options, metadata, agent_run_options, agent_metadata)`
+- `SimulationRunner.run/stream(..., run_options, metadata, actor_run_options, actor_metadata)`
+
+factory metadata 会为每个 case、agent 或 actor 补充基础 metadata。`EvalCase.metadata` 仍然是评测/评分元数据，不是 request metadata。
+
 ## 运行流程
 
 ### 加载期
@@ -390,7 +446,8 @@ flowchart TD
     V --> W["sub_agent_start / sub_agent_step / sub_agent_complete"]
     W --> H
     I --> Q
-    Q --> X["tracing span 携带 metadata 和 parent_span_id 落库"]
+    Q --> X["done/cancelled 事件携带 usage"]
+    X --> Y["tracing span 携带 metadata 和 parent_span_id 落库"]
 ```
 
 ## 插件开发
@@ -493,4 +550,4 @@ python3 -m pytest -q
 python3 -m pytest --cov --cov-report=term-missing:skip-covered -q
 ```
 
-发布门禁要求总覆盖率不低于 90%。
+发布门禁要求总覆盖率不低于 95%。

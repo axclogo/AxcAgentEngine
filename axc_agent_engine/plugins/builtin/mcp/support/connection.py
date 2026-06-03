@@ -37,7 +37,7 @@ class MCPConnection:
 			await asyncio.wait_for(self._transport.request("initialize", {
 				"protocolVersion": self.config.get("protocol_version", DEFAULT_PROTOCOL_VERSION),
 				"capabilities": {},
-				"clientInfo": {"name": "axc_agent_engine", "version": "2.3.0"},
+				"clientInfo": {"name": "axc_agent_engine", "version": "2.3.1"},
 			}), timeout=self._connect_timeout)
 			try:
 				await asyncio.wait_for(self._transport.request("notifications/initialized", {}), timeout=self._connect_timeout)
