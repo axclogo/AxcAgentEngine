@@ -275,6 +275,10 @@ class TestRepetitionGuardPlugin:
 		await p.pre_tool_call(ctx, "test", {"a": 1})
 		allowed, _ = await p.pre_tool_call(ctx, "test", {"a": 1})
 		assert allowed is False
+		assert p._last_rejection_details["guard_name"] == "repetition_guard"
+		assert p._last_rejection_details["tool_name"] == "test"
+		assert p._last_rejection_details["threshold"] == 2
+		assert p._last_rejection_details["observed"] == 2
 
 	@pytest.mark.asyncio
 	async def test_allows_different_args(self):

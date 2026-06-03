@@ -26,6 +26,7 @@ class EventType(str, Enum):
 	SUB_AGENT_STEP = "sub_agent_step"
 	SUB_AGENT_COMPLETE = "sub_agent_complete"
 	ERROR = "error"
+	CANCELLED = "cancelled"
 	DONE = "done"
 
 
@@ -36,7 +37,7 @@ TOOL_EVENTS = frozenset({EventType.TOOL_CALL, EventType.TOOL_RESULT, EventType.T
 PLAN_EVENTS = frozenset({EventType.PLAN_CREATED, EventType.STEP_START, EventType.STEP_COMPLETED})
 SYSTEM_EVENTS = frozenset({EventType.CACHE_HIT, EventType.COST_UPDATE, EventType.STATE_CHANGE})
 SUB_AGENT_EVENTS = frozenset({EventType.SUB_AGENT_START, EventType.SUB_AGENT_STEP, EventType.SUB_AGENT_COMPLETE})
-TERMINAL_EVENTS = frozenset({EventType.DONE, EventType.ERROR})
+TERMINAL_EVENTS = frozenset({EventType.DONE, EventType.ERROR, EventType.CANCELLED})
 
 
 @dataclass
@@ -111,11 +112,17 @@ class Event:
 		return cls(type=EventType.ERROR, content=message, metadata=metadata or {})
 
 	@classmethod
-	def done(cls, content: str) -> "Event":
+	def done(cls, content: str, metadata: dict[str, Any] | None = None) -> "Event":
 		"""English: Bilingual documentation follows.
 中文：以下为双语文档说明。
 创建 DONE 事件。"""
-		return cls(type=EventType.DONE, content=content)
+		return cls(type=EventType.DONE, content=content, metadata=metadata or {})
+
+	@classmethod
+	def cancelled(cls, reason: str, metadata: dict[str, Any] | None = None) -> "Event":
+		"""Create CANCELLED event.
+中文：创建取消事件。"""
+		return cls(type=EventType.CANCELLED, content=reason, metadata=metadata or {})
 
 	@classmethod
 	def step_start(cls, step_id: int, description: str) -> "Event":

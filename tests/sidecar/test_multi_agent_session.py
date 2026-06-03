@@ -176,7 +176,45 @@ async def test_agent_orchestration_worker_raises_dispatcher_error_reply():
 	worker = AgentOrchestrationWorker(ReplyDispatcher(fail={"child"}), "conv", "trace")
 
 	with pytest.raises(RuntimeError, match="child failed"):
-		await worker.request(_agent("child"), "prompt")
+		await worker.request(_agent("child"), "prompt", {"run_id": "r1"}, {"run_id": "r1"})
+
+
+@pytest.mark.asyncio
+async def test_multi_agent_session_passes_run_context_to_dispatcher():
+	dispatcher = ReplyDispatcher({"alpha": "ok"})
+	session = MultiAgentSession(
+		[_agent("alpha")],
+		dispatcher,
+		topic="topic",
+		stop_condition=StopAfterRound(1),
+	)
+
+	events = [event async for event in session.stream(
+		run_options={"run_id": "batch", "stream": False},
+		metadata={"tenant": "t1"},
+		agent_run_options=lambda agent, index: {"run_id": f"batch:{agent.name}"},
+		agent_metadata=lambda agent, index: {"actor_exec": agent.name},
+	)]
+
+	assert events[-1].type == MultiAgentEventType.DONE
+	envelope = dispatcher.envelopes[0]
+	assert envelope.run_options["run_id"] == "batch:alpha"
+	assert envelope.run_options["stream"] is False
+	assert envelope.metadata["run_id"] == "batch:alpha"
+	assert envelope.metadata["tenant"] == "t1"
+	assert envelope.metadata["sidecar"] == "multi_agent"
+	assert envelope.metadata["multi_agent_actor"] == "alpha"
+	assert envelope.metadata["actor_exec"] == "alpha"
+
+
+@pytest.mark.asyncio
+async def test_multi_agent_session_rejects_invalid_run_context_inputs():
+	session = MultiAgentSession([_agent("alpha")], ReplyDispatcher(), stop_condition=StopAfterRound(1))
+
+	with pytest.raises(TypeError, match="run_options"):
+		[event async for event in session.stream(run_options="bad")]
+	with pytest.raises(TypeError, match="agent_metadata"):
+		[event async for event in session.stream(agent_metadata=lambda agent, index: "bad")]
 
 
 def test_multi_agent_event_sink_result_line_ignores_non_message_events():

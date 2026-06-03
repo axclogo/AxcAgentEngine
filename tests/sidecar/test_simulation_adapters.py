@@ -27,9 +27,18 @@ class FakeAgent:
 		self.description = ""
 		self._responses = list(responses)
 		self.prompts: list[str] = []
+		self.calls: list[dict] = []
 
-	async def chat(self, message: str, session_id: str = "", llm_options: dict | None = None) -> str:
+	async def chat(
+		self,
+		message: str,
+		session_id: str = "",
+		llm_options: dict | None = None,
+		run_options: dict | None = None,
+		metadata: dict | None = None,
+	) -> str:
 		self.prompts.append(message)
+		self.calls.append({"run_options": run_options, "metadata": metadata})
 		return self._responses.pop(0)
 
 
@@ -119,7 +128,7 @@ async def test_simulation_session_accepts_custom_policies():
 	)
 
 	class StaticPolicy:
-		async def act(self, observation, scenario):
+		async def act(self, observation, scenario, run_options, metadata):
 			return AgentAction(actor="red", type=ActionType.WAIT, intent="hold")
 
 	session = SimulationSession([agent], scenario, policies={"red": StaticPolicy()})

@@ -290,6 +290,9 @@ REPETITION_GUARD_CONFIG_SCHEMA = config_schema(
 			{"type": "same_tool", "limit": 20},
 			{"type": "total_tool", "limit": 100},
 		]),
+		config_field("enable_text_repetition", "文本重复检测", "boolean", "是否检测 LLM 文案和工具结果文本重复。", label_en="Enable text repetition", default=True),
+		array_field("tool_allowlist", "工具白名单", "只对这些工具启用重复检测；为空表示所有工具。", _string_item(), label_en="Tool allowlist"),
+		config_field("tool_overrides", "工具覆盖", "object", "按工具名覆盖 same_call/same_tool/total_tool 阈值。", label_en="Tool overrides", default={}),
 	],
 	display_name_en="Repetition guard",
 )

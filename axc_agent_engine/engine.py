@@ -27,6 +27,7 @@ from axc_agent_engine.plugins.loader import load_plugins
 from axc_agent_engine.plugins.registry import PluginRegistry
 from axc_agent_engine.runtime.policy import PolicyEvaluator
 from axc_agent_engine.runtime.resources import ResourceRegistry, ensure_resource_registry
+from axc_agent_engine.runtime.run_control import RunControlRegistry
 from axc_agent_engine.runtime.sandbox_models import CommandExecutor
 from axc_agent_engine.core.schema import AgentConfig
 from axc_agent_engine.storage.protocols import (
@@ -130,6 +131,7 @@ class Engine:
 		self._policy_evaluator = policy_evaluator
 		self._input_provider = input_provider or PassthroughInputProvider()
 		self._resources = ensure_resource_registry(resources)
+		self._run_control = RunControlRegistry()
 		self._concurrency = concurrency or ConcurrencyConfig()
 		self._plugin_registry = plugin_registry or PluginRegistry()
 		self._engine_limiter = ExecutionLimiter(
@@ -148,6 +150,7 @@ class Engine:
 			checkpoint_store=checkpoint_store,
 			command_executor=command_executor,
 			policy_evaluator=policy_evaluator,
+			run_control=self._run_control,
 		)
 		self._agents: dict[str, Agent] = {}
 		self._session_manager = SessionManager(persistence=message_persistence)
@@ -244,6 +247,11 @@ class Engine:
 
 	def list_agents(self) -> list[Agent]:
 		return list(self._agents.values())
+
+	def cancel_run(self, run_id: str, reason: str = "cancelled") -> bool:
+		"""Cancel a running execution by run_id.
+中文：按 run_id 取消正在运行的执行。"""
+		return self._run_control.cancel(run_id, reason)
 
 	async def unload_agent(self, name: str) -> None:
 		agent = self._agents.pop(name, None)

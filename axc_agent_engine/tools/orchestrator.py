@@ -35,14 +35,17 @@ class ToolExecutionPipeline:
 		self.ctx = ctx
 
 	async def execute(self, tool_calls: list[dict]) -> list[ToolResult]:
+		self.ctx.check_cancelled()
 		batches = partition_tool_calls(tool_calls, self.registry)
 		results: list[ToolResult] = []
 		for batch in batches:
+			self.ctx.check_cancelled()
 			if batch["concurrent"] and len(batch["calls"]) > 1:
 				tasks = [self.execute_single(tc) for tc in batch["calls"]]
 				results.extend(await asyncio.gather(*tasks))
 			else:
 				for tc in batch["calls"]:
+					self.ctx.check_cancelled()
 					results.append(await self.execute_single(tc))
 		return results
 
@@ -97,6 +100,7 @@ async def _execute_single_runtime(
 执行单个工具调用：pre_hooks → resolve → execute → post_hooks。"""
 	tool_context_key = 0
 	try:
+		ctx.check_cancelled()
 		tool_context_key = push_current_tool_runtime(ctx, runtime)
 		decision = await plugin_manager.apply_pre_tool_call(ctx, runtime.name, runtime.arguments)
 		runtime.arguments = decision.arguments
@@ -133,6 +137,9 @@ async def _execute_single_runtime(
 		)
 		try:
 			result = await execute_tool(runtime.tool_def, runtime.arguments, runtime.tool_call_id, tool_context(ctx, runtime))
+		except asyncio.CancelledError:
+			ctx.cancel("cancelled")
+			raise
 		except TypeError as e:
 			return await _fail_tool_call(
 				ctx, runtime, AuditEventType.TOOL_CALL_FAILED, plugin_manager,
@@ -141,6 +148,7 @@ async def _execute_single_runtime(
 				category=ErrorCategory.CONTRACT,
 			)
 		if result.output:
+			ctx.check_cancelled()
 			result.output = await plugin_manager.apply_post_tool_call(
 				ctx, runtime.name, runtime.arguments, result.output, result.duration_ms)
 		if result.success:

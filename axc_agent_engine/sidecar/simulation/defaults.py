@@ -8,6 +8,7 @@ These implementations are deterministic and dependency-free. They provide a
 safe baseline for tests and for teams that want to plug in richer policies or
 LLM-backed environments later."""
 from __future__ import annotations
+from typing import Any
 
 from axc_agent_engine.sidecar.simulation.models import (
 	ActionType,
@@ -159,7 +160,13 @@ class ScriptedPolicy:
 		self._actions = list(actions)
 		self._index = 0
 
-	async def act(self, observation: Observation, scenario: Scenario) -> AgentAction:
+	async def act(
+		self,
+		observation: Observation,
+		scenario: Scenario,
+		run_options: dict[str, Any],
+		metadata: dict[str, Any],
+	) -> AgentAction:
 		if self._index < len(self._actions):
 			action = self._actions[self._index]
 			self._index += 1

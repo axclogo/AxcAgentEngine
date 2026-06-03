@@ -216,6 +216,10 @@ plugins:
 		assert request.metadata["run_id"] == "run-1"
 		assert request.metadata["exec_log_id"] == 1001
 
+	def test_run_request_generates_run_id(self):
+		request = RunRequest.create(user_message="hi")
+		assert request.metadata["run_id"]
+
 	def test_run_request_rejects_conflicting_run_id_metadata(self):
 		with pytest.raises(ValueError, match="run_options.run_id conflicts with metadata.run_id"):
 			RunRequest.create(
@@ -287,6 +291,52 @@ plugins:
 		assert metadata["run_id"] == "run-1"
 		assert metadata["session_id"] == "session-1"
 		assert metadata["agent_name"] == "metadata_agent"
+
+	@pytest.mark.asyncio
+	async def test_done_event_contains_aggregated_usage(self, mock_llm, tmp_path):
+		path = tmp_path / "agent.yaml"
+		path.write_text("name: usage_agent\nsystem_prompt: base\n", encoding="utf-8")
+		agent = Engine().load_agent_template(str(path)).instantiate(models=AgentModels(default=mock_llm))
+		events = [event async for event in agent.stream("hello", run_options={"run_id": "usage-run", "stream": False})]
+		done = next(event for event in events if event.type.value == "done")
+		assert done.metadata["usage"]["input_tokens"] == 10
+		assert done.metadata["usage"]["output_tokens"] == 5
+		assert done.metadata["usage"]["total_tokens"] == 15
+
+	@pytest.mark.asyncio
+	async def test_engine_cancel_run_emits_cancelled(self, tmp_path):
+		import asyncio
+		from axc_agent_engine.core.schema import LLMMessage, LLMResponse
+
+		class SlowLLM:
+			model = "slow"
+			async def chat(self, messages, tools=None, **kwargs):
+				await asyncio.sleep(10)
+				return LLMResponse(message=LLMMessage(content="late"))
+			async def stream(self, messages, tools=None, **kwargs):
+				raise AssertionError("chat expected")
+			async def ask(self, prompt, **kwargs):
+				return ""
+			async def close(self):
+				pass
+
+		path = tmp_path / "agent.yaml"
+		path.write_text("name: cancel_agent\nsystem_prompt: base\n", encoding="utf-8")
+		engine = Engine()
+		agent = engine.load_agent_template(str(path)).instantiate(models=AgentModels(default=SlowLLM()))
+
+		async def collect():
+			return [event async for event in agent.stream("hello", run_options={"run_id": "cancel-run", "stream": False})]
+
+		task = asyncio.create_task(collect())
+		for _ in range(100):
+			if engine._run_control.token("cancel-run"):
+				break
+			await asyncio.sleep(0.01)
+		assert engine.cancel_run("cancel-run", "user requested") is True
+		events = await task
+		assert events[-1].type.value == "cancelled"
+		assert events[-1].content == "user requested"
 
 	def test_instantiate_rejects_invalid_overrides(self, mock_llm, agent_yaml):
 		engine = Engine()

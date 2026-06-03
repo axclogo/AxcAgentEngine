@@ -243,12 +243,19 @@ class TestDispatcherConsumer:
 		assert "sub_agent_complete" in types
 		tool_step = next(item for item in seen if item.metadata.get("step", {}).get("type") == "tool_call")
 		assert tool_step.metadata["parent_tool_call_id"] == "parent-call"
+		assert tool_step.metadata["sub_run_id"].startswith("run-1:worker:")
 		assert tool_step.metadata["step"]["tool"] == "search"
+		assert tool_step.metadata["step"]["tool_name"] == "search"
+		assert tool_step.metadata["step"]["tool_call_id"] == "child-tool"
+		assert tool_step.metadata["step"]["artifacts"] == []
 		result_step = next(item for item in seen if item.metadata.get("step", {}).get("type") == "tool_result")
 		assert result_step.metadata["step"]["tool"] == "search"
 		assert result_step.metadata["step"]["content"] == "ok"
+		assert result_step.metadata["step"]["error"] == ""
 		complete = next(item for item in seen if item.type == "sub_agent_complete")
 		assert complete.metadata["success"] is True
+		assert complete.metadata["parent_tool_call_id"] == "parent-call"
+		assert complete.metadata["sub_run_id"].startswith("run-1:worker:")
 		await dispatcher.stop_all()
 
 	@pytest.mark.asyncio
@@ -270,6 +277,7 @@ class TestDispatcherConsumer:
 		complete = next(item for item in seen if item.type == "sub_agent_complete")
 		assert complete.metadata["success"] is False
 		assert complete.metadata["error"] == "failed"
+		assert complete.metadata["agent_id"] == "worker"
 		await dispatcher.stop_all()
 
 	@pytest.mark.asyncio
@@ -311,12 +319,14 @@ class TestEnvelopeFields:
 		assert d["type"] == "request"
 		assert d["content"] == "hi"
 		assert d["trace_id"] == "tr1"
+		assert d["run_options"] == {}
 
 	def test_roundtrip(self):
-		env = AgentEnvelope(sender="x", recipient="y", content="z", correlation_id="c1")
+		env = AgentEnvelope(sender="x", recipient="y", content="z", correlation_id="c1", run_options={"run_id": "r1"})
 		restored = AgentEnvelope.from_dict(env.to_dict())
 		assert restored.sender == "x"
 		assert restored.correlation_id == "c1"
+		assert restored.run_options == {"run_id": "r1"}
 
 
 class TestNoDirectAgentChat:

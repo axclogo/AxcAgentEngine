@@ -4,7 +4,7 @@
 Protocols for simulation kernel extension points."""
 from __future__ import annotations
 
-from typing import Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 from axc_agent_engine.sidecar.simulation.models import (
 	AgentAction,
@@ -24,7 +24,13 @@ class AgentPolicy(Protocol):
 根据 observation 生成一个结构化动作。
 	Produces one structured action from an observation.
 	"""
-	async def act(self, observation: Observation, scenario: Scenario) -> AgentAction: ...
+	async def act(
+		self,
+		observation: Observation,
+		scenario: Scenario,
+		run_options: dict[str, Any],
+		metadata: dict[str, Any],
+	) -> AgentAction: ...
 
 
 @runtime_checkable

@@ -79,7 +79,8 @@ async def test_repetition_guard_same_tool_total_empty_patterns_and_no_result():
 	assert (await plugin.pre_tool_call(ExecutionContext(), "read", {"a": 2}))[0] is True
 	allowed, _ = await plugin.pre_tool_call(ExecutionContext(), "read", {"a": 3})
 	assert allowed is False
-	assert "same tool called" in plugin.should_stop(ExecutionContext())[1]
+	assert plugin._last_rejection_details["rule_type"] == "same_tool"
+	assert plugin._last_rejection_details["observed"] == 2
 
 	plugin.initialize({"rules": [{"type": "response_pattern", "pattern": "", "limit": 1}]}, None)
 	await plugin.on_round_end(ExecutionContext(), "u", "", [])

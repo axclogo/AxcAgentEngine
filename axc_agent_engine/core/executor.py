@@ -8,9 +8,11 @@ from __future__ import annotations
 
 import time
 import uuid
+import asyncio
 from typing import AsyncIterator
 
 from axc_agent_engine.runtime.checkpoint import CheckpointStatus
+from axc_agent_engine.core.errors import CancelledError
 from axc_agent_engine.core.context import ExecutionContext
 from axc_agent_engine.core.execution_run import CheckpointRecorder, ExecutionRunLifecycle, StreamLLMBridge
 from axc_agent_engine.core.llm_caller import LLMCaller
@@ -92,6 +94,10 @@ class Executor:
 中文：流式执行入口。"""
 		self._run_id = self._ctx.state.metadata.get("run_id") or uuid.uuid4().hex[:16]
 		self._ctx.state.metadata["run_id"] = self._run_id
+		run_control = self._ctx.services.run_control
+		task = asyncio.current_task()
+		if run_control:
+			run_control.register(self._run_id, self._ctx, task)
 		self._react_kernel.start_time = time.time()
 		if self._restored_from_checkpoint:
 			self._restored_from_checkpoint = False
@@ -106,14 +112,28 @@ class Executor:
 			async for event in self._react_loop(user_message):
 				if event.type == EventType.DONE:
 					result = await self._lifecycle.complete(event.content)
-					await self._save_checkpoint("execution", CheckpointStatus.COMPLETED, {"phase": "done", "result": result})
-					yield Event.done(result)
+					usage = _usage_metadata(self._ctx)
+					await self._save_checkpoint("execution", CheckpointStatus.COMPLETED, {"phase": "done", "result": result, "usage": usage})
+					yield Event.done(result, {"usage": usage})
 				elif event.type == EventType.ERROR:
 					error = event.content
 					await self._save_checkpoint("execution", CheckpointStatus.FAILED, {"phase": "error", "error": error})
 					yield event
+				elif event.type == EventType.CANCELLED:
+					error = event.content
+					await self._save_checkpoint("execution", CheckpointStatus.INTERRUPTED, {"phase": "cancelled", "error": error})
+					yield event
 				else:
 					yield event
+		except asyncio.CancelledError as e:
+			self._ctx.cancel(str(e) or self._ctx.state.cancel_reason or "cancelled")
+			error = self._ctx.state.cancel_reason or "cancelled"
+			await self._save_checkpoint("execution", CheckpointStatus.INTERRUPTED, {"phase": "cancelled", "error": error})
+			yield Event.cancelled(error, {"usage": _usage_metadata(self._ctx)})
+		except CancelledError as e:
+			error = str(e) or self._ctx.state.cancel_reason or "cancelled"
+			await self._save_checkpoint("execution", CheckpointStatus.INTERRUPTED, {"phase": "cancelled", "error": error})
+			yield Event.cancelled(error, {"usage": _usage_metadata(self._ctx)})
 		except Exception as e:
 			error = str(e)
 			await self._save_checkpoint("execution", CheckpointStatus.FAILED, {"phase": "exception", "error": error})
@@ -121,6 +141,8 @@ class Executor:
 			raise
 		finally:
 			await self._lifecycle.end(result, error)
+			if run_control:
+				run_control.unregister(self._run_id, self._ctx, task)
 
 	async def _react_loop(self, user_message: str) -> AsyncIterator[Event]:
 		por_checkpoint = self._ctx.state.metadata.pop("por_resume_checkpoint", None)
@@ -205,3 +227,11 @@ class Executor:
 中文：此文档说明相关引擎组件的行为。"""
 		async for item in self._stream_bridge.call(messages, tools_schema):
 			yield item
+
+
+def _usage_metadata(ctx: ExecutionContext) -> dict[str, int]:
+	return {
+		"input_tokens": ctx.state.total_input_tokens,
+		"output_tokens": ctx.state.total_output_tokens,
+		"total_tokens": ctx.state.total_input_tokens + ctx.state.total_output_tokens,
+	}

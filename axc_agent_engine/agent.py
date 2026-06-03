@@ -178,11 +178,8 @@ class Agent:
 		self._executor_factory = ExecutorFactory(self)
 		self._run_coordinator = RunCoordinator(self)
 		for plugin in plugins:
-			try:
-				tools = plugin.get_tools()
-				self._registry.register_many(tools)
-			except Exception as e:
-				logger.warning(f"Plugin {plugin.name} get_tools error: {e}")
+			tools = plugin.get_tools()
+			self._registry.register_many(tools)
 		self._registry.freeze()
 		logger.info(f"Agent '{name}' loaded: {len(plugins)} plugins, {self._registry.count} tools")
 
@@ -415,6 +412,9 @@ class Agent:
 		):
 			if event.type == EventType.DONE:
 				result = event.content
+			elif event.type == EventType.CANCELLED:
+				from axc_agent_engine.core.errors import CancelledError
+				raise CancelledError(event.content)
 			elif event.type == EventType.ERROR:
 				raise ProviderError(event.content)
 		return result
@@ -445,6 +445,7 @@ class Agent:
 				else [{"role": "user", "content": request.user_message}]
 			)
 			processed = await self._process_input(raw_messages, request.session_id)
+			processed.messages = _normalize_multimodal_messages(processed.messages)
 			effective_user_message = self._extract_last_user_message(processed.messages) or request.user_message
 			if processed.artifacts:
 				executor._ctx.state.metadata["input_artifacts"] = processed.artifacts
@@ -525,3 +526,38 @@ def _content_to_text(content: Any) -> str:
 					text_parts.append(str(text))
 		return "\n".join(text_parts)
 	return "" if content is None else str(content)
+
+
+def _normalize_multimodal_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+	return [{**message, "content": _normalize_content_parts(message.get("content"))} for message in messages]
+
+
+def _normalize_content_parts(content: Any) -> Any:
+	if not isinstance(content, list):
+		return content
+	parts = []
+	for part in content:
+		if not isinstance(part, dict):
+			raise TypeError("message content part must be an object")
+		part_type = str(part.get("type") or "")
+		if part_type == "text":
+			parts.append({"type": "text", "text": str(part.get("text", ""))})
+		elif part_type == "image_url":
+			image = part.get("image_url")
+			if not isinstance(image, dict) or not image.get("url"):
+				raise ValueError("image_url content part requires image_url.url")
+			parts.append({"type": "image_url", "image_url": dict(image)})
+		elif part_type == "image_base64":
+			data = str(part.get("data") or part.get("image_base64") or "")
+			media_type = str(part.get("media_type") or "image/png")
+			if not data:
+				raise ValueError("image_base64 content part requires data")
+			parts.append({"type": "image_url", "image_url": {"url": f"data:{media_type};base64,{data}"}})
+		elif part_type == "file_ref":
+			ref = str(part.get("ref") or part.get("file_ref") or "")
+			if not ref:
+				raise ValueError("file_ref content part requires ref")
+			parts.append({"type": "file_ref", "file_ref": {"ref": ref, **dict(part.get("metadata", {}) or {})}})
+		else:
+			raise ValueError(f"unsupported message content part type: {part_type}")
+	return parts

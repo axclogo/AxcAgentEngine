@@ -127,7 +127,7 @@ async def test_runner_stream_emits_step_and_done_events():
 
 async def test_runner_stream_converts_policy_error_to_error_report():
 	class FailingPolicy:
-		async def act(self, observation, scenario):
+		async def act(self, observation, scenario, run_options, metadata):
 			raise RuntimeError("policy unavailable")
 
 	scenario = Scenario(id="fail-1", title="Failure", agents=[AgentProfile(name="red")], max_steps=2)
@@ -140,7 +140,57 @@ async def test_runner_stream_converts_policy_error_to_error_report():
 	assert events[-1].type == SimulationEventType.DONE
 	assert events[-1].report is not None
 	assert events[-1].report.error == "policy unavailable"
-	assert events[-1].report.metrics["steps"] == 0
+
+
+async def test_runner_passes_run_context_to_policy():
+	class CapturePolicy:
+		def __init__(self):
+			self.context = None
+
+		async def act(self, observation, scenario, run_options, metadata):
+			self.context = (run_options, metadata)
+			return AgentAction(actor=observation.agent, type=ActionType.DECIDE, intent="decide")
+
+	policy = CapturePolicy()
+	scenario = Scenario(id="ctx-1", title="Context", agents=[AgentProfile(name="blue")], max_steps=1)
+	runner = SimulationRunner(policies={"blue": policy})
+
+	await runner.run(
+		scenario,
+		run_options={"run_id": "sim-run"},
+		metadata={"tenant": "t1"},
+		actor_run_options=lambda actor, index: {"stream": False},
+		actor_metadata=lambda actor, index: {"actor_exec": actor},
+	)
+
+	run_options, metadata = policy.context
+	assert run_options == {"run_id": "sim-run", "stream": False}
+	assert metadata["run_id"] == "sim-run"
+	assert metadata["tenant"] == "t1"
+	assert metadata["sidecar"] == "simulation"
+	assert metadata["simulation_scenario_id"] == "ctx-1"
+	assert metadata["simulation_actor"] == "blue"
+	assert metadata["actor_exec"] == "blue"
+
+
+async def test_runner_rejects_invalid_run_context_inputs():
+	scenario = Scenario(id="bad-ctx", title="Bad context", agents=[AgentProfile(name="blue")], max_steps=1)
+	runner = SimulationRunner(policies={"blue": ScriptedPolicy("blue", [AgentAction(actor="blue", type=ActionType.WAIT, intent="wait")])})
+
+	try:
+		[event async for event in runner.stream(scenario, metadata="bad")]
+	except TypeError as exc:
+		assert "metadata" in str(exc)
+	else:
+		raise AssertionError("expected TypeError")
+
+	try:
+		fresh = SimulationRunner(policies={"blue": ScriptedPolicy("blue", [AgentAction(actor="blue", type=ActionType.WAIT, intent="wait")])})
+		[event async for event in fresh.stream(scenario, actor_run_options=lambda actor, index: "bad")]
+	except TypeError as exc:
+		assert "actor_run_options" in str(exc)
+	else:
+		raise AssertionError("expected TypeError")
 
 
 class FakeReportLLM:

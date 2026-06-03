@@ -58,6 +58,12 @@ class TestEvent:
 		assert e.type == EventType.DONE
 		assert e.content == "all good"
 
+	def test_factory_cancelled(self):
+		e = Event.cancelled("stopped", {"run_id": "r1"})
+		assert e.type == EventType.CANCELLED
+		assert e.content == "stopped"
+		assert e.metadata["run_id"] == "r1"
+
 	def test_factory_step_start(self):
 		e = Event.step_start(1, "Do something")
 		assert e.type == EventType.STEP_START

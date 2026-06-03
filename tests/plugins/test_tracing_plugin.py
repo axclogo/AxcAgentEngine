@@ -488,6 +488,24 @@ async def test_tracing_post_llm_without_span_and_execution_end_without_root_are_
 
 
 @pytest.mark.asyncio
+async def test_tracing_execution_end_marks_cancelled_status():
+	spans = []
+	p = _plugin({"enabled": True, "output": "callback"})
+	p.set_callback(spans.append)
+	ctx = ExecutionContext()
+	ctx.add_usage(2, 3)
+	await p.on_execution_start(ctx)
+	ctx.cancel("user stopped")
+	await p.on_execution_end(ctx, "", "user stopped")
+
+	root = next(span for span in spans if span["type"] == "execution")
+	assert root["success"] is False
+	assert root["status"] == "cancelled"
+	assert root["total_tokens"] == 5
+	assert root["error"]["code"] == "execution.cancelled"
+
+
+@pytest.mark.asyncio
 async def test_tracing_manual_tool_hooks_cover_generated_id_missing_runtime_and_failure_default_error():
 	spans = []
 	p = _plugin({"enabled": True, "output": "callback", "include_arguments": True, "include_result": True})

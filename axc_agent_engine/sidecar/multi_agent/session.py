@@ -12,7 +12,7 @@ from __future__ import annotations
 import json
 import logging
 import uuid
-from typing import Any, AsyncIterator, TYPE_CHECKING
+from typing import Any, AsyncIterator, Callable, TYPE_CHECKING
 
 from axc_agent_engine.sidecar.multi_agent.shared_context import SharedContext
 from axc_agent_engine.sidecar.multi_agent.events import MultiAgentEvent
@@ -33,6 +33,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 E = MultiAgentEventType
+AgentContextFactory = Callable[[Any, int], dict]
 
 
 class MultiAgentEventSink:
@@ -77,14 +78,16 @@ class AgentOrchestrationWorker:
 		self._conversation_id = conversation_id
 		self._session_id = session_id
 
-	async def request(self, agent: Any, prompt: str) -> str:
+	async def request(self, agent: Any, prompt: str, run_options: dict[str, Any], metadata: dict[str, Any]) -> str:
 		from axc_agent_engine.core.dispatcher import AgentEnvelope
 		envelope = AgentEnvelope(
 			sender="session",
 			recipient=agent.name,
 			content=prompt,
 			conversation_id=self._conversation_id,
-			trace_id=self._session_id,
+			trace_id=str(metadata.get("run_id") or self._session_id),
+			run_options=run_options,
+			metadata=metadata,
 		)
 		reply = await self._dispatcher.request(envelope, timeout=60.0)
 		if reply.type == "error":
@@ -167,28 +170,46 @@ class MultiAgentSession:
 			if isinstance(persona_data, str):
 				self._persona[agent_name] = await generate_persona(self._topic, persona_data, self._utility_model)
 
-	async def run(self) -> str:
+	async def run(
+		self,
+		run_options: dict | None = None,
+		metadata: dict | None = None,
+		agent_run_options: AgentContextFactory | None = None,
+		agent_metadata: AgentContextFactory | None = None,
+	) -> str:
 		"""English: Bilingual documentation follows.
 中文：以下为双语文档说明。
 非流式执行。
 		Run without streaming.
 		"""
 		result_parts: list[str] = []
-		async for event in self._execute():
+		async for event in self._execute(run_options, metadata, agent_run_options, agent_metadata):
 			if line := self._events.result_line(event):
 				result_parts.append(line)
 		return "\n\n".join(result_parts)
 
-	async def stream(self) -> AsyncIterator[MultiAgentEvent]:
+	async def stream(
+		self,
+		run_options: dict | None = None,
+		metadata: dict | None = None,
+		agent_run_options: AgentContextFactory | None = None,
+		agent_metadata: AgentContextFactory | None = None,
+	) -> AsyncIterator[MultiAgentEvent]:
 		"""English: Bilingual documentation follows.
 中文：以下为双语文档说明。
 事件流执行。
 		Run and yield events as a stream.
 		"""
-		async for event in self._execute():
+		async for event in self._execute(run_options, metadata, agent_run_options, agent_metadata):
 			yield event
 
-	async def _execute(self) -> AsyncIterator[MultiAgentEvent]:
+	async def _execute(
+		self,
+		run_options: dict | None,
+		metadata: dict | None,
+		agent_run_options: AgentContextFactory | None,
+		agent_metadata: AgentContextFactory | None,
+	) -> AsyncIterator[MultiAgentEvent]:
 		await self._ensure_persona_generated()
 		step = 0
 		round_num = 0
@@ -207,7 +228,14 @@ class MultiAgentSession:
 			if not speakers:
 				yield self._events.done("无可用发言者", round_num, self._build_stats())
 				return
-			async for event in self._execute_speakers(speakers, round_num):
+			async for event in self._execute_speakers(
+				speakers,
+				round_num,
+				_dict_or_empty(run_options, "run_options"),
+				_dict_or_empty(metadata, "metadata"),
+				agent_run_options,
+				agent_metadata,
+			):
 				yield event
 			step += 1
 			step_in_round += 1
@@ -221,15 +249,32 @@ class MultiAgentSession:
 					yield self._events.round_start(round_num)
 		yield self._events.done("手动停止", round_num, self._build_stats())
 
-	async def _execute_speakers(self, speakers: list, round_num: int) -> AsyncIterator[MultiAgentEvent]:
+	async def _execute_speakers(
+		self,
+		speakers: list,
+		round_num: int,
+		base_run_options: dict,
+		base_metadata: dict,
+		agent_run_options: AgentContextFactory | None,
+		agent_metadata: AgentContextFactory | None,
+	) -> AsyncIterator[MultiAgentEvent]:
 		"""English: Bilingual documentation follows.
 中文：以下为双语文档说明。
 通过 dispatcher.request 执行发言者。"""
-		for agent in speakers:
+		for index, agent in enumerate(speakers):
 			self._record_speak(agent.name)
 			prompt = self._build_prompt(agent)
+			request_options, request_metadata = _agent_request_context(
+				agent,
+				index,
+				round_num,
+				base_run_options,
+				base_metadata,
+				agent_run_options,
+				agent_metadata,
+			)
 			try:
-				content = await self._worker.request(agent, prompt)
+				content = await self._worker.request(agent, prompt, request_options, request_metadata)
 				self._shared.add_message(agent.name, content, round_num)
 				yield self._events.message(agent.name, content, round_num)
 			except Exception as e:
@@ -298,3 +343,43 @@ class MultiAgentSession:
 
 	def _update_social_feed(self, round_num: int) -> None:
 		self._social_feed.update(self._shared, round_num)
+
+
+def _agent_request_context(
+	agent: Any,
+	index: int,
+	round_num: int,
+	base_run_options: dict,
+	base_metadata: dict,
+	agent_run_options: AgentContextFactory | None,
+	agent_metadata: AgentContextFactory | None,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+	options = {**base_run_options, **_call_factory(agent_run_options, agent, index, "agent_run_options")}
+	metadata = {
+		**base_metadata,
+		"sidecar": "multi_agent",
+		"multi_agent_round": round_num,
+		"multi_agent_actor": agent.name,
+		"multi_agent_actor_index": index,
+		**_call_factory(agent_metadata, agent, index, "agent_metadata"),
+	}
+	if options.get("run_id"):
+		metadata.setdefault("run_id", str(options["run_id"]))
+	return options, metadata
+
+
+def _dict_or_empty(value: dict | None, name: str) -> dict:
+	if value is None:
+		return {}
+	if not isinstance(value, dict):
+		raise TypeError(f"{name} must be a dict")
+	return dict(value)
+
+
+def _call_factory(factory: AgentContextFactory | None, agent: Any, index: int, name: str) -> dict:
+	if not factory:
+		return {}
+	value = factory(agent, index)
+	if not isinstance(value, dict):
+		raise TypeError(f"{name} must return a dict")
+	return dict(value)

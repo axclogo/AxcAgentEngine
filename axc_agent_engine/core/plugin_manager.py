@@ -254,6 +254,7 @@ def _normalize_pre_tool_decision(raw: Any, plugin: BasePlugin,
 			plugin_name=plugin_name if not allowed else "",
 			reason=reason,
 			code=code,
+			details=_plugin_rejection_details(plugin) if not allowed else None,
 		)
 	return PreToolCallDecision(bool(raw), previous_arguments, plugin_name=plugin_name)
 
@@ -273,3 +274,12 @@ def _plugin_rejection_code(plugin: BasePlugin) -> str:
 		or getattr(plugin, "_last_rejection_code", "")
 		or "tool.rejected_by_plugin"
 	)
+
+
+def _plugin_rejection_details(plugin: BasePlugin) -> dict:
+	details = getattr(plugin, "last_rejection_details", None)
+	if details is None:
+		details = getattr(plugin, "_last_rejection_details", {})
+	if not isinstance(details, dict):
+		return {"guard_name": getattr(plugin, "name", "") or plugin.__class__.__name__}
+	return {"guard_name": getattr(plugin, "name", "") or plugin.__class__.__name__, **details}

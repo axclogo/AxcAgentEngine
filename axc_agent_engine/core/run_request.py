@@ -2,6 +2,7 @@
 中文：此文档说明相关引擎组件的行为。"""
 from __future__ import annotations
 
+import uuid
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -51,8 +52,8 @@ class RunRequest:
 		request_metadata = dict(metadata or {})
 		if options.run_id and request_metadata.get("run_id") and str(request_metadata["run_id"]) != options.run_id:
 			raise ValueError("run_options.run_id conflicts with metadata.run_id")
-		if options.run_id:
-			request_metadata["run_id"] = options.run_id
+		run_id = options.run_id or str(request_metadata.get("run_id") or "") or uuid.uuid4().hex[:16]
+		request_metadata["run_id"] = run_id
 		return cls(
 			user_message=user_message,
 			session_id=session_id,

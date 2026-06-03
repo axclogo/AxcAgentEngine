@@ -215,6 +215,8 @@ async def _execute_once(
 	try:
 		raw_result = await _await_tool_execute(tool_def, arguments, context or {})
 		duration_ms = int((time.time() - start) * 1000)
+	except asyncio.CancelledError:
+		raise
 	except asyncio.TimeoutError:
 		return ToolResult(
 			tool_call_id=tool_call_id, tool_name=tool_def.name,

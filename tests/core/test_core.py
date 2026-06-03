@@ -12,7 +12,7 @@ from axc_agent_engine.core.session import Session
 from axc_agent_engine.core.plugin_manager import PluginManager
 from axc_agent_engine.core.context import ExecutionContext, ExecutionConfig
 from axc_agent_engine.core.events import EventType
-from axc_agent_engine.core.errors import ProviderError, CancelledError
+from axc_agent_engine.core.errors import ProviderError
 from axc_agent_engine.core.constants import PLUGIN_CONTEXT_TAG
 from axc_agent_engine.core.schema import LLMMessage, LLMResponse, LLMUsage
 from axc_agent_engine.plugins import model_info_from_models
@@ -365,8 +365,9 @@ class TestExecutor:
 		ctx = ExecutionContext(config=ExecutionConfig(system_prompt="test", stream=False, max_rounds=5))
 		ctx.cancel()
 		executor = Executor(llm_caller=caller, registry=tool_registry, plugin_manager=pm, ctx=ctx)
-		with pytest.raises(CancelledError):
-			await _run_executor(executor, "hello")
+		events = [event async for event in executor.run_stream("hello")]
+		assert events[-1].type == EventType.CANCELLED
+		assert events[-1].content == "cancelled"
 
 	@pytest.mark.asyncio
 	async def test_total_timeout(self, tool_registry):

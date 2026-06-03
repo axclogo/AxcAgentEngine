@@ -104,11 +104,23 @@ class TestInputProvider:
 		content = [
 			{"type": "text", "text": "describe this"},
 			{"type": "image_url", "image_url": {"url": "https://example.test/image.png"}},
+			{"type": "image_base64", "media_type": "image/jpeg", "data": "abc"},
+			{"type": "file_ref", "ref": "artifact-1", "metadata": {"kind": "pdf"}},
 		]
 		llm = CaptureLLM()
 		agent = Agent("agent-name", "", "", RuntimeConfig(), [], llm, None)
 		await agent.chat_with_messages([{"role": "user", "content": content}])
-		assert llm.messages[0][-1]["content"] == content
+		normalized = llm.messages[0][-1]["content"]
+		assert normalized[0] == {"type": "text", "text": "describe this"}
+		assert normalized[1] == {"type": "image_url", "image_url": {"url": "https://example.test/image.png"}}
+		assert normalized[2] == {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,abc"}}
+		assert normalized[3] == {"type": "file_ref", "file_ref": {"ref": "artifact-1", "kind": "pdf"}}
+
+	@pytest.mark.asyncio
+	async def test_agent_rejects_invalid_multimodal_part(self):
+		agent = Agent("agent-name", "", "", RuntimeConfig(), [], CaptureLLM(), None)
+		with pytest.raises(ValueError, match="unsupported message content part type"):
+			await agent.chat_with_messages([{"role": "user", "content": [{"type": "audio_url", "url": "x"}]}])
 
 	def test_agent_extracts_text_goal_from_multimodal_message(self):
 		content = [

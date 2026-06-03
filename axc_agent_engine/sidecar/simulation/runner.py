@@ -4,7 +4,7 @@
 Simulation runner."""
 from __future__ import annotations
 
-from typing import AsyncIterator
+from typing import Any, AsyncIterator, Callable
 
 from axc_agent_engine.sidecar.simulation.defaults import (
 	DefaultEnvironment,
@@ -30,6 +30,8 @@ from axc_agent_engine.sidecar.simulation.models import (
 	WorldState,
 )
 from axc_agent_engine.sidecar.simulation.report import SimulationReportGenerator, apply_generated_report
+
+ActorContextFactory = Callable[[str, int], dict]
 
 
 class SimulationReportBuilder:
@@ -95,9 +97,11 @@ class SimulationStepWorker:
 		state: WorldState,
 		scenario: Scenario,
 		timeline: list[SimulationStep],
+		run_options: dict[str, Any],
+		metadata: dict[str, Any],
 	) -> SimulationStep:
 		observation = self._observation_builder.build(state, actor, scenario)
-		action = await policy.act(observation, scenario)
+		action = await policy.act(observation, scenario, run_options, metadata)
 		delta = await self._environment.apply(state, action, scenario)
 		scorecard = await self._evaluator.evaluate(state, action, delta, scenario)
 		return SimulationStep(
@@ -152,14 +156,29 @@ class SimulationRunner:
 			self._branch_id,
 		)
 
-	async def run(self, scenario: Scenario, initial_state: WorldState | None = None) -> SimulationReport:
+	async def run(
+		self,
+		scenario: Scenario,
+		initial_state: WorldState | None = None,
+		run_options: dict | None = None,
+		metadata: dict | None = None,
+		actor_run_options: ActorContextFactory | None = None,
+		actor_metadata: ActorContextFactory | None = None,
+	) -> SimulationReport:
 		"""English: Bilingual documentation follows.
 中文：以下为双语文档说明。
 运行场景直到停止条件触发，并返回报告。
 		Run the scenario until the stop condition triggers and return its report.
 		"""
 		report: SimulationReport | None = None
-		async for event in self.stream(scenario, initial_state=initial_state):
+		async for event in self.stream(
+			scenario,
+			initial_state=initial_state,
+			run_options=run_options,
+			metadata=metadata,
+			actor_run_options=actor_run_options,
+			actor_metadata=actor_metadata,
+		):
 			if event.report is not None:
 				report = event.report
 		if report is None:
@@ -171,6 +190,10 @@ class SimulationRunner:
 		self,
 		scenario: Scenario,
 		initial_state: WorldState | None = None,
+		run_options: dict | None = None,
+		metadata: dict | None = None,
+		actor_run_options: ActorContextFactory | None = None,
+		actor_metadata: ActorContextFactory | None = None,
 	) -> AsyncIterator[SimulationEvent]:
 		"""English: Bilingual documentation follows.
 中文：以下为双语文档说明。
@@ -178,6 +201,8 @@ class SimulationRunner:
 		Run the scenario and emit structured execution events.
 		"""
 		state = initial_state.clone() if initial_state else scenario.initial_state.clone()
+		base_run_options = _dict_or_empty(run_options, "run_options")
+		base_metadata = _dict_or_empty(metadata, "metadata")
 		timeline: list[SimulationStep] = []
 		yield SimulationEvent.start(scenario)
 		actors = [agent.name for agent in scenario.agents]
@@ -210,13 +235,22 @@ class SimulationRunner:
 				policy = self._policies.get(actor)
 				if policy is None:
 					continue
+				request_options, request_metadata = _actor_request_context(
+					actor,
+					len(timeline),
+					scenario,
+					base_run_options,
+					base_metadata,
+					actor_run_options,
+					actor_metadata,
+				)
 				try:
 					yield SimulationEvent(
 						type=SimulationEventType.STEP_STARTED,
 						content=actor,
 						metadata={"actor": actor, "next_step_id": len(timeline) + 1},
 					)
-					step = await self._step_worker.run(actor, policy, state, scenario, timeline)
+					step = await self._step_worker.run(actor, policy, state, scenario, timeline, request_options, request_metadata)
 				except Exception as exc:
 					message = f"Simulation step failed for actor '{actor}': {exc}"
 					report = self._build_report(scenario, state, timeline, message, error=str(exc))
@@ -257,3 +291,43 @@ class SimulationRunner:
 			return report
 		generated = await self._report_generator.generate(report)
 		return apply_generated_report(report, generated)
+
+
+def _actor_request_context(
+	actor: str,
+	index: int,
+	scenario: Scenario,
+	base_run_options: dict,
+	base_metadata: dict,
+	actor_run_options: ActorContextFactory | None,
+	actor_metadata: ActorContextFactory | None,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+	options = {**base_run_options, **_call_factory(actor_run_options, actor, index, "actor_run_options")}
+	metadata = {
+		**base_metadata,
+		"sidecar": "simulation",
+		"simulation_scenario_id": scenario.id,
+		"simulation_actor": actor,
+		"simulation_step_index": index,
+		**_call_factory(actor_metadata, actor, index, "actor_metadata"),
+	}
+	if options.get("run_id"):
+		metadata.setdefault("run_id", str(options["run_id"]))
+	return options, metadata
+
+
+def _dict_or_empty(value: dict | None, name: str) -> dict:
+	if value is None:
+		return {}
+	if not isinstance(value, dict):
+		raise TypeError(f"{name} must be a dict")
+	return dict(value)
+
+
+def _call_factory(factory: ActorContextFactory | None, actor: str, index: int, name: str) -> dict:
+	if not factory:
+		return {}
+	value = factory(actor, index)
+	if not isinstance(value, dict):
+		raise TypeError(f"{name} must return a dict")
+	return dict(value)

@@ -37,6 +37,7 @@ class AgentEnvelope:
 	content: str = ""
 	reply_to: str = ""
 	trace_id: str = ""
+	run_options: dict[str, Any] = field(default_factory=dict)
 	metadata: dict[str, Any] = field(default_factory=dict)
 
 	def to_dict(self) -> dict[str, Any]:
@@ -50,6 +51,7 @@ class AgentEnvelope:
 			"content": self.content,
 			"reply_to": self.reply_to,
 			"trace_id": self.trace_id,
+			"run_options": self.run_options,
 			"metadata": self.metadata,
 		}
 
@@ -65,6 +67,7 @@ class AgentEnvelope:
 			content=d.get("content", ""),
 			reply_to=d.get("reply_to", ""),
 			trace_id=d.get("trace_id", ""),
+			run_options=dict(d.get("run_options", {}) or {}),
 			metadata=d.get("metadata", {}),
 		)
 
@@ -276,10 +279,13 @@ class AgentMessageDispatcher:
 
 	async def _run_agent_stream(self, agent: "Agent", envelope: AgentEnvelope) -> list["Event"]:
 		events: list["Event"] = []
+		metadata = dict(envelope.metadata)
+		metadata.setdefault("sub_run_id", metadata.get("sub_run_id") or f"{metadata.get('run_id', envelope.trace_id)}:{agent.name}:{envelope.correlation_id}")
 		async for event in agent.stream(
 			envelope.content,
 			session_id=envelope.conversation_id,
-			metadata=envelope.metadata,
+			run_options=envelope.run_options,
+			metadata=metadata,
 		):
 			events.append(event)
 			if event.type.value != "done":
@@ -327,6 +333,7 @@ def _sub_agent_start_envelope(agent_name: str, envelope: AgentEnvelope) -> Agent
 			"agent_name": agent_name,
 			"agent_id": agent_name,
 			"message": envelope.content,
+			"sub_run_id": _sub_run_id(agent_name, envelope),
 			**_parent_metadata(envelope),
 		},
 	)
@@ -339,6 +346,8 @@ def _sub_agent_step_envelope(agent_name: str, envelope: AgentEnvelope, event: "E
 		event.content,
 		{
 			"agent_name": agent_name,
+			"agent_id": agent_name,
+			"sub_run_id": _sub_run_id(agent_name, envelope),
 			**_parent_metadata(envelope),
 			"step": _event_step(event),
 		},
@@ -359,6 +368,8 @@ def _sub_agent_complete_envelope(
 		result,
 		{
 			"agent_name": agent_name,
+			"agent_id": agent_name,
+			"sub_run_id": _sub_run_id(agent_name, envelope),
 			"success": success,
 			"duration_ms": int((time.time() - started) * 1000),
 			"error": error,
@@ -393,10 +404,22 @@ def _event_step(event: "Event") -> dict[str, Any]:
 	return {
 		"type": event.type.value,
 		"tool": event.tool_name,
+		"tool_name": event.tool_name,
+		"tool_call_id": event.tool_call_id,
 		"content": event.content,
 		"arguments": event.arguments,
+		"artifacts": event.metadata.get("artifacts", []),
+		"error": event.metadata.get("error", event.content if event.type.value == "error" else ""),
 		"duration_ms": int(event.metadata.get("duration_ms", 0) or 0),
 	}
+
+
+def _sub_run_id(agent_name: str, envelope: AgentEnvelope) -> str:
+	raw = envelope.metadata.get("sub_run_id")
+	if raw:
+		return str(raw)
+	parent = str(envelope.metadata.get("run_id") or envelope.trace_id or envelope.conversation_id or "")
+	return f"{parent}:{agent_name}:{envelope.correlation_id}" if parent else f"{agent_name}:{envelope.correlation_id}"
 
 
 def _last_event(events: list["Event"], event_type: str) -> "Event | None":

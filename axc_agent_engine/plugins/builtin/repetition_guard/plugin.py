@@ -34,6 +34,9 @@ class RepetitionGuardPlugin(BasePlugin):
 
 	def initialize(self, config: dict, plugin_ctx: "PluginContext") -> None:
 		self._rules = config.get("rules", DEFAULT_RULES)
+		self._enabled_text_repetition = bool(config.get("enable_text_repetition", True))
+		self._tool_allowlist = {str(item) for item in config.get("tool_allowlist", [])}
+		self._tool_overrides = dict(config.get("tool_overrides", {}) or {})
 		self._tool_history: list[tuple[str, str]] = []
 		self._response_history: list[str] = []
 		self._result_history: list[str] = []
@@ -42,14 +45,18 @@ class RepetitionGuardPlugin(BasePlugin):
 
 	async def pre_tool_call(self, exec_ctx: "ExecutionContext", tool_name: str,
 					  arguments: dict) -> tuple[bool, dict]:
+		if self._tool_allowlist and tool_name not in self._tool_allowlist:
+			return True, arguments
 		args_hash = _hash_args(arguments)
-		reason = self._check_tool_rules(tool_name, args_hash)
-		if reason:
+		rejection = self._check_tool_rules(tool_name, args_hash)
+		if rejection:
+			reason = rejection["reason"]
 			logger.warning(f"[repetition_guard] Blocked: {reason}")
 			self._should_stop = True
 			self._stop_reason = reason
 			self._last_rejection_reason = reason
 			self._last_rejection_code = "tool.rejected_by_repetition_guard"
+			self._last_rejection_details = rejection
 			return False, arguments
 		self._tool_history.append((tool_name, args_hash))
 		return True, arguments
@@ -58,7 +65,7 @@ class RepetitionGuardPlugin(BasePlugin):
 					   arguments: dict, result: "ToolOutput", duration_ms: int) -> "ToolOutput":
 		result_str = result.context_view() if result else ""
 		self._result_history.append(result_str)
-		reason = self._check_result_rules(result_str)
+		reason = self._check_result_rules(result_str) if self._enabled_text_repetition else None
 		if reason:
 			logger.warning(f"[repetition_guard] Result repetition: {reason}")
 			self._should_stop = True
@@ -69,7 +76,7 @@ class RepetitionGuardPlugin(BasePlugin):
 						   assistant_message: str, tool_calls: list[dict]) -> None:
 		if assistant_message:
 			self._response_history.append(assistant_message)
-		reason = self._check_response_rules(assistant_message)
+		reason = self._check_response_rules(assistant_message) if self._enabled_text_repetition else None
 		if reason:
 			logger.warning(f"[repetition_guard] Response repetition: {reason}")
 			self._should_stop = True
@@ -80,27 +87,33 @@ class RepetitionGuardPlugin(BasePlugin):
 			return True, self._stop_reason
 		return False, ""
 
-	def _check_tool_rules(self, tool_name: str, args_hash: str) -> str | None:
+	def _check_tool_rules(self, tool_name: str, args_hash: str) -> dict | None:
 		for rule in self._rules:
 			rtype = rule.get("type", "")
-			limit = rule.get("limit", 999)
+			limit = self._rule_limit(tool_name, rtype, rule.get("limit", 999))
 			if rtype == "same_call":
 				count = _count_consecutive_tail(
 					self._tool_history, lambda t: t[0] == tool_name and t[1] == args_hash
 				)
 				if count >= limit:
-					return f"Repetition detected: same tool+args called {count} consecutive times ({tool_name})"
+					return _rejection("same_call", tool_name, count, limit)
 			elif rtype == "same_tool":
 				count = _count_consecutive_tail(
 					self._tool_history, lambda t: t[0] == tool_name
 				)
 				if count >= limit:
-					return f"Repetition detected: same tool called {count} consecutive times ({tool_name})"
+					return _rejection("same_tool", tool_name, count, limit)
 			elif rtype == "total_tool":
 				count = sum(1 for t in self._tool_history if t[0] == tool_name)
 				if count >= limit:
-					return f"Repetition detected: tool {tool_name} called {count} times total"
+					return _rejection("total_tool", tool_name, count, limit)
 		return None
+
+	def _rule_limit(self, tool_name: str, rule_type: str, default: int) -> int:
+		override = self._tool_overrides.get(tool_name)
+		if isinstance(override, dict) and rule_type in override:
+			return int(override[rule_type])
+		return int(default)
 
 	def _check_response_rules(self, response: str) -> str | None:
 		if not response:
@@ -152,3 +165,14 @@ def _count_consecutive_tail(history: list, predicate) -> int:
 		else:
 			break
 	return count
+
+
+def _rejection(rule_type: str, tool_name: str, observed: int, threshold: int) -> dict:
+	return {
+		"guard_name": "repetition_guard",
+		"rule_type": rule_type,
+		"tool_name": tool_name,
+		"observed": observed,
+		"threshold": threshold,
+		"reason": f"Repetition detected: {rule_type} observed={observed} threshold={threshold} tool={tool_name}",
+	}

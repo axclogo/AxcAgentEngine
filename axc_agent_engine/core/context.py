@@ -47,6 +47,7 @@ class ExecutionServices:
 	checkpoint_store: "CheckpointStore | None" = None
 	command_executor: "CommandExecutor | None" = None
 	policy_evaluator: "PolicyEvaluator | None" = None
+	run_control: "object | None" = None
 
 
 @dataclass
@@ -61,6 +62,7 @@ class ExecutionState:
 	total_input_tokens: int = 0
 	total_output_tokens: int = 0
 	cancelled: bool = False
+	cancel_reason: str = ""
 	error: str = ""
 	fallback_triggered: bool = False
 	fallback_reason: str = ""
@@ -103,10 +105,11 @@ class ExecutionContext:
 
 	#English: Source note. 中文：── 便捷方法 ──
 
-	def cancel(self) -> None:
+	def cancel(self, reason: str = "cancelled") -> None:
 		"""English: This documentation describes the related engine component behavior.
 中文：标记执行已取消。"""
 		self.state.cancelled = True
+		self.state.cancel_reason = reason or "cancelled"
 
 	def add_usage(self, input_tokens: int, output_tokens: int) -> None:
 		"""English: Bilingual documentation follows.
@@ -145,7 +148,10 @@ class ExecutionContext:
 		parent_cancelled = bool(self.runtime.cancel_source and self.runtime.cancel_source.cancelled)
 		if self.state.cancelled or parent_cancelled:
 			from axc_agent_engine.core.errors import CancelledError
-			raise CancelledError("Execution cancelled")
+			reason = self.state.cancel_reason
+			if not reason and self.runtime.cancel_source:
+				reason = getattr(self.runtime.cancel_source, "cancel_reason", "")
+			raise CancelledError(reason or "Execution cancelled")
 
 	def get_plugin_state(self, plugin_name: str, factory: Any = None) -> Any:
 		"""English: Bilingual documentation follows.

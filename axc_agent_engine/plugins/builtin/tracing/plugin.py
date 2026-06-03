@@ -268,16 +268,22 @@ class TracingPlugin(BasePlugin):
 		root_span = state.get("root_span")
 		if not root_span:
 			return
-		error_payload = _error_payload(error, self._max_error_length) if error else {}
+		cancelled = bool(exec_ctx.state.cancelled)
+		error_payload = (
+			_error_payload(exec_ctx.state.cancel_reason or error or "cancelled", self._max_error_length, code="execution.cancelled")
+			if cancelled else (_error_payload(error, self._max_error_length) if error else {})
+		)
 		self._finish_span(
 			exec_ctx,
 			state,
 			root_span,
-			success=not error,
+			success=not error and not cancelled,
 			extra={
 				"input_tokens": exec_ctx.state.total_input_tokens,
 				"output_tokens": exec_ctx.state.total_output_tokens,
+				"total_tokens": exec_ctx.state.total_input_tokens + exec_ctx.state.total_output_tokens,
 				"round": exec_ctx.state.current_round,
+				"status": "cancelled" if cancelled else ("error" if error else "completed"),
 			},
 			error=error_payload,
 		)

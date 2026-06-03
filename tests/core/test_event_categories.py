@@ -41,7 +41,8 @@ class TestEventCategories:
 	def test_terminal_events_contains_correct_types(self):
 		assert EventType.DONE in TERMINAL_EVENTS
 		assert EventType.ERROR in TERMINAL_EVENTS
-		assert len(TERMINAL_EVENTS) == 2
+		assert EventType.CANCELLED in TERMINAL_EVENTS
+		assert len(TERMINAL_EVENTS) == 3
 
 	def test_sub_agent_events_contains_correct_types(self):
 		assert EventType.SUB_AGENT_START in SUB_AGENT_EVENTS

@@ -147,13 +147,18 @@ class StreamLLMBridge:
 				if event is done_marker:
 					break
 				yield event
+		except asyncio.CancelledError:
+			task.cancel()
+			raise
 		finally:
 			self._ctx.runtime.stream_delta_emitted = False
 			if not task.done():
 				task.cancel()
 				try:
 					await task
-				except (asyncio.CancelledError, Exception):
+				except asyncio.CancelledError:
+					pass
+				except Exception:
 					pass
 		if not llm_result:
 			raise ProviderError("LLM call produced no result")

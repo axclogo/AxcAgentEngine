@@ -34,9 +34,15 @@ class AgentPolicyAdapter:
 		self._parser = parser or ActionParser()
 		self._session_id = session_id
 
-	async def act(self, observation: Observation, scenario: Scenario) -> AgentAction:
+	async def act(
+		self,
+		observation: Observation,
+		scenario: Scenario,
+		run_options: dict[str, Any],
+		metadata: dict[str, Any],
+	) -> AgentAction:
 		prompt = build_action_prompt(observation, scenario)
-		raw = await self._agent.chat(prompt, session_id=self._session_id)
+		raw = await self._agent.chat(prompt, session_id=self._session_id, run_options=run_options, metadata=metadata)
 		return self._parser.parse(raw, default_actor=observation.agent)
 
 

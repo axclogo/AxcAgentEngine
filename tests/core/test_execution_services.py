@@ -54,7 +54,7 @@ class TestExecutionServices:
 		assert "private" not in child.state.metadata
 		assert child.runtime.llm_options == {"temperature": 0}
 		ctx.cancel()
-		with pytest.raises(Exception, match="Execution cancelled"):
+		with pytest.raises(Exception, match="cancelled"):
 			child.check_cancelled()
 
 
