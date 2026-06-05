@@ -70,18 +70,18 @@ class TestCompressPluginPostToolCall:
 	@pytest.mark.asyncio
 	async def test_records_durable_tool_result_for_boundary_and_context(self):
 		p = CompressPlugin()
-		p.initialize({"durable_tools": {"names": ["business_query"]}}, PluginContext())
+		p.initialize({"durable_tools": {"names": ["external_query"]}}, PluginContext())
 		ctx = ExecutionContext()
 		output = ToolOutput.text(
 			"full result",
 			summary="short",
-		).with_metadata({"durable_summary": "岗位需求分析报告"})
+		).with_metadata({"durable_summary": "durable analysis report"})
 
-		await p.post_tool_call(ctx, "business_query", {}, output, 100)
+		await p.post_tool_call(ctx, "external_query", {}, output, 100)
 		result = p.transform_messages([{"role": "user", "content": "next"}], ctx, "next")
 
-		assert any("岗位需求分析报告" in item for item in p._conversation_buffer)
-		assert any("岗位需求分析报告" in msg.get("content", "") for msg in result)
+		assert any("durable analysis report" in item for item in p._conversation_buffer)
+		assert any("durable analysis report" in msg.get("content", "") for msg in result)
 
 
 class TestCompressPluginTransformMessages:

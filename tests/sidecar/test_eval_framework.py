@@ -58,14 +58,14 @@ async def test_eval_runner_passes_run_request_context_per_case():
 	await runner.run_cases(
 		cases,
 		run_options={"run_id": "batch", "stream_idle_timeout": 9},
-		metadata={"exec_log_id": 1001, "tenant": "t1"},
+		metadata={"external_trace_id": "trace-1001", "tenant": "t1"},
 		case_run_options=lambda case, index: {"run_id": "explicit-c1"} if index == 0 else {"stream": False},
 		case_metadata=lambda case, index: {"eval_case_id": "override-c1"} if index == 0 else {"case_tag": "second"},
 	)
 
 	first, second = engine.agent.calls
 	assert first["run_options"] == {"run_id": "explicit-c1", "stream_idle_timeout": 9}
-	assert first["metadata"]["exec_log_id"] == 1001
+	assert first["metadata"]["external_trace_id"] == "trace-1001"
 	assert first["metadata"]["sidecar"] == "eval"
 	assert first["metadata"]["eval_case_id"] == "override-c1"
 	assert "judge_only" not in first["metadata"]

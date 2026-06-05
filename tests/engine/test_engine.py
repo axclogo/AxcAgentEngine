@@ -211,10 +211,10 @@ plugins:
 		request = RunRequest.create(
 			user_message="hi",
 			run_options={"run_id": "run-1"},
-			metadata={"exec_log_id": 1001},
+			metadata={"external_trace_id": "trace-1001"},
 		)
 		assert request.metadata["run_id"] == "run-1"
-		assert request.metadata["exec_log_id"] == 1001
+		assert request.metadata["external_trace_id"] == "trace-1001"
 
 	def test_run_request_generates_run_id(self):
 		request = RunRequest.create(user_message="hi")
@@ -257,7 +257,7 @@ plugins:
 				yield None
 
 		agent._execute_stream = execute_stream
-		metadata = {"exec_log_id": 1001, "conversation_id": 123, "agent_config_id": 9}
+		metadata = {"external_trace_id": "trace-1001", "conversation_id": 123, "agent_profile_id": 9}
 		events = [
 			event async for event in agent.stream_with_messages(
 				[{"role": "user", "content": "hello"}],
@@ -281,13 +281,13 @@ plugins:
 			stream=True,
 			messages=[{"role": "user", "content": "hello"}],
 			run_options={"run_id": "run-1"},
-			metadata={"exec_log_id": 1001, "conversation_id": 123, "agent_config_id": 9},
+			metadata={"external_trace_id": "trace-1001", "conversation_id": 123, "agent_profile_id": 9},
 		)
 		executor = agent._create_executor(request)
 		metadata = executor._ctx.state.metadata
-		assert metadata["exec_log_id"] == 1001
+		assert metadata["external_trace_id"] == "trace-1001"
 		assert metadata["conversation_id"] == 123
-		assert metadata["agent_config_id"] == 9
+		assert metadata["agent_profile_id"] == 9
 		assert metadata["run_id"] == "run-1"
 		assert metadata["session_id"] == "session-1"
 		assert metadata["agent_name"] == "metadata_agent"

@@ -255,15 +255,15 @@ async for event in agent.stream_with_messages(
     llm_options={"temperature": 0.2},
     run_options={"run_id": "run_abc"},
     metadata={
-        "exec_log_id": 1001,
+        "external_trace_id": "trace_1001",
         "conversation_id": 123,
-        "agent_config_id": 9,
+        "agent_profile_id": 9,
     },
 ):
     ...
 ```
 
-Use this for host execution-log correlation. Do not encode execution IDs in prompts, tool arguments, or fake tool messages.
+Use this for host-side trace or audit correlation. Do not encode external correlation IDs in prompts, tool arguments, or fake tool messages.
 
 ## Cancellation and Usage
 
@@ -315,7 +315,7 @@ Hosts should not monkey patch `ToolOutput` to change LLM context behavior.
 
 ## Durable Tool Results and Sub-Agent Events
 
-The `compress` plugin preserves assistant tool calls and their matching tool results as atomic groups. Durable tool results are also saved into the compression boundary and reinjected after context packing. By default, `agent_call` and `knowledge_search` are durable; business tools can opt in with `compress.durable_tools.names`, `compress.durable_tools.capabilities`, or `ToolOutput.with_metadata({"durable": True, "durable_summary": "..."})`.
+The `compress` plugin preserves assistant tool calls and their matching tool results as atomic groups. Durable tool results are also saved into the compression boundary and reinjected after context packing. By default, `agent_call` and `knowledge_search` are durable; domain tools can opt in with `compress.durable_tools.names`, `compress.durable_tools.capabilities`, or `ToolOutput.with_metadata({"durable": True, "durable_summary": "..."})`.
 
 `collaboration.agent_call` streams child Agent activity back to the parent run as standard events:
 
@@ -558,12 +558,12 @@ CLI logging flags are global and must be placed before the subcommand.
 - **Tools come from plugins.** The engine core embeds no business tools.
 - **Tools must return `ToolOutput`.** Non-`ToolOutput` returns are rejected.
 - **Tool definitions must be `ToolDefinition`.** No dicts.
-- **Business protocols stay out.** Internal APIs, private DBs, company auth belong in private plugins.
+- **Deployment-specific protocols stay out.** External APIs, deployment databases, auth flows, and service discovery belong in host plugins.
 - **LLM config lives in code.** Agent YAML describes runtime limits, capabilities, and plugins.
 - **Fatal errors are not hidden by fallback logic.** Invalid configuration, invalid runtime resources, broken tool contracts, and flow errors must fail clearly.
-- **Official plugins stay lean.** They may strengthen Agent behavior, but they do not own host network clients, business API keys, private services, or deployment-specific protocols.
+- **Official plugins stay lean.** They may strengthen Agent behavior, but they do not own host network clients, deployment API keys, external services, or deployment-specific protocols.
 - **Runtime resources use mounts.** Do not pass resources through YAML or `overrides`.
-- **Request correlation uses metadata.** Hosts pass execution-log identifiers through `metadata`; tracing spans persist it directly.
+- **Request correlation uses metadata.** Hosts pass external trace identifiers through `metadata`; tracing spans persist them directly.
 - **The API is a subset.** Request-level `tools`, `tool_choice`, `n > 1` are rejected.
 
 ## Tests

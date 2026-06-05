@@ -256,15 +256,15 @@ async for event in agent.stream_with_messages(
     llm_options={"temperature": 0.2},
     run_options={"run_id": "run_abc"},
     metadata={
-        "exec_log_id": 1001,
+        "external_trace_id": "trace_1001",
         "conversation_id": 123,
-        "agent_config_id": 9,
+        "agent_profile_id": 9,
     },
 ):
     ...
 ```
 
-宿主应使用这个机制关联执行日志。不要把执行日志 ID 塞进 prompt、tool args 或伪造 tool message。
+宿主应使用这个机制关联外部 trace 或审计记录。不要把外部关联 ID 塞进 prompt、tool args 或伪造 tool message。
 
 ## 取消与 Usage
 
@@ -316,7 +316,7 @@ messages = [{
 
 ## 持久工具结果与子 Agent 事件
 
-`compress` 插件会把 assistant `tool_calls` 和对应的 tool result 当作原子组保留。持久工具结果还会写入压缩边界，并在上下文打包后重新注入。默认 `agent_call` 和 `knowledge_search` 是持久工具；业务工具可以通过 `compress.durable_tools.names`、`compress.durable_tools.capabilities` 或 `ToolOutput.with_metadata({"durable": True, "durable_summary": "..."})` 标记。
+`compress` 插件会把 assistant `tool_calls` 和对应的 tool result 当作原子组保留。持久工具结果还会写入压缩边界，并在上下文打包后重新注入。默认 `agent_call` 和 `knowledge_search` 是持久工具；领域工具可以通过 `compress.durable_tools.names`、`compress.durable_tools.capabilities` 或 `ToolOutput.with_metadata({"durable": True, "durable_summary": "..."})` 标记。
 
 `collaboration.agent_call` 会把子 Agent 活动转发到父运行事件流：
 
@@ -535,12 +535,12 @@ CLI 日志参数是全局参数，需要放在子命令前。
 - **工具来自插件。** Engine 核心不内置业务工具。
 - **工具必须返回 `ToolOutput`。** 非 `ToolOutput` 返回会被拒绝。
 - **工具定义必须是 `ToolDefinition`。** 不接受 dict。
-- **业务协议不进入开源引擎。** 内部 API、私有数据库、公司鉴权、服务发现属于私有插件。
+- **部署相关协议不进入开源引擎。** 外部 API、部署数据库、鉴权流程、服务发现属于宿主插件。
 - **LLM 配置在代码中。** Agent YAML 只描述运行时限制、能力和插件。
 - **致命错误不做兜底隐藏。** 配置错误、运行时资源错误、工具协议错误、流程错误都必须明确失败。
-- **官方插件保持精简。** 可以强化 Agent 能力，但不持有宿主网络 client、业务 API key、私有服务或部署协议。
+- **官方插件保持精简。** 可以强化 Agent 能力，但不持有宿主网络 client、部署 API key、外部服务或部署协议。
 - **运行时资源走 mounts。** 不要通过 YAML 或 `overrides` 传资源对象。
-- **请求关联走 metadata。** 宿主通过 `metadata` 传执行日志标识，tracing span 原样携带落库。
+- **请求关联走 metadata。** 宿主通过 `metadata` 传外部 trace 标识，tracing span 原样携带落库。
 - **API 是明确子集。** 请求级 `tools`、`tool_choice`、`n > 1` 会被拒绝。
 
 ## 测试

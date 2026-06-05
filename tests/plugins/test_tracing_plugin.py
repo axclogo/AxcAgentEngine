@@ -90,9 +90,9 @@ async def test_tracing_span_store_receives_execution_metadata_and_parent_id():
 		),
 	)
 	ctx.state.metadata.update({
-		"exec_log_id": 1001,
+		"external_trace_id": "trace-1001",
 		"conversation_id": 123,
-		"agent_config_id": 9,
+		"agent_profile_id": 9,
 		"run_id": "run-1",
 		"session_id": "session-1",
 		"agent_name": "agent-a",
@@ -106,9 +106,9 @@ async def test_tracing_span_store_receives_execution_metadata_and_parent_id():
 	root = next(span for span in store.spans if span["type"] == "execution")
 	child = next(span for span in store.spans if span["type"] == "tool_call")
 	for span in (root, child):
-		assert span["metadata"]["exec_log_id"] == 1001
+		assert span["metadata"]["external_trace_id"] == "trace-1001"
 		assert span["metadata"]["conversation_id"] == 123
-		assert span["metadata"]["agent_config_id"] == 9
+		assert span["metadata"]["agent_profile_id"] == 9
 		assert span["metadata"]["run_id"] == "run-1"
 		assert span["metadata"]["session_id"] == "session-1"
 		assert span["metadata"]["agent_name"] == "agent-a"

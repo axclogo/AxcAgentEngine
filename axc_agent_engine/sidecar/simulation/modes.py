@@ -123,7 +123,7 @@ SIMULATION_MODE_ADAPTERS: dict[str, SimulationModeAdapter] = {
 		name="sandbox",
 		actor_selector_factory=RoundRobinActorSelector,
 		default_agents=(AgentProfile(name="simulator", role="隔离推演"),),
-		rules=("只改变模拟世界状态", "不写入业务数据库或外部会话"),
+		rules=("只改变模拟世界状态", "不写入外部数据库或外部会话"),
 		constraints=("外部副作用必须通过适配层显式接入",),
 	),
 }

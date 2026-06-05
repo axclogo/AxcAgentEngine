@@ -122,7 +122,7 @@ class TestExecuteToolCalls:
 		class RejectPlugin(BasePlugin):
 			name = "reject_guard"
 			async def pre_tool_call(self, exec_ctx, tool_name, arguments):
-				return False, arguments, "job_id 参数缺失，必须先查询岗位发布者 user_id", "tool.rejected_by_test"
+				return False, arguments, "record_id is required before loading related owner_id", "tool.rejected_by_test"
 
 		async def noop(args, ctx):
 			return ToolOutput.text("ok")
@@ -137,7 +137,7 @@ class TestExecuteToolCalls:
 
 		assert not results[0].success
 		assert "reject_guard" in results[0].error
-		assert "job_id 参数缺失" in results[0].error
+		assert "record_id is required" in results[0].error
 		assert results[0].error != "Operation rejected by plugin"
 
 	@pytest.mark.asyncio

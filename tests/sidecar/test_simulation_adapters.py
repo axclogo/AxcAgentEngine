@@ -145,7 +145,7 @@ def test_simulation_mode_adapter_builds_generic_sandbox_scenario():
 	runner = adapter.build_runner({})
 
 	assert scenario.metadata["mode"] == "sandbox"
-	assert "不写入业务数据库或外部会话" in scenario.rules
+	assert "不写入外部数据库或外部会话" in scenario.rules
 	assert runner is not None
 
 
