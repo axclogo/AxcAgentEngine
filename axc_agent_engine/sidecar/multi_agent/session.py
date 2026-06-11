@@ -363,9 +363,17 @@ def _agent_request_context(
 		"multi_agent_actor_index": index,
 		**_call_factory(agent_metadata, agent, index, "agent_metadata"),
 	}
-	if options.get("run_id"):
-		metadata.setdefault("run_id", str(options["run_id"]))
+	_sync_run_id(options, metadata)
 	return options, metadata
+
+
+def _sync_run_id(options: dict[str, Any], metadata: dict[str, Any]) -> None:
+	option_run_id = options.get("run_id")
+	metadata_run_id = metadata.get("run_id")
+	if option_run_id and metadata_run_id and str(option_run_id) != str(metadata_run_id):
+		raise ValueError("run_options.run_id conflicts with metadata.run_id")
+	if option_run_id:
+		metadata["run_id"] = str(option_run_id)
 
 
 def _dict_or_empty(value: dict | None, name: str) -> dict:

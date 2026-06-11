@@ -68,6 +68,19 @@ class TestCompressPluginPostToolCall:
 		assert await store.get(result.artifacts[0].id, limit=11) == "raw payload"
 
 	@pytest.mark.asyncio
+	async def test_post_tool_call_propagates_externalization_failure(self):
+		class FailingResultStore:
+			async def put(self, content, metadata=None):
+				raise RuntimeError("store unavailable")
+
+		p = CompressPlugin()
+		p.initialize({"tool_result": {"artifact_threshold_tokens": 10}}, PluginContext())
+		ctx = ExecutionContext()
+		ctx.services.result_store = FailingResultStore()
+		with pytest.raises(RuntimeError, match="store unavailable"):
+			await p.post_tool_call(ctx, "file_read", {}, ToolOutput.text("x" * 1000), 30)
+
+	@pytest.mark.asyncio
 	async def test_records_durable_tool_result_for_boundary_and_context(self):
 		p = CompressPlugin()
 		p.initialize({"durable_tools": {"names": ["external_query"]}}, PluginContext())
@@ -136,6 +149,13 @@ class TestCompressPluginTransformMessages:
 		result = p.transform_messages(messages, ctx)
 
 		assert any(msg.get("role") == "tool" and "result0" in msg.get("content", "") for msg in result)
+
+	def test_transform_messages_propagates_invalid_context_window(self):
+		p = CompressPlugin()
+		p.initialize({"context_window": {"max_input_tokens": "bad"}}, PluginContext())
+		ctx = ExecutionContext()
+		with pytest.raises(TypeError):
+			p.transform_messages([{"role": "user", "content": "next"}], ctx, "next")
 
 	def test_empty_messages(self):
 		p = CompressPlugin()

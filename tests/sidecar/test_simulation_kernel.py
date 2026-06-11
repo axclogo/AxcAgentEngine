@@ -173,6 +173,18 @@ async def test_runner_passes_run_context_to_policy():
 	assert metadata["actor_exec"] == "blue"
 
 
+async def test_runner_rejects_conflicting_run_ids():
+	scenario = Scenario(id="bad-run-id", title="Bad run id", agents=[AgentProfile(name="blue")], max_steps=1)
+	runner = SimulationRunner(policies={"blue": ScriptedPolicy("blue", [AgentAction(actor="blue", type=ActionType.WAIT, intent="wait")])})
+
+	try:
+		[event async for event in runner.stream(scenario, run_options={"run_id": "run-a"}, metadata={"run_id": "run-b"})]
+	except ValueError as exc:
+		assert "run_options.run_id conflicts with metadata.run_id" in str(exc)
+	else:
+		raise AssertionError("expected ValueError")
+
+
 async def test_runner_rejects_invalid_run_context_inputs():
 	scenario = Scenario(id="bad-ctx", title="Bad context", agents=[AgentProfile(name="blue")], max_steps=1)
 	runner = SimulationRunner(policies={"blue": ScriptedPolicy("blue", [AgentAction(actor="blue", type=ActionType.WAIT, intent="wait")])})

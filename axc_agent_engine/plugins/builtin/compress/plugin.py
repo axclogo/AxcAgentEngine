@@ -221,25 +221,19 @@ class CompressPlugin(BasePlugin):
 
 	def transform_messages(self, messages: list[dict], exec_ctx: "ExecutionContext",
 						   current_message: str = "") -> list[dict]:
-		try:
-			return self._pipeline.transform(messages, current_message)
-		except Exception:
-			return messages
+		return self._pipeline.transform(messages, current_message)
 
 	async def post_tool_call(self, exec_ctx: "ExecutionContext", tool_name: str,
 							 arguments: dict, result: "ToolOutput", duration_ms: int) -> "ToolOutput":
-		try:
-			self._file_cache.update_from_tool(tool_name, arguments, result)
-			if self._tool_summary_enabled:
-				self._pending_tool_observations.append(observation_from_output(tool_name, arguments, result, duration_ms))
-			self._record_durable_result(tool_name, result)
-			return await externalize_large_tool_output(
-				result,
-				exec_ctx.services.result_store,
-				self._artifact_threshold,
-			)
-		except Exception:
-			return result
+		self._file_cache.update_from_tool(tool_name, arguments, result)
+		if self._tool_summary_enabled:
+			self._pending_tool_observations.append(observation_from_output(tool_name, arguments, result, duration_ms))
+		self._record_durable_result(tool_name, result)
+		return await externalize_large_tool_output(
+			result,
+			exec_ctx.services.result_store,
+			self._artifact_threshold,
+		)
 
 	async def on_round_end(self, exec_ctx: "ExecutionContext", user_message: str,
 						   assistant_message: str, tool_calls: list[dict]) -> None:

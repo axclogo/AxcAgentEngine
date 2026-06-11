@@ -208,6 +208,14 @@ async def test_multi_agent_session_passes_run_context_to_dispatcher():
 
 
 @pytest.mark.asyncio
+async def test_multi_agent_session_rejects_conflicting_run_ids():
+	session = MultiAgentSession([_agent("alpha")], ReplyDispatcher(), stop_condition=StopAfterRound(1))
+
+	with pytest.raises(ValueError, match="run_options.run_id conflicts with metadata.run_id"):
+		[event async for event in session.stream(run_options={"run_id": "run-a"}, metadata={"run_id": "run-b"})]
+
+
+@pytest.mark.asyncio
 async def test_multi_agent_session_rejects_invalid_run_context_inputs():
 	session = MultiAgentSession([_agent("alpha")], ReplyDispatcher(), stop_condition=StopAfterRound(1))
 
