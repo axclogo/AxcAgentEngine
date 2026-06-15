@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import uuid
+from copy import deepcopy
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
@@ -75,7 +76,7 @@ class OrchestrationEventPresenter:
 			"agent": event.agent_name,
 			"content": event.content,
 			"round": event.round_num,
-			"metadata": dict(event.metadata),
+			"metadata": deepcopy(event.metadata),
 		}
 
 	def result(self, task: OrchestrationTask, done_reason: str) -> dict[str, Any]:
@@ -180,7 +181,7 @@ class OrchestrationTaskService:
 			mode=mode,
 			topic=topic,
 			agent_names=list(agent_names),
-			metadata=dict(metadata or {}),
+			metadata=deepcopy(metadata or {}),
 		)
 		await self._repository.add(task)
 		if start:

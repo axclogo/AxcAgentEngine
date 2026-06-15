@@ -11,6 +11,7 @@ Agents may be used as policies by adapters, but the simulation kernel owns
 scenario state, actions, deltas, and timeline records."""
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
@@ -257,4 +258,4 @@ class SimulationEvent:
 
 	@classmethod
 	def error(cls, message: str, metadata: dict[str, Any] | None = None) -> "SimulationEvent":
-		return cls(type=SimulationEventType.ERROR, content=message, metadata=metadata or {})
+		return cls(type=SimulationEventType.ERROR, content=message, metadata=deepcopy(metadata or {}))

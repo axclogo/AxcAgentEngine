@@ -160,6 +160,16 @@ class TestPluginManager:
 		with pytest.raises(RuntimeError, match="boom"):
 			await pm.on_execution_start(ExecutionContext())
 
+	@pytest.mark.asyncio
+	async def test_hook_errors_propagate_from_sync_hooks(self):
+		class BadPlugin(BasePlugin):
+			name = "bad"
+			def inject_context(self, ctx):
+				raise RuntimeError("sync boom")
+		pm = PluginManager([BadPlugin()])
+		with pytest.raises(RuntimeError, match="sync boom"):
+			pm.collect_context(ExecutionContext())
+
 	def test_collect_context(self):
 		class CtxPlugin(BasePlugin):
 			name = "ctx"

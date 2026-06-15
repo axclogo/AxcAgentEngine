@@ -2,9 +2,11 @@
 中文：此文档说明相关引擎组件的行为。"""
 from __future__ import annotations
 
-import uuid
+from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any
+
+from axc_agent_engine.core.run_context import context_run_id, dict_or_empty, normalize_run_context
 
 
 @dataclass(frozen=True)
@@ -17,13 +19,17 @@ class RunOptions:
 
 	@classmethod
 	def from_dict(cls, raw: dict | None) -> "RunOptions":
-		raw = raw or {}
+		raw = dict_or_empty(raw, "run_options")
+		return cls.from_normalized(raw)
+
+	@classmethod
+	def from_normalized(cls, raw: dict[str, Any]) -> "RunOptions":
 		return cls(
 			stream_idle_timeout=_positive_int(raw.get("stream_idle_timeout")),
 			approval_queue=raw.get("approval_queue"),
 			response_queue=raw.get("response_queue"),
 			stream=raw.get("stream") if isinstance(raw.get("stream"), bool) else None,
-			run_id=str(raw.get("run_id") or ""),
+			run_id=context_run_id(raw),
 		)
 
 
@@ -48,20 +54,17 @@ class RunRequest:
 		run_options: dict | None = None,
 		metadata: dict | None = None,
 	) -> "RunRequest":
-		options = RunOptions.from_dict(run_options)
-		request_metadata = dict(metadata or {})
-		if options.run_id and request_metadata.get("run_id") and str(request_metadata["run_id"]) != options.run_id:
-			raise ValueError("run_options.run_id conflicts with metadata.run_id")
-		run_id = options.run_id or str(request_metadata.get("run_id") or "") or uuid.uuid4().hex[:16]
-		request_metadata["run_id"] = run_id
+		request_run_options, request_metadata = normalize_run_context(run_options, metadata)
+		request_llm_options = dict_or_empty(llm_options, "llm_options")
+		options = RunOptions.from_normalized(request_run_options)
 		return cls(
 			user_message=user_message,
 			session_id=session_id,
 			stream=options.stream if options.stream is not None else stream,
-			messages=messages,
-			llm_options=dict(llm_options or {}),
+			messages=deepcopy(messages),
+			llm_options=deepcopy(request_llm_options),
 			options=options,
-			metadata=request_metadata,
+			metadata=deepcopy(request_metadata),
 		)
 
 

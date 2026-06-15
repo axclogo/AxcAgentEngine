@@ -6,6 +6,7 @@ import asyncio
 import time
 import uuid
 from collections import deque
+from copy import deepcopy
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any, Protocol, runtime_checkable
@@ -38,6 +39,10 @@ class AuditEvent:
 	error: dict[str, Any] = field(default_factory=dict)
 	metadata: dict[str, Any] = field(default_factory=dict)
 
+	def __post_init__(self) -> None:
+		object.__setattr__(self, "error", deepcopy(self.error))
+		object.__setattr__(self, "metadata", deepcopy(self.metadata))
+
 	def to_dict(self) -> dict[str, Any]:
 		return {
 			"event_id": self.event_id,
@@ -51,8 +56,8 @@ class AuditEvent:
 			"risk_level": self.risk_level,
 			"allowed": self.allowed,
 			"duration_ms": self.duration_ms,
-			"error": self.error,
-			"metadata": self.metadata,
+			"error": deepcopy(self.error),
+			"metadata": deepcopy(self.metadata),
 		}
 
 

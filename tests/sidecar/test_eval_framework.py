@@ -47,6 +47,36 @@ async def test_eval_store_annotation_and_dataset_runner():
 	assert (await store.list_results("run"))[0].actual_output == "answer:hello"
 
 
+async def test_annotation_reply_copies_metadata_at_store_boundary():
+	metadata = {"label": {"value": "original"}}
+	reply = AnnotationReply(case_id="c1", answer="answer", metadata=metadata)
+	store = InMemoryAnnotationStore()
+	await store.save_reply(reply)
+
+	metadata["label"]["value"] = "mutated"
+	reply.metadata["label"]["value"] = "mutated"
+
+	stored = await store.get_reply("c1")
+	assert stored.metadata == {"label": {"value": "original"}}
+
+
+async def test_eval_runner_copies_annotation_metadata():
+	annotations = InMemoryAnnotationStore()
+	reply_metadata = {"label": {"value": "original"}}
+	await annotations.save_reply(AnnotationReply(case_id="c1", answer="answer:hello", metadata=reply_metadata))
+	runner = EvalRunner(FakeEngine(), "agent", annotation_store=annotations)
+	case = EvalCase(input="hello", case_id="c1", metadata={"case": {"value": "original"}})
+
+	annotated = await runner._apply_annotation(case, "c1")
+	case.metadata["case"]["value"] = "mutated"
+	reply_metadata["label"]["value"] = "mutated"
+
+	assert annotated.metadata == {
+		"case": {"value": "original"},
+		"annotation": {"label": {"value": "original"}},
+	}
+
+
 async def test_eval_runner_passes_run_request_context_per_case():
 	engine = FakeEngine()
 	runner = EvalRunner(engine, "agent")
@@ -76,6 +106,48 @@ async def test_eval_runner_passes_run_request_context_per_case():
 	assert second["metadata"]["case_tag"] == "second"
 
 
+async def test_eval_runner_derives_case_run_id_from_metadata_run_id():
+	engine = FakeEngine()
+	runner = EvalRunner(engine, "agent")
+
+	await runner.run_cases(
+		[EvalCase(input="a", case_id="c1")],
+		metadata={"run_id": "batch", "tenant": "t1"},
+	)
+
+	call = engine.agent.calls[0]
+	assert call["run_options"]["run_id"] == "batch:c1"
+	assert call["metadata"]["run_id"] == "batch:c1"
+	assert call["metadata"]["tenant"] == "t1"
+
+
+async def test_eval_runner_honors_explicit_case_metadata_run_id():
+	engine = FakeEngine()
+	runner = EvalRunner(engine, "agent")
+
+	await runner.run_cases(
+		[EvalCase(input="a", case_id="c1")],
+		run_options={"stream": False},
+		case_metadata=lambda case, index: {"run_id": "case-meta"},
+	)
+
+	call = engine.agent.calls[0]
+	assert call["run_options"] == {"stream": False}
+	assert call["metadata"]["run_id"] == "case-meta"
+
+
+async def test_eval_runner_rejects_case_run_id_conflict():
+	import pytest
+
+	runner = EvalRunner(FakeEngine(), "agent")
+	with pytest.raises(ValueError, match="run_options.run_id conflicts with metadata.run_id"):
+		await runner.run_cases(
+			[EvalCase(input="a", case_id="c1")],
+			case_run_options=lambda case, index: {"run_id": "option"},
+			case_metadata=lambda case, index: {"run_id": "metadata"},
+		)
+
+
 async def test_eval_runner_rejects_conflicting_run_ids():
 	import pytest
 
@@ -86,6 +158,25 @@ async def test_eval_runner_rejects_conflicting_run_ids():
 			run_options={"run_id": "batch"},
 			metadata={"run_id": "other"},
 		)
+
+
+async def test_eval_runner_rejects_invalid_context_factories_and_zero_run_id():
+	import pytest
+
+	runner = EvalRunner(FakeEngine(), "agent")
+	with pytest.raises(TypeError, match="case_run_options must return a dict"):
+		await runner.run_cases([EvalCase(input="a", case_id="c1")], case_run_options=lambda case, index: "bad")
+	with pytest.raises(TypeError, match="metadata must be a dict"):
+		await runner.run_cases([EvalCase(input="a", case_id="c1")], metadata="bad")
+
+	await runner.run_cases(
+		[EvalCase(input="a", case_id="c1")],
+		run_options={"run_id": 0},
+		metadata={"run_id": 0},
+	)
+	call = runner._engine.agent.calls[-1]
+	assert call["run_options"]["run_id"] == "0:c1"
+	assert call["metadata"]["run_id"] == "0:c1"
 
 
 async def test_eval_store_replaces_results_by_case_id():

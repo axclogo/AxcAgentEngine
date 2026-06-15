@@ -13,8 +13,10 @@ from typing import Any, AsyncIterator
 from axc_agent_engine.core.context import ExecutionConfig, ExecutionContext, ExecutionServices
 from axc_agent_engine.core.events import Event, EventType
 from axc_agent_engine.core.executor import Executor
+from axc_agent_engine.core.input_messages import extract_last_user_message, normalize_multimodal_messages
 from axc_agent_engine.core.llm_caller import LLMCaller
 from axc_agent_engine.core.plugin_manager import PluginManager
+from axc_agent_engine.core.run_context import context_run_id, dict_or_empty
 from axc_agent_engine.core.run_request import RunRequest
 from axc_agent_engine.core.session import Session
 from axc_agent_engine.core.session_manager import SessionManager
@@ -163,7 +165,7 @@ class Agent:
 		self._services = services or ExecutionServices(result_store=result_store)
 		self._input_provider = input_provider or PassthroughInputProvider()
 		self._workflow_runtime = workflow_runtime or create_workflow_runtime()
-		self._metadata = dict(metadata or {})
+		self._metadata = dict_or_empty(metadata, "metadata")
 		queue_timeout = self._runtime.concurrency.queue_timeout
 		self._engine_limiter = engine_limiter or ExecutionLimiter()
 		self._agent_limiter = ExecutionLimiter(
@@ -224,7 +226,7 @@ class Agent:
 
 		English: Run a non-streaming chat turn from a structured message list.
 		"""
-		user_msg = self._extract_last_user_message(messages)
+		user_msg = extract_last_user_message(messages)
 		return await self._execute(
 			user_message=user_msg,
 			inject_messages=messages,
@@ -272,7 +274,7 @@ class Agent:
 
 		English: Stream execution events from a structured message list.
 		"""
-		user_msg = self._extract_last_user_message(messages)
+		user_msg = extract_last_user_message(messages)
 		async for event in self._execute_stream(
 			user_message=user_msg,
 			inject_messages=messages,
@@ -326,7 +328,7 @@ class Agent:
 			message=message,
 			handler=lambda plan: self._resume_from_workflow_plan(plan, message, llm_options, run_options, metadata),
 			checkpoint_store=self._services.checkpoint_store,
-			metadata=dict(metadata or {}),
+			metadata=dict_or_empty(metadata, "metadata"),
 		)
 		async for event in self._workflow_runtime.resume(request):
 			yield event
@@ -348,7 +350,7 @@ class Agent:
 		session_id = plan.session_id
 		stream = bool((run_options or {}).get("stream", True))
 		async with await self._run_coordinator.slots(session_id):
-			request_metadata = {"run_id": run_id, **dict(metadata or {})}
+			request_metadata = {"run_id": run_id, **dict_or_empty(metadata, "metadata")}
 			request = RunRequest.create(
 				user_message=message,
 				session_id=session_id,
@@ -445,8 +447,8 @@ class Agent:
 				else [{"role": "user", "content": request.user_message}]
 			)
 			processed = await self._process_input(raw_messages, request.session_id)
-			processed.messages = _normalize_multimodal_messages(processed.messages)
-			effective_user_message = self._extract_last_user_message(processed.messages) or request.user_message
+			processed.messages = normalize_multimodal_messages(processed.messages)
+			effective_user_message = extract_last_user_message(processed.messages) or request.user_message
 			if processed.artifacts:
 				executor._ctx.state.metadata["input_artifacts"] = processed.artifacts
 			if processed.metadata:
@@ -489,11 +491,11 @@ class Agent:
 
 	@staticmethod
 	def _validate_resume_metadata(run_id: str, metadata: dict | None, run_options: dict | None) -> None:
-		metadata_run_id = (metadata or {}).get("run_id")
-		option_run_id = (run_options or {}).get("run_id")
-		if metadata_run_id and str(metadata_run_id) != run_id:
+		metadata_run_id = context_run_id(dict_or_empty(metadata, "metadata"))
+		option_run_id = context_run_id(dict_or_empty(run_options, "run_options"))
+		if metadata_run_id and metadata_run_id != run_id:
 			raise ValueError("metadata.run_id conflicts with resume run_id")
-		if option_run_id and str(option_run_id) != run_id:
+		if option_run_id and option_run_id != run_id:
 			raise ValueError("run_options.run_id conflicts with resume run_id")
 
 	async def _process_input(self, messages: list[dict[str, Any]], session_id: str) -> InputProviderResult:
@@ -503,61 +505,3 @@ class Agent:
 			"workspace": self._runtime.workspace,
 		}
 		return await self._input_provider.process(messages, context)
-
-	@staticmethod
-	def _extract_last_user_message(messages: list[dict]) -> str:
-		for msg in reversed(messages):
-			if msg.get("role") == "user":
-				return _content_to_text(msg.get("content", ""))
-		return ""
-
-
-def _content_to_text(content: Any) -> str:
-	"""Extract a textual goal from string or OpenAI-compatible multimodal content.
-中文：此文档说明相关引擎组件的行为。"""
-	if isinstance(content, str):
-		return content
-	if isinstance(content, list):
-		text_parts = []
-		for part in content:
-			if isinstance(part, dict) and part.get("type") == "text":
-				text = part.get("text", "")
-				if text:
-					text_parts.append(str(text))
-		return "\n".join(text_parts)
-	return "" if content is None else str(content)
-
-
-def _normalize_multimodal_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
-	return [{**message, "content": _normalize_content_parts(message.get("content"))} for message in messages]
-
-
-def _normalize_content_parts(content: Any) -> Any:
-	if not isinstance(content, list):
-		return content
-	parts = []
-	for part in content:
-		if not isinstance(part, dict):
-			raise TypeError("message content part must be an object")
-		part_type = str(part.get("type") or "")
-		if part_type == "text":
-			parts.append({"type": "text", "text": str(part.get("text", ""))})
-		elif part_type == "image_url":
-			image = part.get("image_url")
-			if not isinstance(image, dict) or not image.get("url"):
-				raise ValueError("image_url content part requires image_url.url")
-			parts.append({"type": "image_url", "image_url": dict(image)})
-		elif part_type == "image_base64":
-			data = str(part.get("data") or part.get("image_base64") or "")
-			media_type = str(part.get("media_type") or "image/png")
-			if not data:
-				raise ValueError("image_base64 content part requires data")
-			parts.append({"type": "image_url", "image_url": {"url": f"data:{media_type};base64,{data}"}})
-		elif part_type == "file_ref":
-			ref = str(part.get("ref") or part.get("file_ref") or "")
-			if not ref:
-				raise ValueError("file_ref content part requires ref")
-			parts.append({"type": "file_ref", "file_ref": {"ref": ref, **dict(part.get("metadata", {}) or {})}})
-		else:
-			raise ValueError(f"unsupported message content part type: {part_type}")
-	return parts

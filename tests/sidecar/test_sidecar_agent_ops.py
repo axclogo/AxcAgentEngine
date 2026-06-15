@@ -34,6 +34,19 @@ def test_agent_selector_prefers_capable_high_quality_agent():
 	assert best.missing_capabilities == set()
 
 
+def test_agent_profile_from_agent_copies_metadata():
+	class Agent:
+		name = "worker"
+		description = "does work"
+
+	metadata = {"nested": {"value": "original"}}
+	profile = AgentProfile.from_agent(Agent(), metadata=metadata)
+
+	metadata["nested"]["value"] = "mutated"
+
+	assert profile.metadata == {"nested": {"value": "original"}}
+
+
 def test_agent_distiller_extracts_tool_rules_and_failure_antipatterns():
 	traces = [
 		ExecutionTrace(

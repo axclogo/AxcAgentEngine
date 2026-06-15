@@ -37,8 +37,18 @@ class BuiltinResultTools:
 			return ToolOutput.error("ResultStore not available")
 		results = await result_store.search(artifact_id, query)
 		if not results:
-			return ToolOutput.json_output({"matches": [], "query": query}, summary=f"未找到 '{query}' 的匹配项")
-		return ToolOutput.json_output({"matches": results, "query": query}, summary=f"找到 {len(results)} 个 '{query}' 的匹配项")
+			return ToolOutput(
+				content={"matches": [], "query": query},
+				content_type="json",
+				summary=f"未找到 '{query}' 的匹配项",
+				llm_view=f"No matches for query: {query}",
+			)
+		return ToolOutput(
+			content={"matches": results, "query": query},
+			content_type="json",
+			summary=f"找到 {len(results)} 个 '{query}' 的匹配项",
+			llm_view=_result_search_llm_view(query, results),
+		)
 
 	async def page(self, args: dict[str, Any], context: dict[str, Any]) -> ToolOutput:
 		artifact_id = args.get("artifact_id", "")
@@ -54,3 +64,15 @@ class BuiltinResultTools:
 		if not content:
 			return ToolOutput.error(f"No content at page {page}")
 		return ToolOutput.text(content, summary=f"result_page：第 {page} 页，{len(content)} 个字符")
+
+
+def _result_search_llm_view(query: str, results: list[dict[str, Any]]) -> str:
+	lines = [f"Search results for: {query}", f"Matches: {len(results)}"]
+	for index, item in enumerate(results, start=1):
+		offset = item.get("offset", item.get("position", ""))
+		preview = str(item.get("preview", item.get("text", item.get("content", "")))).strip()
+		location = f" at offset {offset}" if offset != "" else ""
+		lines.append(f"{index}. Match{location}")
+		if preview:
+			lines.append(f"   {preview}")
+	return "\n".join(lines)

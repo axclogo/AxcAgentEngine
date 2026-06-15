@@ -193,7 +193,12 @@ class CollaborationPlugin(BasePlugin):
 			for a in agents
 			if self._is_agent_allowed(a.name, caller)
 		]
-		return ToolOutput.json_output({"agents": result}, summary=f"{len(result)} agents available")
+		return ToolOutput(
+			content={"agents": result},
+			content_type="json",
+			summary=f"{len(result)} agents available",
+			llm_view=_agent_list_llm_view(result),
+		)
 
 	async def _tool_agent_call(self, args: dict, context: dict):
 		from axc_agent_engine.tools.tool_output import ToolOutput
@@ -227,6 +232,7 @@ class CollaborationPlugin(BasePlugin):
 			return ToolOutput.json_output(
 				{"agent": agent_name, "result": reply.content, "duration_ms": duration_ms},
 				summary=durable_summary,
+				llm_view=_agent_call_llm_view(agent_name, reply.content, duration_ms),
 			).with_metadata(
 				{"durable": True, "durable_summary": durable_summary, "agent_name": agent_name},
 			)
@@ -308,6 +314,23 @@ def _collaboration_metadata(context: dict, exec_ctx: Any, depth: int) -> dict[st
 def _agent_call_durable_summary(agent_name: str, result: Any) -> str:
 	text = str(result)
 	return f"Agent '{agent_name}' result:\n{text}"
+
+
+def _agent_call_llm_view(agent_name: str, result: Any, duration_ms: int) -> str:
+	return f"Agent result\nAgent: {agent_name}\nDuration: {duration_ms}ms\nResult:\n{result}"
+
+
+def _agent_list_llm_view(agents: list[dict[str, Any]]) -> str:
+	if not agents:
+		return "Available agents: none"
+	lines = [f"Available agents ({len(agents)}):"]
+	for index, agent in enumerate(agents, start=1):
+		name = str(agent.get("name", ""))
+		description = str(agent.get("description", "")).strip()
+		lines.append(f"{index}. {name}")
+		if description:
+			lines.append(f"   Description: {description}")
+	return "\n".join(lines)
 
 
 def _task_status(task: Any) -> str:

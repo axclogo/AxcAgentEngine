@@ -46,6 +46,9 @@ class TestFileRead:
 		assert result.content_type == "json"
 		assert result.content["total_lines"] == 3
 		assert "line1" in result.content["text"]
+		assert "File: test.txt" in result.context_view()
+		assert "1: line1" in result.context_view()
+		assert result.display_view().startswith('{"path": "test.txt"')
 
 	@pytest.mark.asyncio
 	async def test_empty_path(self):
@@ -628,6 +631,8 @@ class TestResultSearch:
 		result = await _result_search({"artifact_id": ref.id, "query": "foo"}, {"result_store": store})
 		assert not result.is_error
 		assert len(result.content["matches"]) == 1
+		assert "Search results for: foo" in result.context_view()
+		assert "Matches: 1" in result.context_view()
 
 	@pytest.mark.asyncio
 	async def test_no_matches(self):
@@ -636,6 +641,7 @@ class TestResultSearch:
 		result = await _result_search({"artifact_id": ref.id, "query": "xyz"}, {"result_store": store})
 		assert not result.is_error
 		assert result.content["matches"] == []
+		assert result.context_view() == "No matches for query: xyz"
 
 	@pytest.mark.asyncio
 	async def test_empty_query(self):

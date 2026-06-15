@@ -3,9 +3,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import random
 import time
 from copy import deepcopy
-from typing import Any, TYPE_CHECKING
+from typing import Any, Awaitable, Callable, TYPE_CHECKING
+
+import httpx
 
 from axc_agent_engine.core.context import ExecutionContext
 from axc_agent_engine.core.stream_aggregator import StreamAggregator
@@ -26,6 +29,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 PROVIDER_MESSAGE_KEYS = {"role", "content", "name", "tool_call_id", "tool_calls", "function_call"}
+RETRYABLE_LLM_ERRORS = (httpx.NetworkError, httpx.TimeoutException, RetryableProviderError, LLMTimeoutError)
 
 
 class StreamEventEmitter:
@@ -61,6 +65,7 @@ class StreamEventEmitter:
 		await self._sink.emit(Event(type=EventType.THINKING_DELTA, content=content))
 
 	async def _content_delta(self, content: str) -> None:
+		self._ctx.runtime.stream_delta_emitted = True
 		if not self._sink:
 			return
 		if self._in_thinking:
@@ -70,7 +75,6 @@ class StreamEventEmitter:
 			self._stream_started = True
 			await self._sink.emit(Event(type=EventType.STREAM_START))
 		await self._sink.emit(Event(type=EventType.STREAM_DELTA, content=content))
-		self._ctx.runtime.stream_delta_emitted = True
 
 	async def _tool_args_delta(self, content: str, meta: dict) -> None:
 		event = Event.tool_args_preview(
@@ -157,32 +161,12 @@ class LLMCaller:
 		"""English: Bilingual documentation follows.
 中文：以下为双语文档说明。
 带重试和 fallback 的非流式调用。"""
-		import httpx
-		import random
 		kwargs = self._build_kwargs(ctx, tools)
-		for attempt in range(2):
-			try:
-				llm_resp: LLMResponse = await self._primary.chat(messages, tools, **kwargs)
-				if not isinstance(llm_resp, LLMResponse):
-					raise ProviderContractError(
-						f"LLMProvider.chat 必须返回 LLMResponse，实际得到 {type(llm_resp).__name__}")
-				return self._process_sync_response(ctx, llm_resp)
-			except (httpx.NetworkError, httpx.TimeoutException, RetryableProviderError, LLMTimeoutError) as e:
-				if attempt == 0:
-					delay = 1.0 + random.uniform(0, 0.5)
-					logger.warning(f"Primary LLM network error, retrying in {delay:.1f}s: {e}")
-					await asyncio.sleep(delay)
-					continue
-				if self._fallback:
-					logger.warning(f"Primary LLM retry failed, switching to fallback: {e}")
-					self._mark_fallback(ctx, str(e))
-					llm_resp = await self._fallback.chat(messages, tools, **kwargs)
-					if not isinstance(llm_resp, LLMResponse):
-						raise ProviderContractError(
-							f"LLMProvider.chat 必须返回 LLMResponse，实际得到 {type(llm_resp).__name__}")
-					return self._process_sync_response(ctx, llm_resp)
-				raise
-		raise ProviderError("Sync call failed after retries")
+		async def run(client: "LLMProvider") -> tuple[dict, list[Event]]:
+			llm_resp: LLMResponse = await client.chat(messages, tools, **kwargs)
+			return self._process_sync_response(ctx, _ensure_llm_response(llm_resp))
+
+		return await self._call_with_retry(ctx, run, fallback_allowed=lambda: True)
 
 	async def _call_stream(
 		self,
@@ -197,25 +181,35 @@ class LLMCaller:
 		kwargs = self._build_kwargs(ctx, tools)
 		if ctx.config.thinking in ("always", "auto"):
 			kwargs["thinking"] = ctx.config.thinking
-		import httpx
-		import random
+		async def run(client: "LLMProvider") -> tuple[dict, list[Event]]:
+			return await self._aggregate_stream(ctx, client, messages, tools, stream_sink=stream_sink, **kwargs)
+
+		def fallback_allowed() -> bool:
+			return not ctx.runtime.stream_delta_emitted
+
+		return await self._call_with_retry(ctx, run, fallback_allowed)
+
+	async def _call_with_retry(
+		self,
+		ctx: ExecutionContext,
+		call: Callable[["LLMProvider"], Awaitable[tuple[dict, list[Event]]]],
+		fallback_allowed: Callable[[], bool],
+	) -> tuple[dict, list[Event]]:
 		for attempt in range(2):
 			try:
-				return await self._aggregate_stream(ctx, self._primary, messages, tools, stream_sink=stream_sink, **kwargs)
-			except (httpx.NetworkError, httpx.TimeoutException, RetryableProviderError, LLMTimeoutError) as e:
-				if ctx.runtime.stream_delta_emitted:
+				return await call(self._primary)
+			except RETRYABLE_LLM_ERRORS as e:
+				if not fallback_allowed():
 					raise ProviderError(f"Stream interrupted after partial output: {e}") from e
 				if attempt == 0:
-					delay = 1.0 + random.uniform(0, 0.5)
-					logger.warning(f"Primary LLM network error, retrying in {delay:.1f}s: {e}")
-					await asyncio.sleep(delay)
+					await _sleep_before_retry(e)
 					continue
 				if self._fallback:
 					logger.warning(f"Primary LLM retry failed, switching to fallback: {e}")
 					self._mark_fallback(ctx, str(e))
-					return await self._aggregate_stream(ctx, self._fallback, messages, tools, stream_sink=stream_sink, **kwargs)
+					return await call(self._fallback)
 				raise
-		raise ProviderError("Stream call failed after retries")
+		raise ProviderError("LLM call failed after retries")
 
 	async def _aggregate_stream(
 		self, ctx: ExecutionContext, client: "LLMProvider",
@@ -292,3 +286,15 @@ class LLMCaller:
 def _provider_messages(messages: list[dict]) -> list[dict]:
 	"""English: Strip engine-only message fields. 中文：剥离仅供引擎内部使用的消息字段。"""
 	return [{key: deepcopy(value) for key, value in message.items() if key in PROVIDER_MESSAGE_KEYS} for message in messages]
+
+
+def _ensure_llm_response(value: Any) -> LLMResponse:
+	if not isinstance(value, LLMResponse):
+		raise ProviderContractError(f"LLMProvider.chat 必须返回 LLMResponse，实际得到 {type(value).__name__}")
+	return value
+
+
+async def _sleep_before_retry(error: BaseException) -> None:
+	delay = 1.0 + random.uniform(0, 0.5)
+	logger.warning(f"Primary LLM network error, retrying in {delay:.1f}s: {error}")
+	await asyncio.sleep(delay)

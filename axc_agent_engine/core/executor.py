@@ -180,7 +180,7 @@ class Executor:
 		return True, route_plan, ""
 
 	async def _save_checkpoint(self, kind: str, status: CheckpointStatus, extra_state: dict | None = None) -> None:
-		"""Persist a best-effort checkpoint when a CheckpointStore is configured.
+		"""Persist a checkpoint when configured; storage errors propagate.
 中文：此文档说明相关引擎组件的行为。"""
 		await self._checkpoint_recorder.save(self._run_id, kind, status, extra_state)
 

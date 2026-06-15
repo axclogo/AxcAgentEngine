@@ -67,6 +67,7 @@ class BuiltinFileTools:
 			content=content_data,
 			content_type="json",
 			summary=f"file_read：{path}（共 {total_lines} 行，显示 {start_line}-{end_line}）",
+			llm_view=_file_read_llm_view(path, total_lines, start_line, end_line, window_text, bool(artifact_id)),
 			artifacts=artifacts,
 		)
 
@@ -240,3 +241,16 @@ class BuiltinFileTools:
 			return ToolOutput.error(str(e))
 		data = {"success": True, "replacements": count if replace_all else 1, "path": path}
 		return ToolOutput.json_output(data, summary=f"已编辑 {path}：{count if replace_all else 1} 处替换")
+
+
+def _file_read_llm_view(path: str, total_lines: int, start_line: int, end_line: int, text: str, has_artifact: bool) -> str:
+	lines = [
+		f"File: {path}",
+		f"Lines shown: {start_line}-{end_line} of {total_lines}",
+		"内容:",
+	]
+	for offset, line in enumerate(text.split("\n"), start=start_line):
+		lines.append(f"{offset}: {line}")
+	if has_artifact:
+		lines.append("Full file is available as an artifact; use result_read/result_page for more content.")
+	return "\n".join(lines)

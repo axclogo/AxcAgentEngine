@@ -49,6 +49,15 @@ def _agent(name: str):
 	return SimpleNamespace(name=name)
 
 
+def test_multi_agent_event_sink_copies_done_metadata():
+	metadata = {"stats": {"total_speaks": 1}}
+	event = MultiAgentEventSink().done("done", 1, metadata)
+
+	metadata["stats"]["total_speaks"] = 2
+
+	assert event.metadata == {"stats": {"total_speaks": 1}}
+
+
 @pytest.mark.asyncio
 async def test_multi_agent_session_streams_round_messages_and_stats():
 	dispatcher = ReplyDispatcher({"alpha": "first", "beta": "second"})
@@ -223,6 +232,23 @@ async def test_multi_agent_session_rejects_invalid_run_context_inputs():
 		[event async for event in session.stream(run_options="bad")]
 	with pytest.raises(TypeError, match="agent_metadata"):
 		[event async for event in session.stream(agent_metadata=lambda agent, index: "bad")]
+
+
+@pytest.mark.asyncio
+async def test_multi_agent_session_preserves_zero_run_id():
+	dispatcher = ReplyDispatcher({"alpha": "ok"})
+	session = MultiAgentSession(
+		[_agent("alpha")],
+		dispatcher,
+		topic="topic",
+		stop_condition=StopAfterRound(1),
+	)
+
+	[event async for event in session.stream(run_options={"run_id": 0}, metadata={"run_id": 0})]
+
+	envelope = dispatcher.envelopes[0]
+	assert envelope.run_options["run_id"] == 0
+	assert envelope.metadata["run_id"] == "0"
 
 
 def test_multi_agent_event_sink_result_line_ignores_non_message_events():

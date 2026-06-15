@@ -67,6 +67,9 @@ async def test_swarm_dispatch_success_records_metadata_and_audit():
 
 	assert not result.is_error
 	assert result.content["success"] == 2
+	assert "Swarm dispatch result" in result.context_view()
+	assert "a [success]" in result.context_view()
+	assert result.display_view().startswith('{"swarm_id":')
 	assert ctx.state.metadata["swarm"]["success"] == 2
 	assert dispatcher.envelopes[0].sender == "caller"
 	assert dispatcher.envelopes[0].conversation_id == "s1"

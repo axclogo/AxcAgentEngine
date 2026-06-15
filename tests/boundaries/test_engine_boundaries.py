@@ -10,6 +10,7 @@ from axc_agent_engine import (
 	ResourceTypeError,
 )
 from axc_agent_engine.agent import Agent
+from axc_agent_engine.core.input_messages import extract_last_user_message
 from axc_agent_engine.core.schema import LLMMessage, LLMResponse, RuntimeConfig
 from axc_agent_engine.plugins.base import BasePlugin
 
@@ -79,6 +80,31 @@ class TestInputProvider:
 		result.messages[0]["content"] = "changed"
 		assert messages[0]["content"] == "hi"
 
+	def test_input_provider_result_copies_mutable_fields(self):
+		messages = [{"role": "user", "content": [{"type": "text", "text": "hi"}]}]
+		artifact = object()
+		artifacts = [artifact]
+		metadata = {"trace": {"id": "t1"}}
+		result = InputProviderResult(messages=messages, artifacts=artifacts, metadata=metadata)
+
+		messages[0]["content"][0]["text"] = "mutated"
+		artifacts.append(object())
+		metadata["trace"]["id"] = "mutated"
+
+		assert result.messages == [{"role": "user", "content": [{"type": "text", "text": "hi"}]}]
+		assert result.artifacts == [artifact]
+		assert result.metadata == {"trace": {"id": "t1"}}
+
+	def test_input_provider_result_preserves_artifact_identity(self):
+		class RuntimeArtifact:
+			def __deepcopy__(self, memo):
+				raise RuntimeError("artifact is a runtime object")
+
+		artifact = RuntimeArtifact()
+		result = InputProviderResult(messages=[{"role": "user", "content": "hi"}], artifacts=[artifact])
+
+		assert result.artifacts[0] is artifact
+
 	@pytest.mark.asyncio
 	async def test_agent_chat_uses_input_provider(self, mock_llm):
 		class Provider:
@@ -127,7 +153,7 @@ class TestInputProvider:
 			{"type": "text", "text": "text goal"},
 			{"type": "image_url", "image_url": {"url": "https://example.test/image.png"}},
 		]
-		assert Agent._extract_last_user_message([{"role": "user", "content": content}]) == "text goal"
+		assert extract_last_user_message([{"role": "user", "content": content}]) == "text goal"
 
 	@pytest.mark.asyncio
 	async def test_agent_maps_runtime_queues_and_stream_idle_timeout_from_run_options(self):

@@ -224,6 +224,18 @@ class TestToolExecutor:
 		assert "oops" in result.error
 
 	@pytest.mark.asyncio
+	async def test_execute_result_arguments_are_copied(self):
+		async def fn(args, ctx):
+			return ToolOutput.text("ok")
+		arguments = {"nested": {"value": "original"}}
+		td = ToolDefinition(name="test", execute=fn)
+		result = await execute_tool(td, arguments, "id1")
+
+		arguments["nested"]["value"] = "mutated"
+
+		assert result.arguments == {"nested": {"value": "original"}}
+
+	@pytest.mark.asyncio
 	async def test_non_tooloutput_rejected(self):
 		"""Tools returning non-ToolOutput are rejected."""
 		async def invalid_tool(args, ctx):

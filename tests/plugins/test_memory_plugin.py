@@ -163,6 +163,8 @@ class TestMemoryPlugin:
 		mem_id = listed.content["memories"][0]["id"]
 		deleted = await memory_plugin._tool_memory_delete({"id": mem_id}, {"exec_ctx": ctx})
 		assert search.content["memories"]
+		assert "Memory search" in search.context_view()
+		assert "User prefers compact examples" in search.context_view()
 		assert listed.content["count"] == 1
 		assert exported.content["count"] == 1
 		assert deleted.content["deleted"] is True

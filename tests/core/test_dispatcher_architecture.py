@@ -152,6 +152,32 @@ class TestDispatcherConsumer:
 		await dispatcher.stop_all()
 
 	@pytest.mark.asyncio
+	async def test_consumer_metadata_mutation_does_not_pollute_envelope(self):
+		bus = InMemoryMessageBus()
+		dispatcher = AgentMessageDispatcher(message_bus=bus)
+
+		async def mutating_stream(msg, **kwargs):
+			kwargs["metadata"]["nested"]["value"] = "mutated"
+			yield Event.done("ok")
+
+		agent = MagicMock()
+		agent.name = "tracked"
+		agent.stream = mutating_stream
+		dispatcher.run_agent_consumer(agent)
+		await asyncio.sleep(0.05)
+		envelope = AgentEnvelope(
+			sender="test",
+			recipient="tracked",
+			content="task1",
+			metadata={"nested": {"value": "original"}},
+		)
+		result = await dispatcher.request(envelope, timeout=5.0)
+
+		assert envelope.metadata == {"nested": {"value": "original"}}
+		assert result.metadata == {"nested": {"value": "original"}}
+		await dispatcher.stop_all()
+
+	@pytest.mark.asyncio
 	async def test_correlation_id_isolation(self):
 		"""Concurrent requests to same agent get correct replies via correlation_id."""
 		bus = InMemoryMessageBus()
@@ -321,12 +347,74 @@ class TestEnvelopeFields:
 		assert d["trace_id"] == "tr1"
 		assert d["run_options"] == {}
 
+	def test_direct_creation_copies_context_fields(self):
+		run_options = {"control": {"stream": False}}
+		metadata = {"trace": {"span": "s1"}}
+		env = AgentEnvelope(run_options=run_options, metadata=metadata)
+
+		run_options["control"]["stream"] = True
+		metadata["trace"]["span"] = "mutated"
+
+		assert env.run_options == {"control": {"stream": False}}
+		assert env.metadata == {"trace": {"span": "s1"}}
+
+	def test_runtime_run_options_preserve_identity(self):
+		class RuntimeQueue:
+			def __deepcopy__(self, memo):
+				raise RuntimeError("runtime queues are not copyable")
+
+		approval_queue = RuntimeQueue()
+		response_queue = RuntimeQueue()
+		run_options = {
+			"approval_queue": approval_queue,
+			"response_queue": response_queue,
+			"control": {"stream": False},
+		}
+
+		env = AgentEnvelope(run_options=run_options)
+		payload = env.to_dict()
+
+		run_options["control"]["stream"] = True
+		env.run_options["control"]["stream"] = True
+
+		assert env.run_options["approval_queue"] is approval_queue
+		assert env.run_options["response_queue"] is response_queue
+		assert payload["run_options"]["approval_queue"] is approval_queue
+		assert payload["run_options"]["response_queue"] is response_queue
+		assert payload["run_options"]["control"] == {"stream": False}
+
 	def test_roundtrip(self):
 		env = AgentEnvelope(sender="x", recipient="y", content="z", correlation_id="c1", run_options={"run_id": "r1"})
 		restored = AgentEnvelope.from_dict(env.to_dict())
 		assert restored.sender == "x"
 		assert restored.correlation_id == "c1"
 		assert restored.run_options == {"run_id": "r1"}
+
+	def test_to_dict_copies_context_fields(self):
+		env = AgentEnvelope(
+			sender="x",
+			recipient="y",
+			content="z",
+			run_options={"run_id": "r1", "control": {"stream": False}},
+			metadata={"trace_id": "t1", "trace": {"span": "s1"}},
+		)
+		payload = env.to_dict()
+
+		env.run_options["run_id"] = "mutated"
+		env.metadata["trace_id"] = "mutated"
+		env.run_options["control"]["stream"] = True
+		env.metadata["trace"]["span"] = "mutated"
+
+		assert payload["run_options"] == {"run_id": "r1", "control": {"stream": False}}
+		assert payload["metadata"] == {"trace_id": "t1", "trace": {"span": "s1"}}
+
+	def test_from_dict_rejects_invalid_context_types(self):
+		with pytest.raises(TypeError, match="AgentEnvelope data must be a dict"):
+			AgentEnvelope.from_dict([("sender", "x")])
+		with pytest.raises(TypeError, match="run_options must be a dict"):
+			AgentEnvelope.from_dict({"run_options": [("run_id", "r1")]})
+		with pytest.raises(TypeError, match="metadata must be a dict"):
+			AgentEnvelope.from_dict({"metadata": [("run_id", "r1")]})
 
 
 class TestNoDirectAgentChat:

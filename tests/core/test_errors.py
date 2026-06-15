@@ -3,7 +3,7 @@ import pytest
 from axc_agent_engine.core.errors import (
 	AxcError, ConfigError, SchemaError, PluginError, PluginLoadError,
 	PluginInitError, LLMError, ProviderError, LLMTimeoutError,
-	ExecutionError, MaxRoundsError, CancelledError,
+	ExecutionError, MaxRoundsError, CancelledError, ErrorEnvelope,
 )
 
 
@@ -47,3 +47,19 @@ class TestErrorHierarchy:
 				pass
 			except ProviderError:
 				raise
+
+	def test_error_envelope_to_dict_copies_details(self):
+		envelope = ErrorEnvelope(code="x", message="m", details={"nested": {"v": 1}})
+		payload = envelope.to_dict()
+
+		envelope.details["nested"]["v"] = 2
+
+		assert payload["details"] == {"nested": {"v": 1}}
+
+	def test_error_envelope_copies_details_at_creation(self):
+		details = {"nested": {"v": 1}}
+		envelope = ErrorEnvelope(code="x", message="m", details=details)
+
+		details["nested"]["v"] = 2
+
+		assert envelope.details == {"nested": {"v": 1}}

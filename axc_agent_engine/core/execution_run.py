@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import logging
 from collections.abc import AsyncIterator
 
 from axc_agent_engine.core.context import ExecutionContext
@@ -14,12 +13,10 @@ from axc_agent_engine.core.message_store import MessageStore
 from axc_agent_engine.core.plugin_manager import PluginManager
 from axc_agent_engine.core.stream_sink import QueueStreamSink
 from axc_agent_engine.runtime.checkpoint import Checkpoint, CheckpointStatus
-
-logger = logging.getLogger(__name__)
-
+from axc_agent_engine.runtime.tasks import cancel_and_wait
 
 class CheckpointRecorder:
-	"""Best-effort execution checkpoint persistence.
+	"""Execution checkpoint persistence.
 中文：此文档说明相关引擎组件的行为。"""
 
 	def __init__(self, ctx: ExecutionContext, messages: MessageStore) -> None:
@@ -37,16 +34,13 @@ class CheckpointRecorder:
 		if not store:
 			return
 		state = execution_checkpoint_state(self._ctx, self._messages, run_id, extra_state)
-		try:
-			await store.save(Checkpoint(
-				run_id=run_id,
-				sequence=len(self._messages.get_all()) + self._ctx.state.current_round,
-				status=status,
-				kind=kind,
-				state=state,
-			))
-		except Exception as e:
-			logger.warning(f"Checkpoint save error: {e}")
+		await store.save(Checkpoint(
+			run_id=run_id,
+			sequence=len(self._messages.get_all()) + self._ctx.state.current_round,
+			status=status,
+			kind=kind,
+			state=state,
+		))
 
 
 def execution_checkpoint_state(
@@ -152,14 +146,7 @@ class StreamLLMBridge:
 			raise
 		finally:
 			self._ctx.runtime.stream_delta_emitted = False
-			if not task.done():
-				task.cancel()
-				try:
-					await task
-				except asyncio.CancelledError:
-					pass
-				except Exception:
-					pass
+			await cancel_and_wait(task)
 		if not llm_result:
 			raise ProviderError("LLM call produced no result")
 		result = llm_result[0]

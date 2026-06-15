@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import uuid
+from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any, Protocol, runtime_checkable
 
@@ -20,12 +21,15 @@ class ArtifactRef:
 	size: int
 	metadata: dict[str, Any] = field(default_factory=dict)
 
+	def __post_init__(self) -> None:
+		self.metadata = deepcopy(self.metadata)
+
 	def to_dict(self) -> dict[str, Any]:
-		return {"id": self.id, "kind": self.kind, "size": self.size, "metadata": self.metadata}
+		return {"id": self.id, "kind": self.kind, "size": self.size, "metadata": deepcopy(self.metadata)}
 
 	@classmethod
 	def from_dict(cls, d: dict[str, Any]) -> "ArtifactRef":
-		return cls(id=d["id"], kind=d["kind"], size=d["size"], metadata=d.get("metadata", {}))
+		return cls(id=d["id"], kind=d["kind"], size=d["size"], metadata=deepcopy(d.get("metadata", {})))
 
 
 @dataclass
@@ -39,9 +43,16 @@ class ToolOutput:
 	content: str | dict | list
 	content_type: str = "text"  # English: text | json | table | file | error. 中文：内容类型枚举。
 	summary: str = ""
+	llm_view: str = ""
 	artifacts: list[ArtifactRef] = field(default_factory=list)
 	metadata: dict[str, Any] = field(default_factory=dict)
 	is_error: bool = False
+
+	def __post_init__(self) -> None:
+		self.content = deepcopy(self.content)
+		self.llm_view = str(self.llm_view) if self.llm_view else ""
+		self.artifacts = [ArtifactRef.from_dict(artifact.to_dict()) for artifact in self.artifacts]
+		self.metadata = deepcopy(self.metadata)
 
 	def context_view(self, max_chars: int = 2000) -> str:
 		"""English: LLM context view. 中文：写入 LLM 上下文的紧凑视图。"""
@@ -51,6 +62,8 @@ class ToolOutput:
 		durable = self.durable_summary()
 		if durable:
 			view = durable
+		elif self.llm_view:
+			view = self.llm_view
 		elif self.summary:
 			view = self.summary
 		else:
@@ -95,11 +108,12 @@ class ToolOutput:
 	def with_metadata(self, metadata: dict[str, Any]) -> "ToolOutput":
 		"""English: Return a copy with merged metadata. 中文：返回合并 metadata 的副本。"""
 		return ToolOutput(
-			content=self.content,
+			content=deepcopy(self.content),
 			content_type=self.content_type,
 			summary=self.summary,
-			artifacts=list(self.artifacts),
-			metadata={**self.metadata, **metadata},
+			llm_view=self.llm_view,
+			artifacts=[ArtifactRef.from_dict(artifact.to_dict()) for artifact in self.artifacts],
+			metadata={**deepcopy(self.metadata), **deepcopy(metadata)},
 			is_error=self.is_error,
 		)
 
@@ -110,38 +124,40 @@ class ToolOutput:
 
 	def to_dict(self) -> dict[str, Any]:
 		return {
-			"content": self.content,
+			"content": deepcopy(self.content),
 			"content_type": self.content_type,
 			"summary": self.summary,
+			"llm_view": self.llm_view,
 			"artifacts": [a.to_dict() for a in self.artifacts],
-			"metadata": self.metadata,
+			"metadata": deepcopy(self.metadata),
 			"is_error": self.is_error,
 		}
 
 	@classmethod
 	def from_dict(cls, d: dict[str, Any]) -> "ToolOutput":
 		return cls(
-			content=d["content"],
+			content=deepcopy(d["content"]),
 			content_type=d.get("content_type", "text"),
 			summary=d.get("summary", ""),
+			llm_view=d.get("llm_view", ""),
 			artifacts=[ArtifactRef.from_dict(a) for a in d.get("artifacts", [])],
-			metadata=d.get("metadata", {}),
+			metadata=deepcopy(d.get("metadata", {})),
 			is_error=d.get("is_error", False),
 		)
 
 	@classmethod
-	def text(cls, content: str, summary: str = "") -> "ToolOutput":
+	def text(cls, content: str, summary: str = "", llm_view: str = "") -> "ToolOutput":
 		"""English: Bilingual documentation follows.
 中文：以下为双语文档说明。
 便捷创建 text ToolOutput。"""
-		return cls(content=content, content_type="text", summary=summary)
+		return cls(content=content, content_type="text", summary=summary, llm_view=llm_view)
 
 	@classmethod
-	def json_output(cls, content: dict | list, summary: str = "") -> "ToolOutput":
+	def json_output(cls, content: dict | list, summary: str = "", llm_view: str = "") -> "ToolOutput":
 		"""English: Bilingual documentation follows.
 中文：以下为双语文档说明。
 便捷创建 JSON ToolOutput。"""
-		return cls(content=content, content_type="json", summary=summary)
+		return cls(content=content, content_type="json", summary=summary, llm_view=llm_view)
 
 	@classmethod
 	def error(cls, message: str) -> "ToolOutput":

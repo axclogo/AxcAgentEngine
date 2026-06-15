@@ -15,6 +15,22 @@ def test_capability_policy_allows_when_no_capability():
 	assert decision.allowed is True
 
 
+def test_policy_request_and_decision_copy_mutable_fields():
+	arguments = {"nested": {"value": "original"}}
+	request_metadata = {"trace": {"id": "t1"}}
+	decision_metadata = {"reason": {"code": "r1"}}
+	request = PolicyRequest(arguments=arguments, metadata=request_metadata)
+	decision = PolicyDecision(allowed=False, metadata=decision_metadata)
+
+	arguments["nested"]["value"] = "mutated"
+	request_metadata["trace"]["id"] = "mutated"
+	decision_metadata["reason"]["code"] = "mutated"
+
+	assert request.arguments == {"nested": {"value": "original"}}
+	assert request.metadata == {"trace": {"id": "t1"}}
+	assert decision.metadata == {"reason": {"code": "r1"}}
+
+
 def test_capability_policy_denies_missing_capability():
 	decision = CapabilityPolicyEvaluator({Capability.FILE_READ}).evaluate(PolicyRequest(
 		tool_name="shell",

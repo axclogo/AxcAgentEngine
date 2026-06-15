@@ -1,6 +1,7 @@
 """Event 类型定义。"""
 from dataclasses import dataclass, field
 from enum import Enum
+from copy import deepcopy
 from typing import Any
 
 from axc_agent_engine.core.errors import ErrorEnvelope
@@ -53,6 +54,11 @@ class Event:
 	steps: list[dict[str, Any]] = field(default_factory=list)
 	metadata: dict[str, Any] = field(default_factory=dict)
 
+	def __post_init__(self) -> None:
+		self.arguments = deepcopy(self.arguments)
+		self.steps = deepcopy(self.steps)
+		self.metadata = deepcopy(self.metadata)
+
 	#English: Source note. 中文：── 工厂方法 ──
 
 	@classmethod
@@ -60,7 +66,7 @@ class Event:
 		"""English: Bilingual documentation follows.
 中文：以下为双语文档说明。
 创建 TOOL_CALL 事件。"""
-		return cls(type=EventType.TOOL_CALL, tool_name=name, tool_call_id=call_id, arguments=arguments)
+		return cls(type=EventType.TOOL_CALL, tool_name=name, tool_call_id=call_id, arguments=deepcopy(arguments))
 
 	@classmethod
 	def tool_args_preview(
@@ -94,9 +100,9 @@ class Event:
 		"""English: Bilingual documentation follows.
 中文：以下为双语文档说明。
 创建 TOOL_RESULT 事件。"""
-		event_metadata = {"artifacts": artifact_refs or []}
+		event_metadata = {"artifacts": deepcopy(artifact_refs or [])}
 		if metadata:
-			event_metadata.update(metadata)
+			event_metadata.update(deepcopy(metadata))
 		return cls(type=EventType.TOOL_RESULT, tool_name=name, tool_call_id=call_id, content=content, metadata=event_metadata)
 
 	@classmethod
@@ -107,22 +113,22 @@ class Event:
 		if isinstance(message, ErrorEnvelope):
 			error_metadata = {"error": message.to_dict()}
 			if metadata:
-				error_metadata.update(metadata)
+				error_metadata.update(deepcopy(metadata))
 			return cls(type=EventType.ERROR, content=message.message, metadata=error_metadata)
-		return cls(type=EventType.ERROR, content=message, metadata=metadata or {})
+		return cls(type=EventType.ERROR, content=message, metadata=deepcopy(metadata or {}))
 
 	@classmethod
 	def done(cls, content: str, metadata: dict[str, Any] | None = None) -> "Event":
 		"""English: Bilingual documentation follows.
 中文：以下为双语文档说明。
 创建 DONE 事件。"""
-		return cls(type=EventType.DONE, content=content, metadata=metadata or {})
+		return cls(type=EventType.DONE, content=content, metadata=deepcopy(metadata or {}))
 
 	@classmethod
 	def cancelled(cls, reason: str, metadata: dict[str, Any] | None = None) -> "Event":
 		"""Create CANCELLED event.
 中文：创建取消事件。"""
-		return cls(type=EventType.CANCELLED, content=reason, metadata=metadata or {})
+		return cls(type=EventType.CANCELLED, content=reason, metadata=deepcopy(metadata or {}))
 
 	@classmethod
 	def step_start(cls, step_id: int, description: str) -> "Event":
@@ -150,14 +156,14 @@ class Event:
 		"""English: Bilingual documentation follows.
 中文：以下为双语文档说明。
 创建 PLAN_CREATED 事件。"""
-		return cls(type=EventType.PLAN_CREATED, content=goal, steps=steps)
+		return cls(type=EventType.PLAN_CREATED, content=goal, steps=deepcopy(steps))
 
 	@classmethod
 	def state_change(cls, content: str, metadata: dict[str, Any] | None = None) -> "Event":
 		"""English: Bilingual documentation follows.
 中文：以下为双语文档说明。
 创建 STATE_CHANGE 事件。"""
-		return cls(type=EventType.STATE_CHANGE, content=content, metadata=metadata or {})
+		return cls(type=EventType.STATE_CHANGE, content=content, metadata=deepcopy(metadata or {}))
 
 	@classmethod
 	def cost_update(cls, input_tokens: int, output_tokens: int) -> "Event":
@@ -170,13 +176,13 @@ class Event:
 	def sub_agent_start(cls, agent_name: str, message: str, metadata: dict[str, Any]) -> "Event":
 		"""Create SUB_AGENT_START.
 中文：创建子 Agent 开始事件。"""
-		return cls(type=EventType.SUB_AGENT_START, content=message, metadata={"agent_name": agent_name, **metadata})
+		return cls(type=EventType.SUB_AGENT_START, content=message, metadata={"agent_name": agent_name, **deepcopy(metadata)})
 
 	@classmethod
 	def sub_agent_step(cls, agent_name: str, step: dict[str, Any], metadata: dict[str, Any]) -> "Event":
 		"""Create SUB_AGENT_STEP.
 中文：创建子 Agent 明细事件。"""
-		return cls(type=EventType.SUB_AGENT_STEP, metadata={"agent_name": agent_name, "step": step, **metadata})
+		return cls(type=EventType.SUB_AGENT_STEP, metadata={"agent_name": agent_name, "step": deepcopy(step), **deepcopy(metadata)})
 
 	@classmethod
 	def sub_agent_complete(
@@ -198,6 +204,6 @@ class Event:
 				"success": success,
 				"duration_ms": duration_ms,
 				"error": error,
-				**metadata,
+				**deepcopy(metadata),
 			},
 		)

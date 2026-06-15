@@ -218,6 +218,27 @@ class TestSessionManager:
 		restored.clear()
 		assert restored.messages == []
 
+	def test_session_serialization_copies_messages_and_metadata(self):
+		session = Session(
+			session_id="s1",
+			messages=[{"role": "user", "content": {"text": "old"}}],
+			metadata={"tenant": {"id": "t1"}},
+		)
+		data = session.to_dict()
+
+		session.messages[0]["content"]["text"] = "mutated"
+		session.metadata["tenant"]["id"] = "mutated"
+
+		assert data["messages"] == [{"role": "user", "content": {"text": "old"}}]
+		assert data["metadata"] == {"tenant": {"id": "t1"}}
+
+		restored = Session.from_dict(data)
+		data["messages"][0]["content"]["text"] = "changed again"
+		data["metadata"]["tenant"]["id"] = "changed again"
+
+		assert restored.messages == [{"role": "user", "content": {"text": "old"}}]
+		assert restored.metadata == {"tenant": {"id": "t1"}}
+
 class TestLLMCaller:
 	@pytest.mark.asyncio
 	async def test_sync_call(self, mock_llm):

@@ -12,8 +12,12 @@ import asyncio
 import logging
 import time
 import uuid
+from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, TYPE_CHECKING
+
+from axc_agent_engine.core.run_context import copy_run_options, dict_or_empty
+from axc_agent_engine.runtime.tasks import cancel_and_wait
 
 if TYPE_CHECKING:
 	from axc_agent_engine.agent import Agent
@@ -40,6 +44,10 @@ class AgentEnvelope:
 	run_options: dict[str, Any] = field(default_factory=dict)
 	metadata: dict[str, Any] = field(default_factory=dict)
 
+	def __post_init__(self) -> None:
+		self.run_options = copy_run_options(self.run_options)
+		self.metadata = deepcopy(self.metadata)
+
 	def to_dict(self) -> dict[str, Any]:
 		return {
 			"message_id": self.message_id,
@@ -51,12 +59,14 @@ class AgentEnvelope:
 			"content": self.content,
 			"reply_to": self.reply_to,
 			"trace_id": self.trace_id,
-			"run_options": self.run_options,
-			"metadata": self.metadata,
+			"run_options": copy_run_options(self.run_options),
+			"metadata": deepcopy(self.metadata),
 		}
 
 	@classmethod
 	def from_dict(cls, d: dict[str, Any]) -> "AgentEnvelope":
+		if not isinstance(d, dict):
+			raise TypeError("AgentEnvelope data must be a dict")
 		return cls(
 			message_id=d.get("message_id", uuid.uuid4().hex[:12]),
 			conversation_id=d.get("conversation_id", ""),
@@ -67,8 +77,8 @@ class AgentEnvelope:
 			content=d.get("content", ""),
 			reply_to=d.get("reply_to", ""),
 			trace_id=d.get("trace_id", ""),
-			run_options=dict(d.get("run_options", {}) or {}),
-			metadata=d.get("metadata", {}),
+			run_options=dict_or_empty(d.get("run_options"), "run_options"),
+			metadata=dict_or_empty(d.get("metadata"), "metadata"),
 		)
 
 
@@ -110,12 +120,7 @@ class AgentMessageDispatcher:
 中文：以下为双语文档说明。
 停止指定 Agent 的 consumer task。"""
 		task = self._consumers.pop(agent_name, None)
-		if task and not task.done():
-			task.cancel()
-			try:
-				await task
-			except (asyncio.CancelledError, Exception):
-				pass
+		await cancel_and_wait(task)
 
 	async def stop_all(self) -> None:
 		"""English: Bilingual documentation follows.
@@ -181,15 +186,8 @@ class AgentMessageDispatcher:
 		finally:
 			self._pending.pop(correlation_id, None)
 			self._event_callbacks.pop(correlation_id, None)
-			listen_task.cancel()
-			if event_task:
-				event_task.cancel()
-			try:
-				await listen_task
-				if event_task:
-					await event_task
-			except (asyncio.CancelledError, Exception):
-				pass
+			await cancel_and_wait(listen_task)
+			await cancel_and_wait(event_task)
 
 	async def publish(self, envelope: AgentEnvelope) -> None:
 		"""English: Bilingual documentation follows.
@@ -279,7 +277,7 @@ class AgentMessageDispatcher:
 
 	async def _run_agent_stream(self, agent: "Agent", envelope: AgentEnvelope) -> list["Event"]:
 		events: list["Event"] = []
-		metadata = dict(envelope.metadata)
+		metadata = deepcopy(envelope.metadata)
 		metadata.setdefault("sub_run_id", metadata.get("sub_run_id") or f"{metadata.get('run_id', envelope.trace_id)}:{agent.name}:{envelope.correlation_id}")
 		async for event in agent.stream(
 			envelope.content,

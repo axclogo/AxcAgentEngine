@@ -4,9 +4,47 @@ from __future__ import annotations
 from axc_agent_engine.observability.audit import AuditEventType, InMemoryAuditSink
 from axc_agent_engine.core.context import ExecutionConfig, ExecutionContext, ExecutionServices
 from axc_agent_engine.core.schema import Capability, ToolDefinition
+from axc_agent_engine.tools.audit import audit_tool_event
 from axc_agent_engine.tools.orchestrator import execute_tool_calls
 from axc_agent_engine.tools.registry import ToolRegistry
 from axc_agent_engine.tools.tool_output import ToolOutput
+
+
+def test_audit_event_to_dict_copies_error_and_metadata():
+	from axc_agent_engine.observability.audit import AuditEvent
+
+	error = {"nested": {"v": 1}}
+	metadata = {"m": {"v": 1}}
+	event = AuditEvent(error=error, metadata=metadata)
+
+	error["nested"]["v"] = 2
+	metadata["m"]["v"] = 2
+
+	payload = event.to_dict()
+
+	event.error["nested"]["v"] = 2
+	event.metadata["m"]["v"] = 2
+
+	assert payload["error"] == {"nested": {"v": 1}}
+	assert payload["metadata"] == {"m": {"v": 1}}
+
+
+async def test_audit_tool_event_copies_metadata_before_recording():
+	audit = InMemoryAuditSink()
+	ctx = ExecutionContext(services=ExecutionServices(audit_sink=audit))
+	metadata = {"nested": {"v": 1}}
+
+	await audit_tool_event(
+		ctx,
+		AuditEventType.TOOL_CALL_STARTED,
+		"tool",
+		"call-1",
+		metadata=metadata,
+	)
+	metadata["nested"]["v"] = 2
+
+	events = await audit.list_events()
+	assert events[0].metadata == {"nested": {"v": 1}}
 
 
 async def test_tool_success_records_started_and_completed_audit_events():

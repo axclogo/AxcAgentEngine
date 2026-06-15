@@ -1,4 +1,5 @@
 """MultiAgent 事件类型"""
+from copy import deepcopy
 from dataclasses import dataclass, field
 
 from axc_agent_engine.sidecar.multi_agent.types import MultiAgentEventType
@@ -14,3 +15,6 @@ class MultiAgentEvent:
 	content: str = ""
 	round_num: int = 0
 	metadata: dict = field(default_factory=dict)
+
+	def __post_init__(self) -> None:
+		self.metadata = deepcopy(self.metadata)

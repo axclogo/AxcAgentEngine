@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import asyncio
 from collections import OrderedDict
+from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
@@ -24,6 +25,9 @@ class AnnotationReply:
 	answer: str = ""
 	rubric: str = ""
 	metadata: dict = field(default_factory=dict)
+
+	def __post_init__(self) -> None:
+		self.metadata = deepcopy(self.metadata)
 
 
 @runtime_checkable
@@ -122,7 +126,12 @@ class InMemoryAnnotationStore:
 		if not reply.case_id:
 			raise ValueError("case_id is required")
 		async with self._lock:
-			self._replies[reply.case_id] = reply
+			self._replies[reply.case_id] = AnnotationReply(
+				case_id=reply.case_id,
+				answer=reply.answer,
+				rubric=reply.rubric,
+				metadata=reply.metadata,
+			)
 			self._replies.move_to_end(reply.case_id)
 
 	async def get_reply(self, case_id: str) -> AnnotationReply | None:
@@ -130,8 +139,16 @@ class InMemoryAnnotationStore:
 			reply = self._replies.get(case_id)
 			if reply:
 				self._replies.move_to_end(case_id)
-			return reply
+			return AnnotationReply(
+				case_id=reply.case_id,
+				answer=reply.answer,
+				rubric=reply.rubric,
+				metadata=reply.metadata,
+			) if reply else None
 
 	async def list_replies(self) -> list[AnnotationReply]:
 		async with self._lock:
-			return list(self._replies.values())
+			return [
+				AnnotationReply(case_id=reply.case_id, answer=reply.answer, rubric=reply.rubric, metadata=reply.metadata)
+				for reply in self._replies.values()
+			]

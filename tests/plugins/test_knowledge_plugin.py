@@ -49,6 +49,9 @@ async def test_knowledge_plugin_search_tool_supports_filters_trace_and_citations
 	assert results[0]["citation"]["source"].endswith("tenant_a.md")
 	assert "citation" in results[0]
 	assert "highlights" in results[0]
+	assert "Knowledge search" in output.context_view()
+	assert "Query: vector retrieval employees" in output.context_view()
+	assert output.display_view().startswith('{"results":')
 
 
 class MountedIndex:

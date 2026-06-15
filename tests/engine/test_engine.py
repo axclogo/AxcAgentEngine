@@ -228,6 +228,31 @@ plugins:
 				metadata={"run_id": "other"},
 			)
 
+	def test_run_request_rejects_invalid_context_types(self):
+		with pytest.raises(TypeError, match="run_options must be a dict"):
+			RunRequest.create(user_message="hi", run_options="bad")
+		with pytest.raises(TypeError, match="metadata must be a dict"):
+			RunRequest.create(user_message="hi", metadata=["bad"])
+		with pytest.raises(TypeError, match="llm_options must be a dict"):
+			RunRequest.create(user_message="hi", llm_options="bad")
+
+	def test_run_request_preserves_zero_metadata_run_id_when_no_option_run_id(self):
+		request = RunRequest.create(user_message="hi", metadata={"run_id": 0})
+		assert request.metadata["run_id"] == "0"
+		assert request.options.run_id == ""
+
+	def test_run_request_preserves_zero_option_run_id(self):
+		request = RunRequest.create(user_message="hi", run_options={"run_id": 0})
+		assert request.options.run_id == "0"
+		assert request.metadata["run_id"] == "0"
+
+	def test_instantiate_rejects_invalid_metadata_type(self, mock_llm, tmp_path):
+		path = tmp_path / "agent.yaml"
+		path.write_text("name: metadata_agent\nsystem_prompt: base\n", encoding="utf-8")
+		template = Engine().load_agent_template(str(path))
+		with pytest.raises(TypeError, match="metadata must be a dict"):
+			template.instantiate(models=AgentModels(default=mock_llm), metadata=[("tenant", "t")])
+
 	@pytest.mark.asyncio
 	async def test_resume_stream_rejects_conflicting_metadata_run_id(self, mock_llm, tmp_path):
 		path = tmp_path / "agent.yaml"
@@ -243,6 +268,16 @@ plugins:
 		agent = Engine().load_agent_template(str(path)).instantiate(models=AgentModels(default=mock_llm))
 		with pytest.raises(ValueError, match="run_options.run_id conflicts with resume run_id"):
 			[event async for event in agent.resume_stream("run-1", run_options={"run_id": "other"})]
+
+	@pytest.mark.asyncio
+	async def test_resume_stream_rejects_invalid_context_types(self, mock_llm, tmp_path):
+		path = tmp_path / "agent.yaml"
+		path.write_text("name: metadata_agent\nsystem_prompt: base\n", encoding="utf-8")
+		agent = Engine().load_agent_template(str(path)).instantiate(models=AgentModels(default=mock_llm))
+		with pytest.raises(TypeError, match="metadata must be a dict"):
+			[event async for event in agent.resume_stream("run-1", metadata=[("run_id", "run-1")])]
+		with pytest.raises(TypeError, match="run_options must be a dict"):
+			[event async for event in agent.resume_stream("run-1", run_options=[("run_id", "run-1")])]
 
 	@pytest.mark.asyncio
 	async def test_stream_with_messages_passes_metadata_to_run_request(self, mock_llm, tmp_path):

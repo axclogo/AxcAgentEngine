@@ -5,6 +5,7 @@ Host-side Agent selection utilities."""
 from __future__ import annotations
 
 import re
+from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -40,7 +41,7 @@ class AgentProfile:
 			latency_weight=float(overrides.pop("latency_weight", 1.0)),
 			quality_score=float(overrides.pop("quality_score", 0.5)),
 			risk_score=float(overrides.pop("risk_score", 0.0)),
-			metadata=dict(overrides.pop("metadata", {})),
+			metadata=deepcopy(overrides.pop("metadata", {})),
 		)
 
 

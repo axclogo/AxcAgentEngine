@@ -4,10 +4,18 @@ from __future__ import annotations
 import logging
 import time
 import uuid
+from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Callable
 
 from axc_agent_engine.core.events import EventType
+from axc_agent_engine.core.run_context import (
+	call_context_factory,
+	context_run_id,
+	dict_or_empty,
+	normalize_run_context,
+	sync_run_id,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -196,9 +204,14 @@ class EvalRunner:
 			raise ValueError(f"Agent '{self._agent_name}' 未找到")
 		from axc_agent_engine.sidecar.eval.judge import LLMJudge
 		judge = LLMJudge(judge_llm) if judge_llm else None
-		base_run_options = _dict_or_empty(run_options, "run_options")
-		base_metadata = _dict_or_empty(metadata, "metadata")
-		run_id = run_id or str(base_run_options.get("run_id") or "") or uuid.uuid4().hex[:12]
+		base_run_options = dict_or_empty(run_options, "run_options")
+		base_metadata = dict_or_empty(metadata, "metadata")
+		sync_run_id(base_run_options, base_metadata)
+		base_run_id = context_run_id(base_run_options) or context_run_id(base_metadata)
+		run_id = run_id or base_run_id or uuid.uuid4().hex[:12]
+		if base_run_id:
+			base_run_options["run_id"] = base_run_id
+			base_metadata["run_id"] = base_run_id
 		results = []
 		for i, case in enumerate(cases):
 			case_id = case.case_id or f"case_{i}"
@@ -303,7 +316,7 @@ class EvalRunner:
 			if not case.case_id:
 				case.case_id = case_id
 			return case
-		metadata = {**case.metadata, "annotation": reply.metadata}
+		metadata = {**deepcopy(case.metadata), "annotation": deepcopy(reply.metadata)}
 		return EvalCase(
 			input=case.input,
 			expected_output=reply.answer,
@@ -324,8 +337,7 @@ class EvalRunner:
 	) -> tuple[dict, dict]:
 		options = self._case_run_options(case, index, case_id, base_run_options, case_run_options)
 		metadata = self._case_metadata(case, index, case_id, base_metadata, case_metadata)
-		_validate_run_request_context(case.input, options, metadata)
-		return options, metadata
+		return normalize_run_context(options, metadata)
 
 	def _case_run_options(
 		self,
@@ -335,12 +347,12 @@ class EvalRunner:
 		base_run_options: dict,
 		case_run_options: CaseOptionsFactory | None,
 	) -> dict:
-		case_options = _call_case_dict(case_run_options, case, index, "case_run_options")
+		case_options = call_context_factory(case_run_options, "case_run_options", case, index)
 		options = {**base_run_options, **case_options}
-		batch_run_id = str(base_run_options.get("run_id") or "")
-		case_run_id = str(case_options.get("run_id") or "")
-		if batch_run_id and not case_run_id:
-			options["run_id"] = f"{batch_run_id}:{case_id}"
+		case_run_id = context_run_id(case_options)
+		base_run_id = context_run_id(base_run_options)
+		if base_run_id and not case_run_id:
+			options["run_id"] = f"{base_run_id}:{case_id}"
 		return options
 
 	def _case_metadata(
@@ -351,28 +363,8 @@ class EvalRunner:
 		base_metadata: dict,
 		case_metadata: CaseOptionsFactory | None,
 	) -> dict:
-		case_meta = _call_case_dict(case_metadata, case, index, "case_metadata")
+		case_meta = call_context_factory(case_metadata, "case_metadata", case, index)
 		defaults = {"sidecar": "eval", "eval_case_id": case_id, "eval_case_index": index}
-		return {**base_metadata, **defaults, **case_meta}
-
-
-def _dict_or_empty(value: dict | None, name: str) -> dict:
-	if value is None:
-		return {}
-	if not isinstance(value, dict):
-		raise TypeError(f"{name} must be a dict")
-	return dict(value)
-
-
-def _call_case_dict(factory: CaseOptionsFactory | None, case: EvalCase, index: int, name: str) -> dict:
-	if not factory:
-		return {}
-	value = factory(case, index)
-	if not isinstance(value, dict):
-		raise TypeError(f"{name} must return a dict")
-	return dict(value)
-
-
-def _validate_run_request_context(user_message: str, run_options: dict, metadata: dict) -> None:
-	from axc_agent_engine.core.run_request import RunRequest
-	RunRequest.create(user_message=user_message, run_options=run_options, metadata=metadata)
+		metadata = deepcopy(base_metadata)
+		metadata.pop("run_id", None)
+		return {**metadata, **defaults, **deepcopy(case_meta)}

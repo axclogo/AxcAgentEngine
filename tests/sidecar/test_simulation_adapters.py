@@ -149,6 +149,16 @@ def test_simulation_mode_adapter_builds_generic_sandbox_scenario():
 	assert runner is not None
 
 
+def test_simulation_mode_adapter_copies_metadata_override():
+	adapter = get_simulation_mode_adapter("sandbox")
+	metadata = {"nested": {"value": "original"}}
+
+	scenario = adapter.build_scenario("Dry run", metadata=metadata)
+	metadata["nested"]["value"] = "mutated"
+
+	assert scenario.metadata["nested"] == {"value": "original"}
+
+
 def test_simulation_mode_adapter_supports_interview():
 	adapter = get_simulation_mode_adapter("interview")
 	scenario = adapter.build_scenario("Discovery interview")

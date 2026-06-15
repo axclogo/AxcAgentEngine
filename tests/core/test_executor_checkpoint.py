@@ -95,6 +95,25 @@ async def test_executor_writes_start_round_and_done_checkpoints():
 	assert checkpoints[-1].state["metadata"]["run_id"] == "run-simple"
 
 
+async def test_executor_raises_when_checkpoint_store_save_fails():
+	class BrokenCheckpointStore:
+		async def save(self, checkpoint):
+			raise RuntimeError("checkpoint write failed")
+
+	store = BrokenCheckpointStore()
+	pm = PluginManager([])
+	caller = LLMCaller(_provider([{"content": "done"}]), None, pm)
+	ctx = ExecutionContext(
+		config=ExecutionConfig(stream=False),
+		services=ExecutionServices(checkpoint_store=store),
+	)
+	ctx.state.metadata["run_id"] = "run-broken"
+	executor = Executor(caller, ToolRegistry(), pm, ctx)
+
+	with pytest.raises(RuntimeError, match="checkpoint write failed"):
+		await _collect(executor)
+
+
 async def test_executor_writes_round_completed_checkpoint_after_tool_call():
 	tool_call_msg = {
 		"role": "assistant",

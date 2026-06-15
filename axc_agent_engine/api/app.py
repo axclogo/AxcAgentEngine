@@ -26,7 +26,7 @@ def create_app(engine: Engine, models: object, agents_dir: str = "") -> FastAPI:
 		CancelledError, SchemaError, ToolError,
 	)
 
-	app = FastAPI(title="AxcAgentEngine", version="2.3.1")
+	app = FastAPI(title="AxcAgentEngine", version="2.3.2")
 	state = EngineState(engine=engine, agents_dir=agents_dir, models=models)
 	app.state.engine_state = state
 

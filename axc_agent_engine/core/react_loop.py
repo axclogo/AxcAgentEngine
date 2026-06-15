@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 
 from axc_agent_engine.core.errors import ProviderError
 from axc_agent_engine.core.events import Event, EventType
+from axc_agent_engine.runtime.tasks import cancel_and_wait
 from axc_agent_engine.tools.orchestrator import execute_tool_calls
 from axc_agent_engine.tools.utils import parse_tool_calls
 
@@ -204,8 +205,7 @@ class ReActTurnRunner:
 			yield await task
 		finally:
 			self._ctx.runtime.event_sink = previous_sink
-			if not task.done():
-				task.cancel()
+			await cancel_and_wait(task)
 
 
 def por_visible_event(event: Event) -> bool:

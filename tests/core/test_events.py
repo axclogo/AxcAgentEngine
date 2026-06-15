@@ -22,6 +22,20 @@ class TestEvent:
 		assert e.tool_name == ""
 		assert e.metadata == {}
 
+	def test_direct_creation_copies_mutable_payloads(self):
+		arguments = {"nested": {"value": "original"}}
+		steps = [{"metadata": {"value": "original"}}]
+		metadata = {"trace": {"id": "original"}}
+		event = Event(type=EventType.TOOL_CALL, arguments=arguments, steps=steps, metadata=metadata)
+
+		arguments["nested"]["value"] = "mutated"
+		steps[0]["metadata"]["value"] = "mutated"
+		metadata["trace"]["id"] = "mutated"
+
+		assert event.arguments == {"nested": {"value": "original"}}
+		assert event.steps == [{"metadata": {"value": "original"}}]
+		assert event.metadata == {"trace": {"id": "original"}}
+
 	def test_factory_tool_call(self):
 		e = Event.tool_call("echo", "tc1", {"text": "hi"})
 		assert e.type == EventType.TOOL_CALL
@@ -63,6 +77,61 @@ class TestEvent:
 		assert e.type == EventType.CANCELLED
 		assert e.content == "stopped"
 		assert e.metadata["run_id"] == "r1"
+
+	def test_factory_metadata_is_copied(self):
+		metadata = {"run_id": "r1", "nested": {"value": "original"}}
+		events = [
+			Event.done("done", metadata),
+			Event.cancelled("cancelled", metadata),
+			Event.state_change("state", metadata),
+			Event.error("error", metadata),
+		]
+
+		metadata["run_id"] = "mutated"
+		metadata["nested"]["value"] = "mutated"
+
+		assert [event.metadata["run_id"] for event in events] == ["r1", "r1", "r1", "r1"]
+		assert [event.metadata["nested"]["value"] for event in events] == [
+			"original", "original", "original", "original",
+		]
+
+	def test_factory_payloads_are_copied(self):
+		arguments = {"query": {"text": "original"}}
+		tool_call = Event.tool_call("search", "tc1", arguments)
+		arguments["query"]["text"] = "mutated"
+		assert tool_call.arguments == {"query": {"text": "original"}}
+
+		steps = [{"step_id": 1, "metadata": {"description": "original"}}]
+		plan = Event.plan_created("goal", steps)
+		steps[0]["metadata"]["description"] = "mutated"
+		assert plan.steps == [{"step_id": 1, "metadata": {"description": "original"}}]
+
+		artifact_refs = [{"id": "a1", "metadata": {"kind": "text"}}]
+		tool_result = Event.tool_result("search", "tc1", "ok", artifact_refs)
+		artifact_refs[0]["metadata"]["kind"] = "mutated"
+		assert tool_result.metadata["artifacts"] == [{"id": "a1", "metadata": {"kind": "text"}}]
+
+		step = {"type": "tool_call", "details": {"content": "original"}}
+		sub_step = Event.sub_agent_step("worker", step, {"run_id": "r1"})
+		step["details"]["content"] = "mutated"
+		assert sub_step.metadata["step"] == {"type": "tool_call", "details": {"content": "original"}}
+
+	def test_factory_nested_metadata_is_copied(self):
+		metadata = {"trace": {"id": "original"}}
+		envelope = ErrorEnvelope(code="tool.failed", message="failed")
+		events = [
+			Event.tool_result("search", "tc1", "ok", metadata=metadata),
+			Event.error(envelope, metadata),
+			Event.sub_agent_start("worker", "start", metadata),
+			Event.sub_agent_step("worker", {"type": "message"}, metadata),
+			Event.sub_agent_complete("worker", True, 1, "", "done", metadata),
+		]
+
+		metadata["trace"]["id"] = "mutated"
+
+		assert [event.metadata["trace"]["id"] for event in events] == [
+			"original", "original", "original", "original", "original",
+		]
 
 	def test_factory_step_start(self):
 		e = Event.step_start(1, "Do something")

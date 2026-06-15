@@ -30,6 +30,7 @@ from axc_agent_engine.sidecar.simulation.models import (
 	WorldState,
 )
 from axc_agent_engine.sidecar.simulation.report import SimulationReportGenerator, apply_generated_report
+from axc_agent_engine.core.run_context import call_context_factory, dict_or_empty, sync_run_id
 
 ActorContextFactory = Callable[[str, int], dict]
 
@@ -201,8 +202,8 @@ class SimulationRunner:
 		Run the scenario and emit structured execution events.
 		"""
 		state = initial_state.clone() if initial_state else scenario.initial_state.clone()
-		base_run_options = _dict_or_empty(run_options, "run_options")
-		base_metadata = _dict_or_empty(metadata, "metadata")
+		base_run_options = dict_or_empty(run_options, "run_options")
+		base_metadata = dict_or_empty(metadata, "metadata")
 		timeline: list[SimulationStep] = []
 		yield SimulationEvent.start(scenario)
 		actors = [agent.name for agent in scenario.agents]
@@ -302,40 +303,14 @@ def _actor_request_context(
 	actor_run_options: ActorContextFactory | None,
 	actor_metadata: ActorContextFactory | None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-	options = {**base_run_options, **_call_factory(actor_run_options, actor, index, "actor_run_options")}
+	options = {**base_run_options, **call_context_factory(actor_run_options, "actor_run_options", actor, index)}
 	metadata = {
 		**base_metadata,
 		"sidecar": "simulation",
 		"simulation_scenario_id": scenario.id,
 		"simulation_actor": actor,
 		"simulation_step_index": index,
-		**_call_factory(actor_metadata, actor, index, "actor_metadata"),
+		**call_context_factory(actor_metadata, "actor_metadata", actor, index),
 	}
-	_sync_run_id(options, metadata)
+	sync_run_id(options, metadata)
 	return options, metadata
-
-
-def _sync_run_id(options: dict[str, Any], metadata: dict[str, Any]) -> None:
-	option_run_id = options.get("run_id")
-	metadata_run_id = metadata.get("run_id")
-	if option_run_id and metadata_run_id and str(option_run_id) != str(metadata_run_id):
-		raise ValueError("run_options.run_id conflicts with metadata.run_id")
-	if option_run_id:
-		metadata["run_id"] = str(option_run_id)
-
-
-def _dict_or_empty(value: dict | None, name: str) -> dict:
-	if value is None:
-		return {}
-	if not isinstance(value, dict):
-		raise TypeError(f"{name} must be a dict")
-	return dict(value)
-
-
-def _call_factory(factory: ActorContextFactory | None, actor: str, index: int, name: str) -> dict:
-	if not factory:
-		return {}
-	value = factory(actor, index)
-	if not isinstance(value, dict):
-		raise TypeError(f"{name} must return a dict")
-	return dict(value)

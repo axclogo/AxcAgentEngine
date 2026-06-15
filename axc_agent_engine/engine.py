@@ -20,6 +20,7 @@ from axc_agent_engine.runtime.concurrency import ConcurrencyConfig, ExecutionLim
 from axc_agent_engine.core.context import ExecutionServices
 from axc_agent_engine.core.session_manager import SessionManager
 from axc_agent_engine.core.errors import ConfigError, SchemaError
+from axc_agent_engine.core.run_context import dict_or_empty
 from axc_agent_engine.runtime.input import InputProvider, PassthroughInputProvider
 from axc_agent_engine.llm.provider import LLMProvider
 from axc_agent_engine.plugins import PluginContext, agent_info_from_runtime, model_info_from_models
@@ -235,7 +236,7 @@ class Engine:
 			services=self._execution_services,
 			input_provider=self._input_provider,
 			engine_limiter=self._engine_limiter,
-			metadata=metadata or {},
+			metadata=dict_or_empty(metadata, "metadata"),
 		)
 		self._agents[config.name] = agent
 		if self._dispatcher:

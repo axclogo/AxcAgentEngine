@@ -62,6 +62,8 @@ async def test_graph_plugin_exposes_write_tools():
 	)
 	result = await plugin._tool_graph_search({"query": "Alice", "depth": 1}, {})
 	assert result.content["results"]
+	assert "Graph result: graph_search" in result.context_view()
+	assert result.display_view().startswith('{"results":')
 
 
 def test_graph_plugin_uses_mounted_store_resource():

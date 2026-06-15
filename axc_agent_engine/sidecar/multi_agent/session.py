@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import logging
 import uuid
+from copy import deepcopy
 from typing import Any, AsyncIterator, Callable, TYPE_CHECKING
 
 from axc_agent_engine.sidecar.multi_agent.shared_context import SharedContext
@@ -24,6 +25,7 @@ from axc_agent_engine.sidecar.multi_agent.modes import (
 )
 from axc_agent_engine.sidecar.multi_agent.persona import build_persona_prompt
 from axc_agent_engine.sidecar.multi_agent.types import MultiAgentEventType, SessionMode
+from axc_agent_engine.core.run_context import call_context_factory, dict_or_empty, sync_run_id
 
 if TYPE_CHECKING:
 	from axc_agent_engine.agent import Agent
@@ -50,7 +52,7 @@ class MultiAgentEventSink:
 		return MultiAgentEvent(type=E.ROUND_END, round_num=round_num)
 
 	def done(self, content: str, round_num: int, metadata: dict | None = None) -> MultiAgentEvent:
-		return MultiAgentEvent(type=E.DONE, content=content, round_num=round_num, metadata=metadata or {})
+		return MultiAgentEvent(type=E.DONE, content=content, round_num=round_num, metadata=deepcopy(metadata or {}))
 
 	def message(self, agent_name: str, content: str, round_num: int) -> MultiAgentEvent:
 		return MultiAgentEvent(type=E.MESSAGE, agent_name=agent_name, content=content, round_num=round_num)
@@ -231,8 +233,8 @@ class MultiAgentSession:
 			async for event in self._execute_speakers(
 				speakers,
 				round_num,
-				_dict_or_empty(run_options, "run_options"),
-				_dict_or_empty(metadata, "metadata"),
+				dict_or_empty(run_options, "run_options"),
+				dict_or_empty(metadata, "metadata"),
 				agent_run_options,
 				agent_metadata,
 			):
@@ -354,40 +356,14 @@ def _agent_request_context(
 	agent_run_options: AgentContextFactory | None,
 	agent_metadata: AgentContextFactory | None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-	options = {**base_run_options, **_call_factory(agent_run_options, agent, index, "agent_run_options")}
+	options = {**base_run_options, **call_context_factory(agent_run_options, "agent_run_options", agent, index)}
 	metadata = {
 		**base_metadata,
 		"sidecar": "multi_agent",
 		"multi_agent_round": round_num,
 		"multi_agent_actor": agent.name,
 		"multi_agent_actor_index": index,
-		**_call_factory(agent_metadata, agent, index, "agent_metadata"),
+		**call_context_factory(agent_metadata, "agent_metadata", agent, index),
 	}
-	_sync_run_id(options, metadata)
+	sync_run_id(options, metadata)
 	return options, metadata
-
-
-def _sync_run_id(options: dict[str, Any], metadata: dict[str, Any]) -> None:
-	option_run_id = options.get("run_id")
-	metadata_run_id = metadata.get("run_id")
-	if option_run_id and metadata_run_id and str(option_run_id) != str(metadata_run_id):
-		raise ValueError("run_options.run_id conflicts with metadata.run_id")
-	if option_run_id:
-		metadata["run_id"] = str(option_run_id)
-
-
-def _dict_or_empty(value: dict | None, name: str) -> dict:
-	if value is None:
-		return {}
-	if not isinstance(value, dict):
-		raise TypeError(f"{name} must be a dict")
-	return dict(value)
-
-
-def _call_factory(factory: AgentContextFactory | None, agent: Any, index: int, name: str) -> dict:
-	if not factory:
-		return {}
-	value = factory(agent, index)
-	if not isinstance(value, dict):
-		raise TypeError(f"{name} must return a dict")
-	return dict(value)

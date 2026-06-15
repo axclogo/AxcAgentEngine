@@ -23,10 +23,10 @@ class PluginHookRunner:
 	"""Executes plugin hooks and propagates plugin errors.
 中文：此文档说明相关引擎组件的行为。"""
 
-	async def safe_call_async(self, plugin: BasePlugin, method: str, *args: Any) -> None:
+	async def call_async(self, plugin: BasePlugin, method: str, *args: Any) -> None:
 		await getattr(plugin, method)(*args)
 
-	def safe_call_sync(self, plugin: BasePlugin, method: str, *args: Any) -> Any:
+	def call_sync(self, plugin: BasePlugin, method: str, *args: Any) -> Any:
 		return getattr(plugin, method)(*args)
 
 	async def apply_pre_tool_call(
@@ -77,13 +77,13 @@ class PluginManager:
 		"""English: This documentation describes the related engine component behavior.
 中文：通知所有插件执行已开始。"""
 		for p in self._plugins:
-			await self._safe_call_async(p, "on_execution_start", ctx)
+			await self._call_async_hook(p, "on_execution_start", ctx)
 
 	async def on_execution_end(self, ctx: ExecutionContext, result: str, error: str) -> None:
 		"""English: This documentation describes the related engine component behavior.
 中文：通知所有插件执行已结束。"""
 		for p in self._plugins:
-			await self._safe_call_async(p, "on_execution_end", ctx, result, error)
+			await self._call_async_hook(p, "on_execution_end", ctx, result, error)
 
 	async def on_execution_complete(self, ctx: ExecutionContext, result: str, trace: dict) -> str:
 		"""English: This documentation describes the related engine component behavior.
@@ -102,30 +102,30 @@ class PluginManager:
 		"""English: This documentation describes the related engine component behavior.
 中文：通知所有插件一轮执行已结束。"""
 		for p in self._plugins:
-			await self._safe_call_async(p, "on_round_end", ctx, user_message, assistant_message, tool_calls)
+			await self._call_async_hook(p, "on_round_end", ctx, user_message, assistant_message, tool_calls)
 
 	async def on_error(self, ctx: ExecutionContext, error: Exception) -> None:
 		"""English: This documentation describes the related engine component behavior.
 中文：通知所有插件发生错误。"""
 		for p in self._plugins:
-			await self._safe_call_async(p, "on_error", ctx, error)
+			await self._call_async_hook(p, "on_error", ctx, error)
 
 	async def on_plan_created(self, ctx: ExecutionContext, plan_info: dict) -> None:
 		"""English: This documentation describes the related engine component behavior.
 中文：通知所有插件计划已创建。"""
 		for p in self._plugins:
-			await self._safe_call_async(p, "on_plan_created", ctx, plan_info)
+			await self._call_async_hook(p, "on_plan_created", ctx, plan_info)
 
 	async def on_step_completed(self, ctx: ExecutionContext, step_info: dict) -> None:
 		"""English: This documentation describes the related engine component behavior.
 中文：通知所有插件步骤已完成。"""
 		for p in self._plugins:
-			await self._safe_call_async(p, "on_step_completed", ctx, step_info)
+			await self._call_async_hook(p, "on_step_completed", ctx, step_info)
 
 	async def post_llm_call(self, ctx: ExecutionContext, messages: list[dict], response: dict, duration_ms: int) -> None:
 		"""LLM 调用后通知所有插件。"""
 		for p in self._plugins:
-			await self._safe_call_async(p, "post_llm_call", ctx, messages, response, duration_ms)
+			await self._call_async_hook(p, "post_llm_call", ctx, messages, response, duration_ms)
 
 	async def apply_pre_tool_call(self, ctx: ExecutionContext, tool_name: str,
 								  arguments: dict) -> PreToolCallDecision:
@@ -174,7 +174,7 @@ class PluginManager:
 中文：收集所有插件要注入的上下文。"""
 		parts = []
 		for p in self._plugins:
-			result = self._safe_call_sync(p, "inject_context", ctx)
+			result = self._call_sync_hook(p, "inject_context", ctx)
 			if result:
 				parts.append(result)
 		return "\n\n".join(parts)
@@ -183,7 +183,7 @@ class PluginManager:
 		"""English: This documentation describes the related engine component behavior.
 中文：按顺序应用所有插件的消息转换。"""
 		for p in self._plugins:
-			result = self._safe_call_sync(p, "transform_messages", messages, ctx, current_message)
+			result = self._call_sync_hook(p, "transform_messages", messages, ctx, current_message)
 			if result is not None:
 				messages = result
 		return messages
@@ -192,7 +192,7 @@ class PluginManager:
 		"""English: This documentation describes the related engine component behavior.
 中文：检查是否有插件要求停止执行。"""
 		for p in self._plugins:
-			result = self._safe_call_sync(p, "should_stop", ctx)
+			result = self._call_sync_hook(p, "should_stop", ctx)
 			if result is not None:
 				stop, reason = result
 				if stop:
@@ -207,26 +207,26 @@ class PluginManager:
 	) -> tuple[list[dict], list[dict] | None]:
 		"""English: Bilingual documentation follows.
 中文：以下为双语文档说明。
-应用所有插件的 pre-LLM-call hooks。"""
+		应用所有插件的 pre-LLM-call hooks。"""
 		for p in self._plugins:
-			result = self._safe_call_sync(p, "pre_llm_call", ctx, messages, tools)
+			result = self._call_sync_hook(p, "pre_llm_call", ctx, messages, tools)
 			if result is not None:
 				messages, tools = result
 		return messages, tools
 
 	#English: Source note. 中文：── 内部辅助方法 ──
 
-	def _safe_call_sync(self, plugin: BasePlugin, method: str, *args: Any) -> Any:
+	def _call_sync_hook(self, plugin: BasePlugin, method: str, *args: Any) -> Any:
 		"""English: Bilingual documentation follows.
 	中文：以下为双语文档说明。
 	调用同步插件方法；插件异常直接抛出。"""
-		return self._hook_runner.safe_call_sync(plugin, method, *args)
+		return self._hook_runner.call_sync(plugin, method, *args)
 
-	async def _safe_call_async(self, plugin: BasePlugin, method: str, *args: Any) -> None:
+	async def _call_async_hook(self, plugin: BasePlugin, method: str, *args: Any) -> None:
 		"""English: Bilingual documentation follows.
 	中文：以下为双语文档说明。
 	调用异步插件方法；插件异常直接抛出。"""
-		await self._hook_runner.safe_call_async(plugin, method, *args)
+		await self._hook_runner.call_async(plugin, method, *args)
 
 
 def _normalize_pre_tool_decision(raw: Any, plugin: BasePlugin,

@@ -7,6 +7,7 @@ read-only retry behavior."""
 import asyncio
 import logging
 import time
+from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any
 
@@ -47,6 +48,11 @@ class ToolResult:
 	error: str = ""
 	success: bool = True
 	duration_ms: int = 0
+
+	def __post_init__(self) -> None:
+		self.arguments = deepcopy(self.arguments)
+		if self.output is not None:
+			self.output = ToolOutput.from_dict(self.output.to_dict())
 
 	def context_view(self) -> str:
 		"""English: Return the LLM context view. 中文：返回写入 LLM 上下文的视图。"""
@@ -127,13 +133,13 @@ class SingleToolExecutor:
 		if not tool_def.execute:
 			return ToolResult(
 				tool_call_id=tool_call_id, tool_name=tool_def.name,
-				arguments=arguments, error="Tool has no execute function", success=False,
+				arguments=deepcopy(arguments), error="Tool has no execute function", success=False,
 			)
 		validation_error = self.validator.validate(tool_def, arguments)
 		if validation_error:
 			return ToolResult(
 				tool_call_id=tool_call_id, tool_name=tool_def.name,
-				arguments=arguments, error=validation_error, success=False,
+				arguments=deepcopy(arguments), error=validation_error, success=False,
 			)
 		max_retries = self.retry_policy.max_retries(tool_def)
 		result: ToolResult | None = None
@@ -212,6 +218,7 @@ async def _execute_once(
 中文：以下为双语文档说明。
 执行一次工具调用尝试，并强制返回 ToolOutput。"""
 	start = time.time()
+	result_arguments = deepcopy(arguments)
 	try:
 		raw_result = await _await_tool_execute(tool_def, arguments, context or {})
 		duration_ms = int((time.time() - start) * 1000)
@@ -220,14 +227,14 @@ async def _execute_once(
 	except asyncio.TimeoutError:
 		return ToolResult(
 			tool_call_id=tool_call_id, tool_name=tool_def.name,
-			arguments=arguments, error=f"Tool execution timeout ({tool_def.timeout}s)", success=False,
+			arguments=result_arguments, error=f"Tool execution timeout ({tool_def.timeout}s)", success=False,
 			duration_ms=int((time.time() - start) * 1000),
 		)
 	except Exception as e:
 		logger.error(f"Tool execution failed: {tool_def.name}: {e}")
 		return ToolResult(
 			tool_call_id=tool_call_id, tool_name=tool_def.name,
-			arguments=arguments, error=str(e), success=False,
+			arguments=result_arguments, error=str(e), success=False,
 			duration_ms=int((time.time() - start) * 1000),
 		)
 	# English: ToolOutput is a hard plugin contract. 中文：ToolOutput 是插件必须遵守的硬边界。
@@ -236,13 +243,13 @@ async def _execute_once(
 	if raw_result.is_error:
 		return ToolResult(
 			tool_call_id=tool_call_id, tool_name=tool_def.name,
-			arguments=arguments, output=raw_result,
+			arguments=result_arguments, output=raw_result,
 			error=raw_result._content_as_str(), success=False,
 			duration_ms=duration_ms,
 		)
 	return ToolResult(
 		tool_call_id=tool_call_id, tool_name=tool_def.name,
-		arguments=arguments, output=raw_result, success=True,
+		arguments=result_arguments, output=raw_result, success=True,
 		duration_ms=duration_ms,
 	)
 

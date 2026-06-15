@@ -88,8 +88,26 @@ def test_checkpoint_protocol_compliance():
 
 
 def test_checkpoint_to_dict():
-	checkpoint = Checkpoint(run_id="run-1", sequence=1, state={"k": "v"})
+	checkpoint = Checkpoint(run_id="run-1", sequence=1, state={"k": {"nested": 1}}, metadata={"m": {"nested": 1}})
 	data = checkpoint.to_dict()
 	assert data["run_id"] == "run-1"
 	assert data["sequence"] == 1
-	assert data["state"] == {"k": "v"}
+	assert data["state"] == {"k": {"nested": 1}}
+
+	checkpoint.state["k"]["nested"] = 2
+	checkpoint.metadata["m"]["nested"] = 2
+
+	assert data["state"] == {"k": {"nested": 1}}
+	assert data["metadata"] == {"m": {"nested": 1}}
+
+
+def test_checkpoint_copies_state_and_metadata_on_create():
+	state = {"k": {"nested": 1}}
+	metadata = {"m": {"nested": 1}}
+	checkpoint = Checkpoint(run_id="run-1", sequence=1, state=state, metadata=metadata)
+
+	state["k"]["nested"] = 2
+	metadata["m"]["nested"] = 2
+
+	assert checkpoint.state == {"k": {"nested": 1}}
+	assert checkpoint.metadata == {"m": {"nested": 1}}

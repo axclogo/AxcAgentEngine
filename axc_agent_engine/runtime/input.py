@@ -16,6 +16,11 @@ class InputProviderResult:
 	artifacts: list[object] = field(default_factory=list)
 	metadata: dict[str, Any] = field(default_factory=dict)
 
+	def __post_init__(self) -> None:
+		self.messages = deepcopy(self.messages)
+		self.artifacts = list(self.artifacts)
+		self.metadata = deepcopy(self.metadata)
+
 
 class InputProvider(Protocol):
 	"""Pre-loop input normalizer for text, media, files, or other raw input.

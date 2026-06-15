@@ -29,11 +29,50 @@ class GraphPresenter:
 			2000,
 		)
 		if ref is None:
-			return ToolOutput.json_output(payload, summary=summary)
+			return ToolOutput(
+				content=payload,
+				content_type="json",
+				summary=summary,
+				llm_view=_graph_llm_view(payload, kind, summary),
+			)
 		return ToolOutput(
 			content=content,
 			content_type="json",
 			summary=summary,
+			llm_view=_graph_llm_view(payload, kind, summary),
 			artifacts=[ref],
 			metadata={"namespace": self._config.namespace, "kind": kind},
 		)
+
+
+def _graph_llm_view(payload: dict, kind: str, summary: str) -> str:
+	lines = [f"Graph result: {kind}", summary]
+	entities = payload.get("entities")
+	relations = payload.get("relations")
+	if isinstance(entities, list):
+		lines.append(f"Entities: {len(entities)}")
+		for index, entity in enumerate(entities[:10], start=1):
+			if not isinstance(entity, dict):
+				continue
+			name = entity.get("name", entity.get("id", ""))
+			entity_type = entity.get("entity_type", entity.get("type", ""))
+			description = str(entity.get("description", "")).strip()
+			header = f"{index}. {name}"
+			if entity_type:
+				header += f" ({entity_type})"
+			lines.append(header)
+			if description:
+				lines.append(f"   {description}")
+	if isinstance(relations, list):
+		lines.append(f"Relations: {len(relations)}")
+		for index, relation in enumerate(relations[:10], start=1):
+			if not isinstance(relation, dict):
+				continue
+			source = relation.get("source", relation.get("source_id", ""))
+			target = relation.get("target", relation.get("target_id", ""))
+			relation_type = relation.get("relation_type", relation.get("type", "RELATED_TO"))
+			description = str(relation.get("description", "")).strip()
+			lines.append(f"{index}. {source} -[{relation_type}]-> {target}")
+			if description:
+				lines.append(f"   {description}")
+	return "\n".join(str(line) for line in lines if line != "")

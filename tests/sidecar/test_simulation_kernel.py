@@ -8,6 +8,7 @@ from axc_agent_engine.sidecar.simulation import (
 	DefaultObservationBuilder,
 	Scenario,
 	ScriptedPolicy,
+	SimulationEvent,
 	SimulationEventType,
 	LLMSimulationReportGenerator,
 	SimulationRunner,
@@ -125,6 +126,15 @@ async def test_runner_stream_emits_step_and_done_events():
 	assert events[-1].report.metrics["steps"] == 1
 
 
+def test_simulation_error_event_copies_metadata():
+	metadata = {"actor": {"name": "red"}}
+	event = SimulationEvent.error("failed", metadata)
+
+	metadata["actor"]["name"] = "blue"
+
+	assert event.metadata == {"actor": {"name": "red"}}
+
+
 async def test_runner_stream_converts_policy_error_to_error_report():
 	class FailingPolicy:
 		async def act(self, observation, scenario, run_options, metadata):
@@ -203,6 +213,26 @@ async def test_runner_rejects_invalid_run_context_inputs():
 		assert "actor_run_options" in str(exc)
 	else:
 		raise AssertionError("expected TypeError")
+
+
+async def test_runner_preserves_zero_run_id():
+	class CapturePolicy:
+		def __init__(self):
+			self.context = None
+
+		async def act(self, observation, scenario, run_options, metadata):
+			self.context = (run_options, metadata)
+			return AgentAction(actor=observation.agent, type=ActionType.WAIT, intent="wait")
+
+	policy = CapturePolicy()
+	scenario = Scenario(id="zero-run", title="Zero run", agents=[AgentProfile(name="blue")], max_steps=1)
+	runner = SimulationRunner(policies={"blue": policy})
+
+	await runner.run(scenario, run_options={"run_id": 0}, metadata={"run_id": 0})
+
+	run_options, metadata = policy.context
+	assert run_options["run_id"] == 0
+	assert metadata["run_id"] == "0"
 
 
 class FakeReportLLM:

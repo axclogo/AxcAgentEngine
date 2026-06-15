@@ -10,6 +10,7 @@ import asyncio
 import time
 import uuid
 from collections import OrderedDict
+from copy import deepcopy
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any, Protocol, runtime_checkable
@@ -37,6 +38,10 @@ class Checkpoint:
 	metadata: dict[str, Any] = field(default_factory=dict)
 	created_at: float = field(default_factory=time.time)
 
+	def __post_init__(self) -> None:
+		object.__setattr__(self, "state", deepcopy(self.state))
+		object.__setattr__(self, "metadata", deepcopy(self.metadata))
+
 	def to_dict(self) -> dict[str, Any]:
 		return {
 			"id": self.id,
@@ -44,8 +49,8 @@ class Checkpoint:
 			"sequence": self.sequence,
 			"status": self.status,
 			"kind": self.kind,
-			"state": self.state,
-			"metadata": self.metadata,
+			"state": deepcopy(self.state),
+			"metadata": deepcopy(self.metadata),
 			"created_at": self.created_at,
 		}
 

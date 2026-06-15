@@ -1,4 +1,5 @@
 """Agent YAML Schema 定义 + 全局枚举 + 核心数据结构"""
+from copy import deepcopy
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
@@ -66,6 +67,9 @@ class ToolDefinition:
 	capability: str = ""  # Capability 枚举值；空字符串表示不限制
 	risk_level: str = "safe"  # RiskLevel 枚举值
 
+	def __post_init__(self) -> None:
+		self.parameters = deepcopy(self.parameters)
+
 	def to_openai_schema(self) -> dict[str, Any]:
 		"""English: Bilingual documentation follows.
 中文：以下为双语文档说明。
@@ -75,7 +79,7 @@ class ToolDefinition:
 			"function": {
 				"name": self.name,
 				"description": self.description,
-				"parameters": self.parameters,
+				"parameters": deepcopy(self.parameters),
 			},
 		}
 
@@ -100,13 +104,16 @@ class LLMMessage:
 	tool_calls: list[dict[str, Any]] = field(default_factory=list)
 	raw: dict[str, Any] = field(default_factory=dict)
 
+	def __post_init__(self) -> None:
+		self.tool_calls = deepcopy(self.tool_calls)
+
 	def to_dict(self) -> dict[str, Any]:
 		"""English: Bilingual documentation follows.
 中文：以下为双语文档说明。
-转换成核心循环使用的内部 assistant message dict。"""
+		转换成核心循环使用的内部 assistant message dict。"""
 		d: dict[str, Any] = {"role": self.role, "content": self.content}
 		if self.tool_calls:
-			d["tool_calls"] = self.tool_calls
+			d["tool_calls"] = deepcopy(self.tool_calls)
 		return d
 
 
@@ -132,6 +139,10 @@ class LLMStreamChunk:
 	finish_reason: str | None = None
 	metadata: dict[str, Any] = field(default_factory=dict)
 	raw: Any = None
+
+	def __post_init__(self) -> None:
+		self.tool_call_delta = deepcopy(self.tool_call_delta)
+		self.metadata = deepcopy(self.metadata)
 
 
 # ── Pydantic 配置模型 ──

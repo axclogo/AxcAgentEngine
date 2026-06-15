@@ -233,9 +233,12 @@ class MemoryToolHandlers:
 			plugin._stats["searches"] += 1
 			await plugin._persist_memories([item.id for item in items], exec_ctx)
 			plugin._sync_metadata(exec_ctx)
-		return ToolOutput.json_output(
-			{"memories": [_public_memory(item.to_dict()) for item in items], "query": query},
+		memories = [_public_memory(item.to_dict()) for item in items]
+		return ToolOutput(
+			content={"memories": memories, "query": query},
+			content_type="json",
 			summary=f"找到 {len(items)} 条记忆",
+			llm_view=_memory_search_llm_view(query, memories),
 		)
 
 	async def list(self, args: dict, context: dict):
@@ -807,6 +810,32 @@ def _public_memory(item: dict) -> dict:
 		"access_count": item.get("access_count", 0),
 		"metadata": item.get("metadata", {}),
 	}
+
+
+def _memory_search_llm_view(query: str, memories: list[dict]) -> str:
+	if not memories:
+		return f"Memory search\nQuery: {query}\nMemories: none"
+	lines = [f"Memory search\nQuery: {query}", f"Memories: {len(memories)}"]
+	for index, item in enumerate(memories, start=1):
+		layer = item.get("layer", "")
+		importance = item.get("importance", "")
+		fact_type = item.get("fact_type", "")
+		content = str(item.get("content", "")).strip()
+		header = f"{index}. layer={layer}"
+		if fact_type:
+			header += f" type={fact_type}"
+		if importance != "":
+			header += f" importance={importance}"
+		lines.append(header)
+		if content:
+			lines.append(f"   {_memory_short_text(content, 500)}")
+	return "\n".join(lines)
+
+
+def _memory_short_text(text: str, limit: int) -> str:
+	if len(text) <= limit:
+		return text
+	return f"{text[:limit - 20].rstrip()} ...[truncated]"
 
 
 def _layer_counts(memories: list[dict]) -> dict[str, int]:

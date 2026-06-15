@@ -1,6 +1,7 @@
 """AxcAgentEngine 异常层级。"""
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
@@ -32,13 +33,16 @@ class ErrorEnvelope:
 	details: dict[str, Any] = field(default_factory=dict)
 	cause: str = ""
 
+	def __post_init__(self) -> None:
+		object.__setattr__(self, "details", deepcopy(self.details))
+
 	def to_dict(self) -> dict[str, Any]:
 		return {
 			"code": self.code,
 			"message": self.message,
 			"category": self.category,
 			"retryable": self.retryable,
-			"details": self.details,
+			"details": deepcopy(self.details),
 			"cause": self.cause,
 		}
 

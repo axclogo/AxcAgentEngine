@@ -153,9 +153,11 @@ class KnowledgePlugin(BasePlugin):
 			min_score=float(args.get("min_score", 0.0) or 0.0),
 			include_trace=bool(args.get("include_trace", self._include_trace_default)),
 		)
-		return ToolOutput.json_output(
-			payload,
+		return ToolOutput(
+			content=payload,
+			content_type="json",
 			summary=f"knowledge_search：为 '{query[:50]}' 找到 {len(payload.get('results', []))} 条结果",
+			llm_view=_knowledge_search_llm_view(query, payload.get("results", [])),
 		)
 
 	async def _hybrid_search_async(
@@ -592,3 +594,29 @@ def _tool_filters(args: dict) -> KnowledgeFilter:
 	if args.get("allowed_acl_tags"):
 		filter_data["allowed_acl_tags"] = args["allowed_acl_tags"]
 	return _filter_from_config(filter_data)
+
+
+def _knowledge_search_llm_view(query: str, results: list[dict]) -> str:
+	if not results:
+		return f"Knowledge search\nQuery: {query}\nResults: none"
+	lines = [f"Knowledge search\nQuery: {query}", f"Results: {len(results)}"]
+	for index, item in enumerate(results, start=1):
+		score = item.get("score", "")
+		source = item.get("source", "") or item.get("document_id", "")
+		text = str(item.get("text", item.get("content", ""))).strip()
+		title = item.get("title", "") or item.get("chunk_id", "") or item.get("id", "")
+		header = f"{index}. {title}".rstrip()
+		if score != "":
+			header += f" | score={score}"
+		if source:
+			header += f" | source={source}"
+		lines.append(header)
+		if text:
+			lines.append(f"   {_short_text(text, 700)}")
+	return "\n".join(lines)
+
+
+def _short_text(text: str, limit: int) -> str:
+	if len(text) <= limit:
+		return text
+	return f"{text[:limit - 20].rstrip()} ...[truncated]"

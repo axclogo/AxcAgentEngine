@@ -38,6 +38,24 @@ class TestResultStoreProtocol:
 		assert content == "test content"
 
 
+def test_tool_result_copies_mutable_arguments_and_output():
+	arguments = {"nested": {"value": "original"}}
+	output = ToolOutput(
+		content={"rows": [{"id": 1}]},
+		content_type="json",
+		metadata={"source": {"id": "s1"}},
+	)
+	result = ToolResult(tool_call_id="1", tool_name="t", arguments=arguments, output=output)
+
+	arguments["nested"]["value"] = "mutated"
+	output.content["rows"][0]["id"] = 2
+	output.metadata["source"]["id"] = "mutated"
+
+	assert result.arguments == {"nested": {"value": "original"}}
+	assert result.output.content == {"rows": [{"id": 1}]}
+	assert result.output.metadata == {"source": {"id": "s1"}}
+
+
 class TestToolOutputSerialization:
 	def test_to_dict_with_all_fields(self):
 		ref = ArtifactRef(id="a1", kind="file", size=1000, metadata={"path": "/x"})
@@ -45,6 +63,7 @@ class TestToolOutputSerialization:
 			content={"data": [1, 2, 3]},
 			content_type="json",
 			summary="3 items",
+			llm_view="three items for llm",
 			artifacts=[ref],
 			metadata={"tool": "test"},
 			is_error=False,
@@ -53,6 +72,7 @@ class TestToolOutputSerialization:
 		assert d["content"] == {"data": [1, 2, 3]}
 		assert d["content_type"] == "json"
 		assert d["summary"] == "3 items"
+		assert d["llm_view"] == "three items for llm"
 		assert d["artifacts"][0]["id"] == "a1"
 		assert d["metadata"]["tool"] == "test"
 
@@ -69,12 +89,14 @@ class TestToolOutputSerialization:
 			content={"nested": {"deep": True}},
 			content_type="json",
 			summary="complex",
+			llm_view="complex for llm",
 			artifacts=refs,
 			metadata={"version": 2},
 			is_error=False,
 		)
 		restored = ToolOutput.from_dict(out.to_dict())
 		assert restored.content == out.content
+		assert restored.llm_view == "complex for llm"
 		assert len(restored.artifacts) == 5
 		assert restored.metadata == {"version": 2}
 

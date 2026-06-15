@@ -8,6 +8,9 @@ import pytest
 
 from axc_agent_engine.core.dispatcher import AgentEnvelope
 from axc_agent_engine.sidecar import OrchestrationTaskService, OrchestrationTaskStatus
+from axc_agent_engine.sidecar.multi_agent.events import MultiAgentEvent
+from axc_agent_engine.sidecar.multi_agent.types import MultiAgentEventType
+from axc_agent_engine.sidecar.orchestration import OrchestrationEventPresenter
 
 
 class RecordingDispatcher:
@@ -36,6 +39,24 @@ class BlockingDispatcher:
 		raise AssertionError("cancel should interrupt dispatcher request")
 
 
+def test_orchestration_event_presenter_copies_metadata():
+	event = MultiAgentEvent(type=MultiAgentEventType.MESSAGE, content="hi", metadata={"m": {"v": 1}})
+	payload = OrchestrationEventPresenter().event_to_dict(event)
+
+	event.metadata["m"]["v"] = 2
+
+	assert payload["metadata"] == {"m": {"v": 1}}
+
+
+def test_multi_agent_event_copies_metadata_on_create():
+	metadata = {"m": {"v": 1}}
+	event = MultiAgentEvent(type=MultiAgentEventType.MESSAGE, content="hi", metadata=metadata)
+
+	metadata["m"]["v"] = 2
+
+	assert event.metadata == {"m": {"v": 1}}
+
+
 async def test_orchestration_task_service_runs_multi_agent_session():
 	agents = [SimpleNamespace(name="alpha"), SimpleNamespace(name="beta")]
 	dispatcher = RecordingDispatcher()
@@ -56,6 +77,27 @@ async def test_orchestration_task_service_runs_multi_agent_session():
 	assert task.result["mode"] == "debate"
 	assert len(task.result["messages"]) == 2
 	assert [envelope.recipient for envelope in dispatcher.envelopes] == ["alpha", "beta"]
+
+
+async def test_orchestration_create_task_copies_metadata():
+	agents = [SimpleNamespace(name="alpha")]
+	service = OrchestrationTaskService(
+		agent_getter=lambda name: agents[0],
+		agent_lister=lambda: agents,
+		dispatcher=RecordingDispatcher(),
+	)
+	metadata = {"nested": {"value": "original"}}
+
+	task = await service.create_task(
+		agent_names=["alpha"],
+		mode="group_chat",
+		topic="ship?",
+		metadata=metadata,
+		start=False,
+	)
+	metadata["nested"]["value"] = "mutated"
+
+	assert task.metadata == {"nested": {"value": "original"}}
 
 
 async def test_orchestration_task_service_runs_group_chat_round_robin():

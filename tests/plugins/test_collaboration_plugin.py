@@ -236,6 +236,8 @@ def test_agent_list_filters_visible_agents():
 	result = asyncio.run(plugin._tool_agent_list({}, {"agent_name": "caller"}))
 
 	assert result.content["agents"] == [{"name": "worker", "description": "ok"}]
+	assert result.context_view() == "Available agents (1):\n1. worker\n   Description: ok"
+	assert result.display_view() == '{"agents": [{"name": "worker", "description": "ok"}]}'
 
 
 async def test_collaboration_plugin_can_create_sidecar_orchestration_task():

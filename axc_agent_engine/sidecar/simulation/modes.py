@@ -4,6 +4,7 @@
 Mode adapters for the generic simulation kernel."""
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any, Callable
 
@@ -40,7 +41,7 @@ class SimulationModeAdapter:
 			constraints=list(overrides.pop("constraints", self.constraints)),
 			success_criteria=list(overrides.pop("success_criteria", [])),
 			max_steps=int(overrides.pop("max_steps", 10)),
-			metadata={"mode": self.name, **dict(overrides.pop("metadata", {}))},
+			metadata={"mode": self.name, **deepcopy(overrides.pop("metadata", {}))},
 		)
 
 	def build_runner(self, policies: dict[str, Any], **kwargs: Any) -> SimulationRunner:

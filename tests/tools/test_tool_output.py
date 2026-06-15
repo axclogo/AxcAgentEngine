@@ -16,10 +16,26 @@ class TestArtifactRef:
 		ref = ArtifactRef(id="x", kind="file", size=50, metadata={"path": "/a.txt"})
 		assert ref.metadata["path"] == "/a.txt"
 
+	def test_direct_creation_copies_metadata(self):
+		metadata = {"nested": {"value": "original"}}
+		ref = ArtifactRef(id="x", kind="json", size=200, metadata=metadata)
+
+		metadata["nested"]["value"] = "mutated"
+
+		assert ref.metadata == {"nested": {"value": "original"}}
+
 	def test_to_dict(self):
 		ref = ArtifactRef(id="x", kind="json", size=200, metadata={"k": "v"})
 		d = ref.to_dict()
 		assert d == {"id": "x", "kind": "json", "size": 200, "metadata": {"k": "v"}}
+
+	def test_to_dict_copies_metadata(self):
+		ref = ArtifactRef(id="x", kind="json", size=200, metadata={"k": "v"})
+		d = ref.to_dict()
+
+		ref.metadata["k"] = "mutated"
+
+		assert d["metadata"] == {"k": "v"}
 
 	def test_from_dict(self):
 		d = {"id": "y", "kind": "binary", "size": 300, "metadata": {"a": 1}}
@@ -27,6 +43,14 @@ class TestArtifactRef:
 		assert ref.id == "y"
 		assert ref.kind == "binary"
 		assert ref.size == 300
+		assert ref.metadata == {"a": 1}
+
+	def test_from_dict_copies_metadata(self):
+		d = {"id": "y", "kind": "binary", "size": 300, "metadata": {"a": 1}}
+		ref = ArtifactRef.from_dict(d)
+
+		d["metadata"]["a"] = 2
+
 		assert ref.metadata == {"a": 1}
 
 	def test_from_dict_no_metadata(self):
@@ -60,6 +84,10 @@ class TestToolOutput:
 		out = ToolOutput.json_output([1, 2, 3])
 		assert out.content == [1, 2, 3]
 
+	def test_factories_accept_llm_view(self):
+		assert ToolOutput.text("full", llm_view="llm").context_view() == "llm"
+		assert ToolOutput.json_output({"full": True}, llm_view="llm").context_view() == "llm"
+
 	def test_error_factory(self):
 		out = ToolOutput.error("bad thing")
 		assert out.content == "bad thing"
@@ -74,6 +102,19 @@ class TestToolOutput:
 		out = ToolOutput.text("full", summary="summary").with_metadata({"durable_summary": "durable"})
 		assert out.context_view() == "durable"
 		assert ToolOutput.text("full", summary="summary").context_view() == "summary"
+
+	def test_context_view_prefers_explicit_llm_view_after_durable_summary(self):
+		out = ToolOutput(content={"rows": [{"id": 1}]}, content_type="json", summary="summary", llm_view="row 1")
+		assert out.context_view() == "row 1"
+		assert out.display_view() == '{"rows": [{"id": 1}]}'
+
+		durable = out.with_metadata({"durable_summary": "durable"})
+		assert durable.context_view() == "durable"
+		assert durable.llm_view == "row 1"
+
+	def test_llm_view_is_copied(self):
+		out = ToolOutput(content="full", llm_view=123)
+		assert out.llm_view == "123"
 
 	def test_display_view_returns_full_content(self):
 		long_text = "x" * 5000
@@ -104,6 +145,40 @@ class TestToolOutput:
 		assert "abc" in view
 		assert "附件" in view
 
+	def test_direct_creation_copies_content_metadata_and_artifacts(self):
+		ref = ArtifactRef(id="r1", kind="text", size=10, metadata={"source": {"id": "s1"}})
+		content = {"rows": [{"id": 1}]}
+		metadata = {"nested": {"value": "original"}}
+		out = ToolOutput(content=content, content_type="json", artifacts=[ref], metadata=metadata)
+
+		content["rows"][0]["id"] = 2
+		metadata["nested"]["value"] = "mutated"
+		ref.metadata["source"]["id"] = "mutated"
+
+		assert out.content == {"rows": [{"id": 1}]}
+		assert out.metadata == {"nested": {"value": "original"}}
+		assert out.artifacts[0].metadata == {"source": {"id": "s1"}}
+
+	def test_with_metadata_copies_content_metadata_and_artifacts(self):
+		ref = ArtifactRef(id="a", kind="text", size=1, metadata={"source": {"id": "s1"}})
+		out = ToolOutput(
+			content={"rows": [{"id": 1}]},
+			content_type="json",
+			artifacts=[ref],
+			metadata={"existing": {"value": 1}},
+		)
+		extra = {"new": {"value": 2}}
+
+		merged = out.with_metadata(extra)
+		out.content["rows"][0]["id"] = 2
+		out.metadata["existing"]["value"] = 3
+		ref.metadata["source"]["id"] = "mutated"
+		extra["new"]["value"] = 4
+
+		assert merged.content == {"rows": [{"id": 1}]}
+		assert merged.metadata == {"existing": {"value": 1}, "new": {"value": 2}}
+		assert merged.artifacts[0].metadata == {"source": {"id": "s1"}}
+
 	def test_context_view_json_content(self):
 		out = ToolOutput.json_output({"status": 200, "body": "ok"})
 		view = out.context_view()
@@ -120,6 +195,24 @@ class TestToolOutput:
 		assert d["metadata"] == {"k": 1}
 		assert d["is_error"] is False
 
+	def test_to_dict_copies_content_metadata_and_artifacts(self):
+		ref = ArtifactRef(id="r1", kind="text", size=10, metadata={"source": "s1"})
+		out = ToolOutput(
+			content={"rows": [{"id": 1}]},
+			content_type="json",
+			artifacts=[ref],
+			metadata={"k": {"nested": 1}},
+		)
+		d = out.to_dict()
+
+		out.content["rows"][0]["id"] = 2
+		out.metadata["k"]["nested"] = 2
+		ref.metadata["source"] = "mutated"
+
+		assert d["content"] == {"rows": [{"id": 1}]}
+		assert d["metadata"] == {"k": {"nested": 1}}
+		assert d["artifacts"][0]["metadata"] == {"source": "s1"}
+
 	def test_from_dict(self):
 		d = {
 			"content": {"x": 1},
@@ -134,6 +227,23 @@ class TestToolOutput:
 		assert out.content_type == "json"
 		assert len(out.artifacts) == 1
 		assert out.artifacts[0].id == "a"
+
+	def test_from_dict_copies_content_and_metadata(self):
+		d = {
+			"content": {"x": [1]},
+			"content_type": "json",
+			"metadata": {"k": {"nested": 1}},
+			"artifacts": [{"id": "a", "kind": "json", "size": 5, "metadata": {"source": "s1"}}],
+		}
+		out = ToolOutput.from_dict(d)
+
+		d["content"]["x"].append(2)
+		d["metadata"]["k"]["nested"] = 2
+		d["artifacts"][0]["metadata"]["source"] = "mutated"
+
+		assert out.content == {"x": [1]}
+		assert out.metadata == {"k": {"nested": 1}}
+		assert out.artifacts[0].metadata == {"source": "s1"}
 
 	def test_roundtrip(self):
 		out = ToolOutput(content="test", content_type="text", summary="s",

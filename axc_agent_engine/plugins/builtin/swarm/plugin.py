@@ -173,6 +173,7 @@ class SwarmPlugin(BasePlugin):
 			content=payload,
 			content_type="json",
 			summary=f"Swarm：{success_count}/{len(normalized)} 个任务成功",
+			llm_view=_swarm_llm_view(payload),
 			artifacts=artifacts,
 			metadata={"swarm_id": swarm_id, "capability": "agent_call", "risk_level": "moderate"},
 		)
@@ -321,6 +322,33 @@ def _swarm_metadata(context: dict, exec_ctx: Any, depth: int, swarm_id: str, goa
 	if not metadata.get("trace_id"):
 		metadata["trace_id"] = str(metadata.get("run_id") or swarm_id)
 	return metadata
+
+
+def _swarm_llm_view(payload: dict[str, Any]) -> str:
+	lines = [
+		"Swarm dispatch result",
+		f"Goal: {payload.get('goal', '')}",
+		f"Summary: success={payload.get('success', 0)} error={payload.get('error', 0)} cancelled={payload.get('cancelled', 0)} total={payload.get('total', 0)}",
+	]
+	for item in payload.get("results", []) or []:
+		if not isinstance(item, dict):
+			continue
+		lines.append(f"{int(item.get('index', 0)) + 1}. {item.get('agent_name', '')} [{item.get('status', '')}]")
+		result = str(item.get("result", "")).strip()
+		error = str(item.get("error", "")).strip()
+		if result:
+			lines.append(f"   Result: {_swarm_short_text(result, 500)}")
+		if error:
+			lines.append(f"   Error: {error}")
+		if item.get("artifact_id"):
+			lines.append(f"   Artifact: {item['artifact_id']}")
+	return "\n".join(lines)
+
+
+def _swarm_short_text(text: str, limit: int) -> str:
+	if len(text) <= limit:
+		return text
+	return f"{text[:limit - 20].rstrip()} ...[truncated]"
 
 
 async def _externalize_result(

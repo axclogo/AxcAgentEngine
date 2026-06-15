@@ -2,6 +2,7 @@
 中文：此文档说明相关引擎组件的行为。"""
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any, Protocol, runtime_checkable
 
@@ -21,6 +22,10 @@ class PolicyRequest:
 	arguments: dict[str, Any] = field(default_factory=dict)
 	metadata: dict[str, Any] = field(default_factory=dict)
 
+	def __post_init__(self) -> None:
+		object.__setattr__(self, "arguments", deepcopy(self.arguments))
+		object.__setattr__(self, "metadata", deepcopy(self.metadata))
+
 
 @dataclass(frozen=True)
 class PolicyDecision:
@@ -30,6 +35,9 @@ class PolicyDecision:
 	reason: str = ""
 	code: str = ""
 	metadata: dict[str, Any] = field(default_factory=dict)
+
+	def __post_init__(self) -> None:
+		object.__setattr__(self, "metadata", deepcopy(self.metadata))
 
 	def to_error(self) -> ErrorEnvelope:
 		return ErrorEnvelope(

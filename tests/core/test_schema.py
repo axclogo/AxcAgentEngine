@@ -4,7 +4,7 @@ from pydantic import ValidationError
 
 from axc_agent_engine.core.schema import (
 	StepStatus, RiskLevel, PluginSignal,
-	ToolDefinition, LLMUsage, RuntimeConfig, PluginConfig, AgentConfig, ConcurrencyRuntimeConfig,
+	ToolDefinition, LLMMessage, LLMStreamChunk, LLMUsage, RuntimeConfig, PluginConfig, AgentConfig, ConcurrencyRuntimeConfig,
 )
 
 
@@ -46,6 +46,22 @@ class TestToolDefinition:
 		assert td.parameters == {"type": "object", "properties": {}}
 		assert td.execute is None
 
+	def test_direct_creation_copies_parameters(self):
+		parameters = {"type": "object", "properties": {"x": {"type": "string"}}}
+		td = ToolDefinition(name="x", parameters=parameters)
+
+		parameters["properties"]["x"]["type"] = "number"
+
+		assert td.parameters == {"type": "object", "properties": {"x": {"type": "string"}}}
+
+	def test_to_openai_schema_copies_parameters(self):
+		td = ToolDefinition(name="x", parameters={"type": "object", "properties": {"x": {"type": "string"}}})
+		schema = td.to_openai_schema()
+
+		schema["function"]["parameters"]["properties"]["x"]["type"] = "number"
+
+		assert td.parameters == {"type": "object", "properties": {"x": {"type": "string"}}}
+
 
 class TestUsage:
 	def test_defaults(self):
@@ -56,6 +72,50 @@ class TestUsage:
 	def test_custom(self):
 		u = LLMUsage(input_tokens=100, output_tokens=50)
 		assert u.input_tokens == 100
+
+
+class TestLLMMessage:
+	def test_direct_creation_copies_tool_calls_and_preserves_raw_identity(self):
+		class RawProviderPayload:
+			def __deepcopy__(self, memo):
+				raise RuntimeError("provider raw payload is opaque")
+
+		tool_calls = [{"id": "tc1", "function": {"name": "search"}}]
+		raw = RawProviderPayload()
+		message = LLMMessage(content="", tool_calls=tool_calls, raw=raw)
+
+		tool_calls[0]["function"]["name"] = "mutated"
+
+		assert message.tool_calls == [{"id": "tc1", "function": {"name": "search"}}]
+		assert message.raw is raw
+
+	def test_to_dict_copies_tool_calls(self):
+		tool_calls = [{"id": "tc1", "function": {"name": "search"}}]
+		message = LLMMessage(content="", tool_calls=tool_calls)
+		payload = message.to_dict()
+
+		tool_calls[0]["function"]["name"] = "mutated"
+
+		assert payload["tool_calls"] == [{"id": "tc1", "function": {"name": "search"}}]
+
+
+class TestLLMStreamChunk:
+	def test_direct_creation_copies_delta_metadata_and_preserves_raw_identity(self):
+		class RawProviderPayload:
+			def __deepcopy__(self, memo):
+				raise RuntimeError("provider raw payload is opaque")
+
+		delta = {"function": {"arguments": "{}"}}
+		metadata = {"usage": {"input": 1}}
+		raw = RawProviderPayload()
+		chunk = LLMStreamChunk(tool_call_delta=delta, metadata=metadata, raw=raw)
+
+		delta["function"]["arguments"] = '{"mutated":true}'
+		metadata["usage"]["input"] = 2
+
+		assert chunk.tool_call_delta == {"function": {"arguments": "{}"}}
+		assert chunk.metadata == {"usage": {"input": 1}}
+		assert chunk.raw is raw
 
 
 class TestRuntimeConfig:

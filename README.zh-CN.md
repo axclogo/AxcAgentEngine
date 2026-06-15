@@ -35,7 +35,7 @@ AxcAgentEngine 在 ReAct 之外加了 **POR（Plan-Observe-Replan）**：先生�
 pip install axc-agent-engine
 
 # 固定安装当前 2.3 版本
-pip install axc-agent-engine==2.3.1
+pip install axc-agent-engine==2.3.2
 
 # 可选能力
 pip install "axc-agent-engine[api]"

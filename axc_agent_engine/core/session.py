@@ -1,6 +1,7 @@
 """Session — 独立会话管理"""
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -20,8 +21,8 @@ class Session:
 		self.messages.clear()
 
 	def to_dict(self) -> dict:
-		return {"session_id": self.session_id, "messages": self.messages, "metadata": self.metadata}
+		return {"session_id": self.session_id, "messages": deepcopy(self.messages), "metadata": deepcopy(self.metadata)}
 
 	@classmethod
 	def from_dict(cls, data: dict) -> "Session":
-		return cls(session_id=data["session_id"], messages=data.get("messages", []), metadata=data.get("metadata", {}))
+		return cls(session_id=data["session_id"], messages=deepcopy(data.get("messages", [])), metadata=deepcopy(data.get("metadata", {})))

@@ -3,7 +3,7 @@ import pytest
 from unittest.mock import MagicMock, AsyncMock
 from axc_agent_engine.core.llm_caller import LLMCaller
 from axc_agent_engine.core.context import ExecutionContext, ExecutionConfig, ExecutionState
-from axc_agent_engine.core.errors import RetryableProviderError
+from axc_agent_engine.core.errors import ProviderContractError, ProviderError, RetryableProviderError
 from axc_agent_engine.core.plugin_manager import PluginManager
 from axc_agent_engine.core.schema import LLMResponse, LLMMessage, LLMUsage, LLMStreamChunk
 
@@ -31,6 +31,19 @@ class TestLLMCallerRetry:
 		ctx = _make_ctx(stream=False)
 		msg, events = await caller.call(ctx, [{"role": "user", "content": "hi"}], None)
 		assert msg["content"] == "from fallback"
+		assert ctx.state.fallback_triggered is True
+
+	@pytest.mark.asyncio
+	async def test_sync_fallback_contract_error_is_not_hidden(self):
+		primary = MagicMock()
+		primary.chat = AsyncMock(side_effect=RetryableProviderError("primary down"))
+		fallback = MagicMock()
+		fallback.chat = AsyncMock(return_value={"content": "bad"})
+		pm = PluginManager([])
+		caller = LLMCaller(primary=primary, fallback=fallback, plugin_manager=pm)
+		ctx = _make_ctx(stream=False)
+		with pytest.raises(ProviderContractError, match="LLMProvider.chat"):
+			await caller.call(ctx, [{"role": "user", "content": "hi"}], None)
 		assert ctx.state.fallback_triggered is True
 
 	@pytest.mark.asyncio
@@ -87,6 +100,34 @@ class TestLLMCallerRetry:
 		msg, events = await caller.call(ctx, [{"role": "user", "content": "hi"}], None)
 		assert msg["content"] == "fallback"
 		assert ctx.state.fallback_triggered is True
+
+	@pytest.mark.asyncio
+	async def test_stream_partial_retryable_error_does_not_retry_or_fallback(self):
+		import httpx
+
+		call_count = [0]
+
+		def primary_stream(messages, tools=None, **kwargs):
+			call_count[0] += 1
+			async def gen():
+				yield LLMStreamChunk(content_delta="partial")
+				raise httpx.NetworkError("broken after partial")
+			return gen()
+
+		def fallback_stream(messages, tools=None, **kwargs):
+			raise AssertionError("fallback must not be called after partial output")
+
+		primary = MagicMock()
+		primary.stream = primary_stream
+		fallback = MagicMock()
+		fallback.stream = fallback_stream
+		pm = PluginManager([])
+		caller = LLMCaller(primary=primary, fallback=fallback, plugin_manager=pm)
+		ctx = _make_ctx(stream=True)
+		with pytest.raises(ProviderError, match="partial output"):
+			await caller.call(ctx, [{"role": "user", "content": "hi"}], None)
+		assert call_count[0] == 1
+		assert ctx.state.fallback_triggered is False
 
 	@pytest.mark.asyncio
 	async def test_stream_non_retryable_error_does_not_fallback(self):
