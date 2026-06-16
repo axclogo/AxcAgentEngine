@@ -4,7 +4,7 @@
 
 ExecutionConfig：不可变执行配置（max_rounds、stream、thinking 等）。
 ExecutionState：可变运行时状态（current_round、tokens、cancelled 等）。
-ExecutionServices：类型化基础设施依赖（result_store、message_bus 等）。
+ExecutionServices：类型化基础设施依赖（artifact_store、message_bus 等）。
 ExecutionContext：组合以上对象，并提供 cancel、add_usage、check_cancelled 等便捷方法。"""
 from __future__ import annotations
 
@@ -13,10 +13,11 @@ from dataclasses import dataclass, field
 from typing import Any, TYPE_CHECKING
 
 if TYPE_CHECKING:
-	from axc_agent_engine.storage.protocols import AuditSink, CheckpointStore, MessageBus, ResultStore
+	from axc_agent_engine.storage.artifact_store import ArtifactStore
+	from axc_agent_engine.storage.protocols import AuditSink, CheckpointStore, MessageBus
 	from axc_agent_engine.runtime.sandbox_models import CommandExecutor
 	from axc_agent_engine.runtime.policy import PolicyEvaluator
-	from axc_agent_engine.plugins import AgentInfo, ModelInfo
+	from axc_agent_engine.plugins.context import AgentInfo, ModelInfo
 
 
 @dataclass(frozen=True)
@@ -40,7 +41,7 @@ class ExecutionConfig:
 class ExecutionServices:
 	"""English: This documentation describes the related engine component behavior.
 中文：执行所需的类型化基础设施依赖。"""
-	result_store: "ResultStore | None" = None
+	artifact_store: "ArtifactStore | None" = None
 	message_bus: "MessageBus | None" = None
 	dispatcher: "object | None" = None
 	audit_sink: "AuditSink | None" = None
@@ -95,7 +96,7 @@ class ExecutionContext:
 
 	通过 ctx.config.max_rounds、ctx.config.stream 等访问配置。
 	通过 ctx.state.current_round、ctx.state.metadata 等访问状态。
-	通过 ctx.services.result_store 等访问服务。
+	通过 ctx.services.artifact_store 等访问服务。
 	"""
 	config: ExecutionConfig = field(default_factory=ExecutionConfig)
 	state: ExecutionState = field(default_factory=ExecutionState)

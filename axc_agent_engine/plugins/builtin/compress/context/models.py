@@ -35,4 +35,3 @@ class PackedContext:
 
 	messages: list[dict[str, Any]]
 	estimated_tokens: int
-	truncated: bool = False

@@ -210,13 +210,24 @@ class TestPluginManager:
 		result_msgs, _ = pm.apply_pre_llm_call(ExecutionContext(), msgs, None)
 		assert len(result_msgs) == 1
 
+	@pytest.mark.asyncio
+	async def test_invalid_pre_tool_call_return_raises(self):
+		class BadPlugin(BasePlugin):
+			name = "bad"
+			async def pre_tool_call(self, ctx, name, args):
+				return {"allowed": True}
+
+		pm = PluginManager([BadPlugin()])
+		with pytest.raises(TypeError, match="bad.pre_tool_call must return"):
+			await pm.apply_pre_tool_call(ExecutionContext(), "tool", {})
+
 
 class TestCompressPlugin:
 	@pytest.mark.asyncio
 	async def test_snip_compact(self, plugin_ctx):
 		from axc_agent_engine.plugins.builtin.compress.plugin import CompressPlugin
 		p = CompressPlugin()
-		p.initialize({"snip_threshold": 10}, plugin_ctx)
+		p.initialize({"tool_result": {"artifact_threshold_tokens": 10}}, plugin_ctx)
 		msgs = [
 			{"role": "system", "content": "sys"},
 			{"role": "user", "content": "run tool"},
@@ -226,13 +237,13 @@ class TestCompressPlugin:
 		ctx = ExecutionContext()
 		result = p.transform_messages(msgs, ctx)
 		tool_msg = next(m for m in result if m["role"] == "tool")
-		assert len(tool_msg["content"]) < 1000
+		assert tool_msg["content"] == "x" * 1000
 
 	@pytest.mark.asyncio
 	async def test_micro_compact(self, plugin_ctx):
 		from axc_agent_engine.plugins.builtin.compress.plugin import CompressPlugin
 		p = CompressPlugin()
-		p.initialize({"micro_compact_keep_recent": 2}, plugin_ctx)
+		p.initialize({"recent_window": {"rounds": 2}}, plugin_ctx)
 		msgs = [{"role": "system", "content": "sys"}]
 		for i in range(5):
 			msgs.append({"role": "user", "content": f"msg{i}"})
@@ -246,7 +257,7 @@ class TestCompressPlugin:
 	async def test_summary_generation(self, plugin_ctx):
 		from axc_agent_engine.plugins.builtin.compress.plugin import CompressPlugin
 		p = CompressPlugin()
-		p.initialize({"summary_after_rounds": 2}, plugin_ctx)
+		p.initialize({"summary": {"after_rounds": 2}}, plugin_ctx)
 		ctx = ExecutionContext()
 		await p.on_round_end(ctx, "hello", "world", [])
 		await p.on_round_end(ctx, "foo", "bar", [])
@@ -257,7 +268,7 @@ class TestCompressPlugin:
 		from axc_agent_engine.plugins.builtin.compress.plugin import CompressPlugin
 		plugin_ctx.utility_model.ask = AsyncMock(side_effect=RuntimeError("fail"))
 		p = CompressPlugin()
-		p.initialize({"summary_after_rounds": 1, "max_compact_failures": 2}, plugin_ctx)
+		p.initialize({"summary": {"after_rounds": 1, "max_failures": 2}}, plugin_ctx)
 		ctx = ExecutionContext()
 		await p.on_round_end(ctx, "a", "b", [])
 		await p.on_round_end(ctx, "c", "d", [])

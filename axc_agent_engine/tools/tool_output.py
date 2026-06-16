@@ -8,7 +8,7 @@ import json
 import uuid
 from copy import deepcopy
 from dataclasses import dataclass, field
-from typing import Any, Protocol, runtime_checkable
+from typing import Any
 
 
 @dataclass
@@ -54,25 +54,18 @@ class ToolOutput:
 		self.artifacts = [ArtifactRef.from_dict(artifact.to_dict()) for artifact in self.artifacts]
 		self.metadata = deepcopy(self.metadata)
 
-	def context_view(self, max_chars: int = 2000) -> str:
-		"""English: LLM context view. 中文：写入 LLM 上下文的紧凑视图。"""
+	def context_view(self, max_chars: int = 0) -> str:
+		"""English: LLM context view. 中文：写入 LLM 上下文的完整工具结果视图。"""
 		if self.is_error:
 			content_str = self._content_as_str()
-			return f"[错误] {content_str[:max_chars]}"
+			return f"[错误] {content_str}"
 		durable = self.durable_summary()
 		if durable:
 			view = durable
 		elif self.llm_view:
 			view = self.llm_view
-		elif self.summary:
-			view = self.summary
 		else:
 			view = self._content_as_str()
-		if len(view) > max_chars:
-			head = view[:int(max_chars * 0.75)]
-			tail = view[-(max_chars - len(head)):]
-			omitted = len(view) - len(head) - len(tail)
-			view = f"{head}\n...[省略 {omitted} 个字符]...\n{tail}"
 		if self.artifacts:
 			refs = ", ".join(f"{a.kind}:{a.id}({a.size}B)" for a in self.artifacts)
 			view += f"\n[附件：{refs}]"
@@ -80,26 +73,14 @@ class ToolOutput:
 
 	def display_view(self, max_chars: int = 0) -> str:
 		"""English: UI/event display view. 中文：用于事件和 UI 展示的结果视图。"""
-		view = self._content_as_str()
-		if max_chars and max_chars > 0 and len(view) > max_chars:
-			head = view[:int(max_chars * 0.75)]
-			tail = view[-(max_chars - len(head)):]
-			omitted = len(view) - len(head) - len(tail)
-			view = f"{head}\n...[省略 {omitted} 个字符]...\n{tail}"
-		return view
+		return self._content_as_str()
 
 	def durable_summary(self, max_chars: int = 4000) -> str:
 		"""English: Return long-lived tool facts. 中文：返回后续轮次必须保留的工具结果摘要。"""
 		value = self.metadata.get("durable_summary", "")
 		if not value:
 			return ""
-		text = str(value)
-		if len(text) <= max_chars:
-			return text
-		head = text[:int(max_chars * 0.75)]
-		tail = text[-(max_chars - len(head)):]
-		omitted = len(text) - len(head) - len(tail)
-		return f"{head}\n...[省略 {omitted} 个字符]...\n{tail}"
+		return str(value)
 
 	def is_durable(self) -> bool:
 		"""English: Whether this result should survive compression. 中文：结果是否应跨压缩保留。"""
@@ -165,15 +146,6 @@ class ToolOutput:
 中文：以下为双语文档说明。
 便捷创建 error ToolOutput。"""
 		return cls(content=message, content_type="error", is_error=True)
-
-
-@runtime_checkable
-class ResultStore(Protocol):
-	"""English: This documentation describes the related engine component behavior.
-中文：外部存储大工具结果的协议。"""
-	async def put(self, content: str | bytes, metadata: dict[str, Any] | None = None) -> ArtifactRef: ...
-	async def get(self, artifact_id: str, offset: int = 0, limit: int = 4000) -> str: ...
-	async def search(self, artifact_id: str, query: str) -> list[dict[str, Any]]: ...
 
 
 def generate_artifact_id() -> str:

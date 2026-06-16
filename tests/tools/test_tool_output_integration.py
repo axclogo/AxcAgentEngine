@@ -10,58 +10,57 @@ from axc_agent_engine.core.schema import ToolDefinition
 from axc_agent_engine.core.context import ExecutionContext, ExecutionConfig, ExecutionState
 from axc_agent_engine.core.message_store import MessageStore
 from axc_agent_engine.core.plugin_manager import PluginManager
-from axc_agent_engine.storage.result_store import InMemoryResultStore
+from axc_agent_engine.storage.artifact_store import InMemoryArtifactStore
 
 
-class TestToolOutputWithResultStore:
-	"""End-to-end: tool stores artifact, result_read retrieves it."""
+class TestToolOutputWithArtifactStore:
+	"""End-to-end: tool stores artifact, artifact_read retrieves it."""
 
 	@pytest.mark.asyncio
-	async def test_file_read_then_result_read(self, tmp_path):
-		"""file_read stores large file as artifact, result_read retrieves it."""
-		from axc_agent_engine.plugins.builtin.builtin_tools.tool_definitions import _file_read, _result_read
+	async def test_file_read_then_artifact_read(self, tmp_path):
+		"""file_read stores large file as artifact, artifact_read retrieves it."""
+		from axc_agent_engine.plugins.builtin.builtin_tools.tool_definitions import _file_read, _artifact_read
 		f = tmp_path / "big.txt"
-		content = "\n".join(f"line {i}: data" for i in range(500))
+		content = "line 0: data\n" + ("x" * (10 * 1024 * 1024 + 1))
 		f.write_text(content)
-		store = InMemoryResultStore()
-		ctx = {"result_store": store, "workspace": str(tmp_path)}
+		store = InMemoryArtifactStore()
+		ctx = {"artifact_store": store, "workspace": str(tmp_path)}
 		read_result = await _file_read({"path": "big.txt"}, ctx)
 		assert not read_result.is_error
-		assert read_result.content["truncated"] is True
+		assert read_result.content["externalized"] is True
 		assert len(read_result.artifacts) == 1
 		artifact_id = read_result.artifacts[0].id
-		# Now use result_read to get full content
-		page_result = await _result_read({"artifact_id": artifact_id, "offset": 0, "limit": 100}, ctx)
+		# Now use artifact_read to get full content
+		page_result = await _artifact_read({"artifact_id": artifact_id, "offset": 0, "limit": 100}, ctx)
 		assert not page_result.is_error
 		assert "line 0" in page_result.content
 
 	@pytest.mark.asyncio
 	async def test_shell_large_stdout_artifact(self):
 		"""shell stores large stdout as artifact."""
-		from axc_agent_engine.plugins.builtin.builtin_tools.tool_definitions import _shell, _result_read
-		store = InMemoryResultStore()
-		ctx = {"result_store": store, "allow_unsafe_workspace": True}
+		from axc_agent_engine.plugins.builtin.builtin_tools.tool_definitions import _shell, _artifact_read
+		store = InMemoryArtifactStore()
+		ctx = {"artifact_store": store, "allow_unsafe_workspace": True}
 		result = await _shell({"command": "python3 -c \"print('x' * 5000)\""}, ctx)
 		assert not result.is_error
 		if "stdout_artifact_id" in result.content:
 			aid = result.content["stdout_artifact_id"]
-			read_result = await _result_read({"artifact_id": aid}, ctx)
+			read_result = await _artifact_read({"artifact_id": aid}, ctx)
 			assert not read_result.is_error
 			assert len(read_result.content) > 0
 
 	@pytest.mark.asyncio
-	async def test_result_search_in_file(self, tmp_path):
+	async def test_artifact_search_in_file(self, tmp_path):
 		"""Search within a stored file artifact."""
-		from axc_agent_engine.plugins.builtin.builtin_tools.tool_definitions import _file_read, _result_search
+		from axc_agent_engine.plugins.builtin.builtin_tools.tool_definitions import _file_read, _artifact_search
 		f = tmp_path / "searchable.txt"
-		lines = [f"line {i}: {'important' if i % 10 == 0 else 'normal'}" for i in range(500)]
-		f.write_text("\n".join(lines))
-		store = InMemoryResultStore()
-		ctx = {"result_store": store, "workspace": str(tmp_path)}
+		f.write_text("important first line\n" + ("x" * (10 * 1024 * 1024 + 1)))
+		store = InMemoryArtifactStore()
+		ctx = {"artifact_store": store, "workspace": str(tmp_path)}
 		read_result = await _file_read({"path": "searchable.txt"}, ctx)
 		assert len(read_result.artifacts) == 1
 		aid = read_result.artifacts[0].id
-		search_result = await _result_search({"artifact_id": aid, "query": "important"}, ctx)
+		search_result = await _artifact_search({"artifact_id": aid, "query": "important"}, ctx)
 		assert not search_result.is_error
 		assert len(search_result.content["matches"]) > 0
 
@@ -71,7 +70,7 @@ class TestToolOutputNoLLMInDefaultPath:
 
 	@pytest.mark.asyncio
 	async def test_no_llm_call_for_large_result(self):
-		"""Large tool result uses context_view, not LLM summarization."""
+		"""Large tool result is written directly; no LLM summarization is invoked."""
 		async def big_tool(args, ctx):
 			return ToolOutput.text("x" * 10000, summary="10000 chars of x")
 
@@ -83,8 +82,7 @@ class TestToolOutputNoLLMInDefaultPath:
 		results = await execute_tool_calls(
 			[{"name": "big", "arguments": {}, "id": "1"}], reg, pm.plugins, ctx)
 		assert results[0].success
-		# context_view uses summary, no LLM involved
-		assert results[0].context_view() == "10000 chars of x"
+		assert results[0].context_view() == "x" * 10000
 
 
 class TestToolOutputConcurrentExecution:
@@ -152,9 +150,9 @@ class TestToolOutputMessageStoreIntegration:
 			output = ToolOutput.text("x" * 10000, summary=f"Result {i}")
 			results = [ToolResult(tool_call_id=str(i), tool_name="t", arguments={}, output=output, success=True)]
 			ms.append_tool_results(results)
-		# Total content should be small (summaries only)
+		# Tool results stay complete; compression is responsible for later context packing.
 		total_chars = sum(len(m["content"]) for m in ms.get_all())
-		assert total_chars < 500  # 10 short summaries
+		assert total_chars == 100000
 
 	def test_artifacts_referenced_in_messages(self):
 		ms = MessageStore()

@@ -8,7 +8,8 @@ from typing import Any
 
 from .models import DEFAULT_PROTOCOL_VERSION, MCPApplicationError, MCPTool, MCPTransport, MCPTransportError
 from .normalization import normalize_call_result, tool_from_payload
-from .transports import build_transport, timeout
+from axc_agent_engine.plugins.builtin.mcp.support.transports.base import timeout
+from axc_agent_engine.plugins.builtin.mcp.support.transports.factory import build_transport
 
 logger = logging.getLogger(__name__)
 

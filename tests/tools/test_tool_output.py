@@ -1,7 +1,8 @@
-"""Tests for ToolOutput, ArtifactRef, and ResultStore protocol."""
+"""Tests for ToolOutput, ArtifactRef, and ArtifactStore protocol."""
 import pytest
-from axc_agent_engine.tools.tool_output import ToolOutput, ArtifactRef, generate_artifact_id, ResultStore
-from axc_agent_engine.storage.result_store import InMemoryResultStore
+from axc_agent_engine.tools.tool_output import ToolOutput, ArtifactRef, generate_artifact_id
+from axc_agent_engine.storage.artifact_store import ArtifactStore
+from axc_agent_engine.storage.artifact_store import InMemoryArtifactStore
 
 
 class TestArtifactRef:
@@ -98,10 +99,10 @@ class TestToolOutput:
 		out = ToolOutput.text("short")
 		assert out.context_view() == "short"
 
-	def test_context_view_prefers_durable_summary_then_summary(self):
+	def test_context_view_prefers_durable_summary_over_llm_view_and_content(self):
 		out = ToolOutput.text("full", summary="summary").with_metadata({"durable_summary": "durable"})
 		assert out.context_view() == "durable"
-		assert ToolOutput.text("full", summary="summary").context_view() == "summary"
+		assert ToolOutput.text("full", summary="summary").context_view() == "full"
 
 	def test_context_view_prefers_explicit_llm_view_after_durable_summary(self):
 		out = ToolOutput(content={"rows": [{"id": 1}]}, content_type="json", summary="summary", llm_view="row 1")
@@ -121,16 +122,20 @@ class TestToolOutput:
 		out = ToolOutput.text(long_text, summary="summary")
 		assert out.display_view() == long_text
 
-	def test_context_view_uses_summary(self):
+	def test_context_view_does_not_use_summary_as_default_llm_content(self):
 		out = ToolOutput.text("very long " * 500, summary="brief summary")
-		assert out.context_view() == "brief summary"
+		assert out.context_view() == "very long " * 500
 
-	def test_context_view_truncates_long(self):
+	def test_context_view_does_not_truncate_by_default(self):
+		long_text = "x" * 5000
+		out = ToolOutput.text(long_text)
+		assert out.context_view() == long_text
+
+	def test_context_view_ignores_max_chars(self):
 		long_text = "x" * 5000
 		out = ToolOutput.text(long_text)
 		view = out.context_view(max_chars=200)
-		assert len(view) <= 250  # some overhead for marker
-		assert "省略" in view
+		assert view == long_text
 
 	def test_context_view_error(self):
 		out = ToolOutput.error("oops")
@@ -272,149 +277,148 @@ class TestGenerateArtifactId:
 		assert len(ids) == 100
 
 
-class TestInMemoryResultStore:
+class TestInMemoryArtifactStore:
 	@pytest.mark.asyncio
 	async def test_put_and_get(self):
-		store = InMemoryResultStore()
-		ref = await store.put("hello world")
+		store = InMemoryArtifactStore()
+		ref = await store.put_text("hello world")
 		assert ref.size == 11
-		content = await store.get(ref.id)
-		assert content == "hello world"
+		content = await store.read(ref.id)
+		assert content.content == "hello world"
 
 	@pytest.mark.asyncio
 	async def test_get_with_offset(self):
-		store = InMemoryResultStore()
-		ref = await store.put("0123456789")
-		content = await store.get(ref.id, offset=5)
-		assert content == "56789"
+		store = InMemoryArtifactStore()
+		ref = await store.put_text("0123456789")
+		content = await store.read(ref.id, offset=5)
+		assert content.content == "56789"
 
 	@pytest.mark.asyncio
 	async def test_get_with_limit(self):
-		store = InMemoryResultStore()
-		ref = await store.put("0123456789")
-		content = await store.get(ref.id, offset=0, limit=3)
-		assert content == "012"
+		store = InMemoryArtifactStore()
+		ref = await store.put_text("0123456789")
+		content = await store.read(ref.id, offset=0, limit=3)
+		assert content.content == "012"
 
 	@pytest.mark.asyncio
 	async def test_get_with_offset_and_limit(self):
-		store = InMemoryResultStore()
-		ref = await store.put("abcdefghij")
-		content = await store.get(ref.id, offset=2, limit=4)
-		assert content == "cdef"
+		store = InMemoryArtifactStore()
+		ref = await store.put_text("abcdefghij")
+		content = await store.read(ref.id, offset=2, limit=4)
+		assert content.content == "cdef"
 
 	@pytest.mark.asyncio
 	async def test_get_nonexistent(self):
-		store = InMemoryResultStore()
-		content = await store.get("nonexistent")
-		assert content == ""
+		store = InMemoryArtifactStore()
+		content = await store.read("nonexistent")
+		assert content.content == ""
 
 	@pytest.mark.asyncio
 	async def test_search_found(self):
-		store = InMemoryResultStore()
-		ref = await store.put("line1\nline2 hello\nline3\nline4 hello world")
+		store = InMemoryArtifactStore()
+		ref = await store.put_text("line1\nline2 hello\nline3\nline4 hello world")
 		results = await store.search(ref.id, "hello")
 		assert len(results) == 2
-		assert results[0]["line"] == 2
-		assert results[1]["line"] == 4
+		assert results[0].line == 2
+		assert results[1].line == 4
 
 	@pytest.mark.asyncio
 	async def test_search_not_found(self):
-		store = InMemoryResultStore()
-		ref = await store.put("nothing here")
+		store = InMemoryArtifactStore()
+		ref = await store.put_text("nothing here")
 		results = await store.search(ref.id, "xyz")
 		assert results == []
 
 	@pytest.mark.asyncio
 	async def test_search_nonexistent_artifact(self):
-		store = InMemoryResultStore()
+		store = InMemoryArtifactStore()
 		results = await store.search("nope", "query")
 		assert results == []
 
 	@pytest.mark.asyncio
 	async def test_search_case_insensitive(self):
-		store = InMemoryResultStore()
-		ref = await store.put("Hello World\nGoodbye")
+		store = InMemoryArtifactStore()
+		ref = await store.put_text("Hello World\nGoodbye")
 		results = await store.search(ref.id, "hello")
 		assert len(results) == 1
 
 	@pytest.mark.asyncio
 	async def test_search_max_results(self):
-		store = InMemoryResultStore()
+		store = InMemoryArtifactStore()
 		content = "\n".join(f"match line {i}" for i in range(50))
-		ref = await store.put(content)
+		ref = await store.put_text(content)
 		results = await store.search(ref.id, "match")
 		assert len(results) == 20  # capped at 20
 
 	@pytest.mark.asyncio
 	async def test_eviction(self):
-		store = InMemoryResultStore(max_entries=3)
+		store = InMemoryArtifactStore(max_entries=3)
 		refs = []
 		for i in range(5):
-			refs.append(await store.put(f"content_{i}"))
+			refs.append(await store.put_text(f"content_{i}"))
 		# First 2 should be evicted
-		assert await store.get(refs[0].id) == ""
-		assert await store.get(refs[1].id) == ""
-		assert await store.get(refs[4].id) == "content_4"
+		assert (await store.read(refs[0].id)).content == ""
+		assert (await store.read(refs[1].id)).content == ""
+		assert (await store.read(refs[4].id)).content == "content_4"
 
 	@pytest.mark.asyncio
 	async def test_byte_size_eviction(self):
-		store = InMemoryResultStore(max_entries=10, max_bytes=8)
-		ref1 = await store.put("12345")
-		ref2 = await store.put("67890")
-		assert await store.get(ref1.id) == ""
-		assert await store.get(ref2.id) == "67890"
-		assert store.stats()["total_bytes"] <= 8
+		store = InMemoryArtifactStore(max_entries=10, max_bytes=8)
+		ref1 = await store.put_text("12345")
+		ref2 = await store.put_text("67890")
+		assert (await store.read(ref1.id)).content == ""
+		assert (await store.read(ref2.id)).content == "67890"
+		assert store.stats()["inline_bytes"] <= 8
 
 	@pytest.mark.asyncio
 	async def test_ttl_expiry(self):
-		store = InMemoryResultStore(ttl=1)
-		ref = await store.put("short lived")
-		store._store[ref.id]["created_at"] -= 2
-		assert await store.get(ref.id) == ""
+		store = InMemoryArtifactStore(default_ttl=1)
+		ref = await store.put_text("short lived", expires_at=0)
+		assert (await store.read(ref.id)).content == ""
 		assert store.has(ref.id) is False
 
 	@pytest.mark.asyncio
 	async def test_delete(self):
-		store = InMemoryResultStore()
-		ref = await store.put("delete me")
+		store = InMemoryArtifactStore()
+		ref = await store.put_text("delete me")
 		await store.delete(ref.id)
-		assert await store.get(ref.id) == ""
+		assert (await store.read(ref.id)).content == ""
 		assert store.stats()["entries"] == 0
 
 	def test_stats(self):
-		store = InMemoryResultStore(max_entries=7, max_bytes=1024, ttl=9)
+		store = InMemoryArtifactStore(max_entries=7, max_bytes=1024, default_ttl=9)
 		stats = store.stats()
 		assert stats["entries"] == 0
 		assert stats["max_entries"] == 7
 		assert stats["max_bytes"] == 1024
-		assert stats["ttl"] == 9
+		assert stats["default_ttl"] == 9
 
 	@pytest.mark.asyncio
 	async def test_has(self):
-		store = InMemoryResultStore()
-		ref = await store.put("data")
+		store = InMemoryArtifactStore()
+		ref = await store.put_text("data")
 		assert store.has(ref.id) is True
 		assert store.has("nonexistent") is False
 
 	@pytest.mark.asyncio
 	async def test_put_bytes(self):
-		store = InMemoryResultStore()
-		ref = await store.put(b"binary data")
+		store = InMemoryArtifactStore()
+		ref = await store.put_bytes(b"binary data")
 		assert ref.kind == "binary"
-		content = await store.get(ref.id)
-		assert content == "binary data"
+		content = await store.read(ref.id)
+		assert content.content == "binary data"
 
 	@pytest.mark.asyncio
 	async def test_put_with_metadata(self):
-		store = InMemoryResultStore()
-		ref = await store.put("content", {"kind": "file", "path": "/a.txt"})
+		store = InMemoryArtifactStore()
+		ref = await store.put_text("content", {"path": "/a.txt"}, kind="file")
 		assert ref.kind == "file"
 
 	@pytest.mark.asyncio
 	async def test_protocol_compliance(self):
-		"""InMemoryResultStore satisfies ResultStore protocol."""
-		store = InMemoryResultStore()
-		assert isinstance(store, ResultStore)
+		"""InMemoryArtifactStore satisfies ArtifactStore protocol."""
+		store = InMemoryArtifactStore()
+		assert isinstance(store, ArtifactStore)
 
 
 class TestToolOutputContextViewEdgeCases:
@@ -429,7 +433,7 @@ class TestToolOutputContextViewEdgeCases:
 	def test_max_chars_zero(self):
 		out = ToolOutput.text("hello")
 		view = out.context_view(max_chars=0)
-		assert "省略" in view or view == ""
+		assert view == "hello"
 
 	def test_multiple_artifacts(self):
 		refs = [

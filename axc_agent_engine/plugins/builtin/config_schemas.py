@@ -38,11 +38,10 @@ COMPRESS_CONFIG_SCHEMA = config_schema(
 	"控制上下文窗口、摘要、召回、工具结果压缩和边界持久化。",
 	[
 		object_field("tool_result", "工具结果", "工具结果内联和外部化阈值。", [
-			config_field("max_inline_tokens", "最大内联 Token", "integer", "超过该值的工具消息会被压缩；兼容旧字段 snip_threshold。", label_en="Max inline tokens", default=1200),
 			config_field("artifact_threshold_tokens", "产物阈值 Token", "integer", "超过该值的工具输出会尝试外部化为 artifact。", label_en="Artifact threshold tokens", default=4000),
 		], label_en="Tool result"),
 		object_field("recent_window", "近期窗口", "保留最近轮次的原始上下文窗口。", [
-			config_field("rounds", "保留轮次", "integer", "最近保留的对话轮数；兼容旧字段 micro_compact_keep_recent。", label_en="Rounds", default=4),
+			config_field("rounds", "保留轮次", "integer", "最近保留的对话轮数。", label_en="Rounds", default=4),
 		], label_en="Recent window"),
 		object_field("context_window", "上下文窗口", "输入上下文打包预算。", [
 			config_field("max_input_tokens", "最大输入 Token", "integer", "打包后的最大输入 token 预算。", label_en="Max input tokens", default=24000),
@@ -50,16 +49,13 @@ COMPRESS_CONFIG_SCHEMA = config_schema(
 		], label_en="Context window"),
 		object_field("summary", "摘要", "会话摘要触发和长度控制。", [
 			config_field("enabled", "启用摘要", "boolean", "是否启用会话摘要。", label_en="Enabled", default=True),
-			config_field("after_rounds", "触发轮次", "integer", "达到该轮数后生成摘要；兼容旧字段 summary_after_rounds。", label_en="After rounds", default=8),
-			config_field("keep_recent_rounds", "摘要后保留轮次", "integer", "摘要后继续保留的最近轮次；兼容旧字段 summary_keep_recent。", label_en="Keep recent rounds", default=3),
-			config_field("max_tokens", "最大摘要 Token", "integer", "摘要最大长度；兼容旧字段 summary_max_length。", label_en="Max tokens", default=800),
-			config_field("max_failures", "最大失败次数", "integer", "摘要连续失败达到该值后熔断；兼容旧字段 max_compact_failures。", label_en="Max failures", default=3),
+			config_field("after_rounds", "触发轮次", "integer", "达到该轮数后生成摘要。", label_en="After rounds", default=8),
+			config_field("max_tokens", "摘要 Token 配置", "integer", "传入摘要提示的目标长度。", label_en="Summary token config", default=800),
+			config_field("max_failures", "最大失败次数", "integer", "摘要连续失败达到该值后熔断。", label_en="Max failures", default=3),
 		], label_en="Summary"),
 		object_field("file_restore", "文件恢复", "摘要场景下恢复最近读取文件片段。", [
 			config_field("enabled", "启用文件恢复", "boolean", "是否把最近读取文件摘要注入上下文。", label_en="Enabled", default=True),
 			config_field("max_files", "最大文件数", "integer", "最多缓存的文件数量。", label_en="Max files", default=5),
-			config_field("max_chars_per_file", "单文件最大字符", "integer", "每个文件缓存的最大字符数。", label_en="Max chars per file", default=4000),
-			config_field("max_total_chars", "总最大字符", "integer", "所有文件缓存的总字符上限。", label_en="Max total chars", default=12000),
 		], label_en="File restore"),
 		object_field("tool_summary", "工具摘要", "聚合工具观察并生成摘要。", [
 			config_field("enabled", "启用工具摘要", "boolean", "是否启用工具结果摘要。", label_en="Enabled", default=False),
@@ -220,12 +216,11 @@ OUTPUT_FORMAT_CONFIG_SCHEMA = config_schema(
 		config_field("template", "模板", "string", "输出模板文本。", label_en="Template", default=""),
 		config_field("constraints", "约束", "string", "输出必须满足的额外约束。", label_en="Constraints", default=""),
 		config_field("strict", "严格模式", "boolean", "是否严格执行输出校验。", label_en="Strict", default=False),
-		config_field("auto_repair", "自动修复", "boolean", "校验失败时是否尝试自动修复；兼容旧字段 repair。", label_en="Auto repair", default=True),
+		config_field("auto_repair", "自动修复", "boolean", "校验失败时是否尝试自动修复。", label_en="Auto repair", default=True),
 		config_field("repair_attempts", "修复次数", "integer", "自动修复最大尝试次数。", label_en="Repair attempts", default=1),
 		config_field("repair_timeout", "修复超时", "number", "单次修复超时秒数。", label_en="Repair timeout", default=30),
-		config_field("max_repair_chars", "最大修复字符", "integer", "送入修复流程的最大字符数。", label_en="Max repair chars", default=3000),
 		config_field("max_output_chars", "最大输出字符", "integer", "最终输出字符上限，0 表示不限制。", label_en="Max output chars", default=0),
-		config_field("schema_id", "Schema ID", "string", "Schema 标识；兼容旧字段 contract_name。", label_en="Schema ID", default=""),
+		config_field("schema_id", "Schema ID", "string", "Schema 标识。", label_en="Schema ID", default=""),
 		config_field("schema_version", "Schema 版本", "string", "Schema 版本。", label_en="Schema version", default=""),
 	],
 	display_name_en="Output format",
@@ -240,9 +235,6 @@ TRACING_CONFIG_SCHEMA = config_schema(
 		config_field("output", "输出", "string", "trace 输出目标。", label_en="Output", default="log", enum=["log", "store", "callback", "exporter"]),
 		config_field("include_arguments", "包含参数", "boolean", "span 中是否记录工具参数。", label_en="Include arguments", default=False),
 		config_field("include_result", "包含结果", "boolean", "span 中是否记录工具结果。", label_en="Include result", default=False),
-		config_field("max_argument_length", "参数最大长度", "integer", "单个参数记录最大长度。", label_en="Max argument length", default=2000),
-		config_field("max_result_length", "结果最大长度", "integer", "结果记录最大长度。", label_en="Max result length", default=200),
-		config_field("max_error_length", "错误最大长度", "integer", "错误记录最大长度。", label_en="Max error length", default=2000),
 		config_field("sample_rate", "采样率", "number", "trace 采样率，范围 0 到 1。", label_en="Sample rate", default=1.0),
 		config_field("sample_errors", "采样错误", "boolean", "是否强制采样错误 span。", label_en="Sample errors", default=True),
 		config_field("slow_span_ms", "慢 Span 阈值", "integer", "达到该耗时毫秒数的 span 会被采样，0 表示关闭。", label_en="Slow span ms", default=0),
@@ -270,7 +262,6 @@ REFLEXION_CONFIG_SCHEMA = config_schema(
 	"每轮后基于工具调用进行自我反思。",
 	[
 		config_field("start_after_round", "开始轮次", "integer", "从该轮次后开始反思。", label_en="Start after round", default=3),
-		config_field("max_reflection_len", "最大反思长度", "integer", "保留的反思文本最大长度。", label_en="Max reflection length", default=200),
 	],
 	display_name_en="Reflexion",
 )
@@ -382,8 +373,6 @@ SKILL_CONFIG_SCHEMA = config_schema(
 		array_field("allowed_extensions", "允许扩展名", "允许执行的脚本扩展名。", _string_item(), label_en="Allowed extensions", default=[".py", ".sh"]),
 		config_field("duplicate_policy", "重复策略", "string", "遇到重复技能名时的处理策略。", label_en="Duplicate policy", default="error", enum=["skip", "replace", "error"]),
 		config_field("timeout", "脚本超时", "integer", "脚本执行超时秒数。", label_en="Timeout", default=60),
-		config_field("stdout_limit", "标准输出上限", "integer", "脚本 stdout 捕获字符上限。", label_en="Stdout limit", default=1500),
-		config_field("stderr_limit", "标准错误上限", "integer", "脚本 stderr 捕获字符上限。", label_en="Stderr limit", default=500),
 		config_field("max_skill_content_chars", "技能内容上限", "integer", "单个技能说明内容最大字符数。", label_en="Max skill content chars", default=100_000),
 		config_field("max_result_bytes", "最大结果字节", "integer", "超过该字节数的脚本结果会尝试外部化。", label_en="Max result bytes", default=256_000),
 	],

@@ -17,4 +17,6 @@ async def test_plan_checkpoint_roundtrip():
 	assert restored.goal == "ship"
 	assert restored.steps[0].status == StepStatus.RUNNING
 	assert checkpoint.state["phase"] == "step_start"
+	assert "plan" not in checkpoint.state
+	assert "current_step_id" not in checkpoint.state
 	assert checkpoint.metadata["phase"] == "step_start"

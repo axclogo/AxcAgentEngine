@@ -19,6 +19,7 @@ from axc_agent_engine.plugins import PluginContext
 from axc_agent_engine.plugins.builtin.tracing.plugin import TracingPlugin
 from axc_agent_engine.tools.registry import ToolRegistry
 from axc_agent_engine.tools.tool_output import ToolOutput
+from axc_agent_engine.workflow.state import resume_snapshot_from_checkpoint
 
 
 def _provider(responses: list[dict]):
@@ -197,14 +198,14 @@ def test_executor_restores_checkpoint_state():
 		run_id="resume-run",
 		sequence=2,
 		state={
-			"current_round": 2,
+			"cursor": {"current_round": 2},
 			"messages": [{"role": "system", "content": "s"}, {"role": "user", "content": "u"}],
-			"input_tokens": 11,
-			"output_tokens": 7,
+			"usage": {"input_tokens": 11, "output_tokens": 7},
+			"metadata": {},
 		},
 	)
 
-	executor.load_resume_snapshot(checkpoint.run_id, checkpoint.state)
+	executor.load_resume_snapshot(checkpoint.run_id, resume_snapshot_from_checkpoint(checkpoint))
 
 	assert ctx.state.metadata["run_id"] == "resume-run"
 	assert ctx.state.current_round == 2
@@ -232,14 +233,13 @@ async def test_executor_continues_from_restored_checkpoint_without_reinitializin
 		run_id="resume-run-stream",
 		sequence=3,
 		state={
-			"current_round": 2,
+			"cursor": {"current_round": 2},
 			"messages": messages,
-			"input_tokens": 11,
-			"output_tokens": 7,
+			"usage": {"input_tokens": 11, "output_tokens": 7},
 			"metadata": {"session_id": "session-a", "agent_name": "agent-a"},
 		},
 	)
-	executor.load_resume_snapshot(checkpoint.run_id, checkpoint.state)
+	executor.load_resume_snapshot(checkpoint.run_id, resume_snapshot_from_checkpoint(checkpoint))
 
 	events = []
 	async for event in executor.run_stream("new user input should not be appended during resume"):
@@ -251,7 +251,8 @@ async def test_executor_continues_from_restored_checkpoint_without_reinitializin
 	assert ctx.state.metadata["session_id"] == "session-a"
 	assert ctx.state.metadata["agent_name"] == "agent-a"
 	checkpoints = await store.list("resume-run-stream")
-	assert checkpoints[0].state["current_round"] == 2
+	assert checkpoints[0].state["cursor"]["current_round"] == 2
+	assert "current_round" not in checkpoints[0].state
 	assert checkpoints[-1].status == CheckpointStatus.COMPLETED
 
 
@@ -403,8 +404,9 @@ async def test_agent_resume_stream_restores_latest_execution_checkpoint():
 		kind="round",
 		status=CheckpointStatus.INTERRUPTED,
 		state={
-			"current_round": 2,
+			"cursor": {"current_round": 2},
 			"messages": messages,
+			"usage": {"input_tokens": 0, "output_tokens": 0},
 			"metadata": {"session_id": "s1", "agent_name": "agent"},
 		},
 	))

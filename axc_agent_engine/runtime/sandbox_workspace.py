@@ -41,8 +41,6 @@ class WorkspaceCommandExecutor:
 			timeout=spec.timeout,
 			env=dict(spec.env),
 			use_shell=spec.use_shell,
-			stdout_limit=spec.stdout_limit,
-			stderr_limit=spec.stderr_limit,
 		))
 		await asyncio.to_thread(self._write_log, spec, result, cwd)
 		return result

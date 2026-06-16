@@ -50,4 +50,4 @@ def clean_text(value: Any, max_length: int) -> str:
 	text = str(value or "").strip()
 	if max_length <= 0:
 		return ""
-	return text[:max_length]
+	return text

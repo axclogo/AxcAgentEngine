@@ -23,7 +23,6 @@ from axc_agent_engine.plugins.builtin.tracing.plugin import (
 	_strict_float,
 	_strict_int,
 	_trace_summary,
-	_truncate,
 )
 from axc_agent_engine.storage.in_memory import InMemorySpanStore
 from axc_agent_engine.tools.orchestrator import execute_tool_calls
@@ -190,7 +189,6 @@ async def test_tracing_redacts_arguments_and_results():
 		"output": "callback",
 		"include_arguments": True,
 		"include_result": True,
-		"max_result_length": 4,
 	})
 	p.set_callback(spans.append)
 	reg = ToolRegistry()
@@ -307,6 +305,10 @@ async def test_tracing_span_store_query_and_status_tools():
 	assert trace.content["summary"]["span_count"] == 1
 	assert status.content["stats"]["stored"] == 1
 	assert listed.content["count"] == 1
+	assert trace_id in trace.context_view()
+	assert "Spans: 1" in trace.context_view()
+	assert trace_id in listed.context_view()
+	assert "list_traces（1 项）" in listed.context_view()
 
 
 @pytest.mark.asyncio
@@ -395,7 +397,6 @@ async def test_tracing_drops_when_queue_full_and_without_running_loop():
 
 
 def test_tracing_helpers_and_logging(caplog):
-	assert _truncate("abcdef", 3) == "abc...[省略 3 个字符]"
 	assert _sampled("trace", 1.0)
 	assert not _sampled("trace", 0.0)
 	sampler = TraceSampler(0.0, sample_errors=False, slow_span_ms=10)
@@ -407,9 +408,9 @@ def test_tracing_helpers_and_logging(caplog):
 	]) == {"span_count": 2, "errors": 1, "tool_calls": 1, "llm_calls": 1, "duration_ms": 5}
 
 	envelope = ErrorEnvelope(code="x", message="m")
-	assert _error_payload(envelope, 10)["code"] == "x"
-	assert _error_payload(RuntimeError("boom"), 10)["details"]["class"] == "RuntimeError"
-	assert _error_payload("tool bad", 10, code="tool")["category"] == "tool"
+	assert _error_payload(envelope)["code"] == "x"
+	assert _error_payload(RuntimeError("boom"))["details"]["class"] == "RuntimeError"
+	assert _error_payload("tool bad", code="tool")["category"] == "tool"
 
 	with caplog.at_level(logging.INFO):
 		for span in [
@@ -578,11 +579,11 @@ def test_tracing_schedule_without_running_loop_closes_coroutine_and_counts_drop(
 @pytest.mark.asyncio
 async def test_tracing_redaction_metadata_bounds_and_resource_helpers():
 	stats = {"redacted": 0}
-	redaction = RedactionService({"secret"}, 3, stats)
+	redaction = RedactionService({"secret"}, stats)
 	value = redaction.redact({"secret": "x", "nested": [{"text": "abcdef"}], "plain": object()})
 
 	assert value["secret"] == "[REDACTED]"
-	assert value["nested"][0]["text"] == "abc...[省略 3 个字符]"
+	assert value["nested"][0]["text"] == "abcdef"
 	assert stats["redacted"] == 1
 	assert isinstance(value["plain"], object)
 	assert _span_metadata({"a": object(), "b": (1, {"x": object()})})["b"][1]["x"].startswith("<object")

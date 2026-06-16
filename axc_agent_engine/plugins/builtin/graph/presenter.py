@@ -3,7 +3,7 @@
 import json
 import logging
 
-from axc_agent_engine.plugins.builtin.common import externalize_text, result_store_from_context
+from axc_agent_engine.plugins.builtin.common import externalize_text, artifact_store_from_context
 
 from .config import GraphConfig
 
@@ -18,7 +18,7 @@ class GraphPresenter:
 	async def json_output(self, payload: dict, context: dict, summary: str, kind: str):
 		from axc_agent_engine.tools.tool_output import ToolOutput
 		encoded = json.dumps(payload, ensure_ascii=False, default=str)
-		store = result_store_from_context(context, self._plugin_ctx)
+		store = artifact_store_from_context(context, self._plugin_ctx)
 		content, ref = await externalize_text(
 			encoded,
 			store,
@@ -51,7 +51,7 @@ def _graph_llm_view(payload: dict, kind: str, summary: str) -> str:
 	relations = payload.get("relations")
 	if isinstance(entities, list):
 		lines.append(f"Entities: {len(entities)}")
-		for index, entity in enumerate(entities[:10], start=1):
+		for index, entity in enumerate(entities, start=1):
 			if not isinstance(entity, dict):
 				continue
 			name = entity.get("name", entity.get("id", ""))
@@ -65,7 +65,7 @@ def _graph_llm_view(payload: dict, kind: str, summary: str) -> str:
 				lines.append(f"   {description}")
 	if isinstance(relations, list):
 		lines.append(f"Relations: {len(relations)}")
-		for index, relation in enumerate(relations[:10], start=1):
+		for index, relation in enumerate(relations, start=1):
 			if not isinstance(relation, dict):
 				continue
 			source = relation.get("source", relation.get("source_id", ""))

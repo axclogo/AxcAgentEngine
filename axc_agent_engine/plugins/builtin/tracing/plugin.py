@@ -16,7 +16,7 @@ from axc_agent_engine.plugins.builtin.config_schemas import TRACING_CONFIG_SCHEM
 
 if TYPE_CHECKING:
 	from axc_agent_engine.core.context import ExecutionContext
-	from axc_agent_engine.plugins import PluginContext
+	from axc_agent_engine.plugins.context import PluginContext
 	from axc_agent_engine.tools.tool_output import ToolOutput
 
 logger = logging.getLogger(__name__)
@@ -33,13 +33,12 @@ _DEFAULT_REDACT_KEYS = {
 
 
 class RedactionService:
-	def __init__(self, redact_keys: set[str], max_argument_length: int, stats: dict[str, int]) -> None:
+	def __init__(self, redact_keys: set[str], stats: dict[str, int]) -> None:
 		self.redact_keys = redact_keys
-		self.max_argument_length = max_argument_length
 		self.stats = stats
 
 	def redact(self, value: Any) -> Any:
-		return _redact(value, self.redact_keys, self.max_argument_length, self.stats)
+		return _redact(value, self.redact_keys, self.stats)
 
 
 class TraceSampler:
@@ -162,9 +161,6 @@ class TracingPlugin(BasePlugin):
 		self._output = str(config.get("output", "log"))
 		self._include_args = bool(config.get("include_arguments", False))
 		self._include_result = bool(config.get("include_result", False))
-		self._max_argument_length = _strict_int(config.get("max_argument_length", 2000), 1, 200_000, "tracing.max_argument_length")
-		self._max_result_len = _strict_int(config.get("max_result_length", 200), 1, 200_000, "tracing.max_result_length")
-		self._max_error_length = _strict_int(config.get("max_error_length", 2000), 1, 200_000, "tracing.max_error_length")
 		self._sample_rate = _strict_float(config.get("sample_rate", 1.0), 0.0, 1.0, "tracing.sample_rate")
 		self._sample_errors = bool(config.get("sample_errors", True))
 		self._slow_span_ms = _strict_int(config.get("slow_span_ms", 0), 0, 3_600_000, "tracing.slow_span_ms")
@@ -180,7 +176,7 @@ class TracingPlugin(BasePlugin):
 		self._pending_tasks: set[asyncio.Task] = set()
 		self._task_errors: list[BaseException] = []
 		self._stats: dict[str, int] = {"emitted": 0, "stored": 0, "dropped": 0, "failed": 0, "redacted": 0}
-		self._redaction = RedactionService(self._redact_keys, self._max_argument_length, self._stats)
+		self._redaction = RedactionService(self._redact_keys, self._stats)
 		self._sampler = TraceSampler(self._sample_rate, self._sample_errors, self._slow_span_ms)
 		self._span_factory = SpanFactory()
 		self._span_emitter = SpanEmitter(self)
@@ -270,8 +266,8 @@ class TracingPlugin(BasePlugin):
 			return
 		cancelled = bool(exec_ctx.state.cancelled)
 		error_payload = (
-			_error_payload(exec_ctx.state.cancel_reason or error or "cancelled", self._max_error_length, code="execution.cancelled")
-			if cancelled else (_error_payload(error, self._max_error_length) if error else {})
+			_error_payload(exec_ctx.state.cancel_reason or error or "cancelled", code="execution.cancelled")
+			if cancelled else (_error_payload(error) if error else {})
 		)
 		self._finish_span(
 			exec_ctx,
@@ -342,7 +338,7 @@ class TracingPlugin(BasePlugin):
 			state,
 			span,
 			success=False,
-			error=_error_payload(error, self._max_error_length),
+			error=_error_payload(error),
 			force_sample=True,
 		)
 
@@ -380,7 +376,7 @@ class TracingPlugin(BasePlugin):
 		result_str = result.context_view() if result else ""
 		success = not result.is_error if result else True
 		error = (
-			_error_payload(result_str, self._max_error_length, code="tool.output_error")
+			_error_payload(result_str, code="tool.output_error")
 			if result and result.is_error else {}
 		)
 		extra = {
@@ -389,7 +385,7 @@ class TracingPlugin(BasePlugin):
 			"artifact_count": len(getattr(result, "artifacts", []) or []),
 		}
 		if self._include_result:
-			extra["result"] = _truncate(result_str, self._max_result_len)
+			extra["result"] = result_str
 		if span:
 			self._finish_span(
 				exec_ctx,
@@ -407,7 +403,7 @@ class TracingPlugin(BasePlugin):
 				"tool_name": tool_name,
 				"tool_call_id": tool_call_id,
 				"arguments": self._redaction.redact(arguments),
-				"result_preview": _truncate(result_str, 500),
+				"result": result_str,
 				"duration_ms": duration_ms,
 				"session_id": exec_ctx.state.metadata.get("session_id", ""),
 				"trace_id": state["trace_id"],
@@ -431,7 +427,7 @@ class TracingPlugin(BasePlugin):
 				duration_ms=duration_ms,
 				success=False,
 				extra={"tool_call_id": tool_call_id},
-				error=error or _error_payload("tool call failed", self._max_error_length, code="tool.execution_failed"),
+				error=error or _error_payload("tool call failed", code="tool.execution_failed"),
 				force_sample=True,
 			)
 
@@ -476,7 +472,7 @@ class TracingPlugin(BasePlugin):
 			"spans": spans,
 			"count": len(spans),
 			"summary": _trace_summary(spans),
-		}, summary=f"trace {trace_id}: {len(spans)} spans")
+		}, summary=f"trace {trace_id}: {len(spans)} spans", llm_view=_trace_llm_view(trace_id, spans))
 
 	async def _tool_list_traces(self, args: dict, context: dict):
 		from axc_agent_engine.tools.tool_output import ToolOutput
@@ -503,7 +499,7 @@ class TracingPlugin(BasePlugin):
 			item["start_time"] = min(item["start_time"], span.get("start_time", item["start_time"]))
 			item["last_time"] = max(item["last_time"], span.get("end_time", span.get("start_time", item["last_time"])))
 		traces = sorted(by_trace.values(), key=lambda item: item["last_time"], reverse=True)[:limit]
-		return ToolOutput.json_output({"traces": traces, "count": len(traces)}, summary=f"找到 {len(traces)} 条 trace")
+		return ToolOutput.json_output({"traces": traces, "count": len(traces)}, summary=f"找到 {len(traces)} 条 trace", llm_view=_trace_list_llm_view(traces))
 
 	def _new_span(self, exec_ctx: "ExecutionContext", state: dict[str, Any], span_type: str, name: str,
 				  parent_span_id: str | None = "", extra: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -634,7 +630,7 @@ def _sampled(trace_id: str, sample_rate: float) -> bool:
 	return value <= sample_rate
 
 
-def _redact(value: Any, redact_keys: set[str], max_length: int, stats: dict[str, int]) -> Any:
+def _redact(value: Any, redact_keys: set[str], stats: dict[str, int]) -> Any:
 	if isinstance(value, dict):
 		redacted = {}
 		for key, item in value.items():
@@ -642,37 +638,29 @@ def _redact(value: Any, redact_keys: set[str], max_length: int, stats: dict[str,
 				redacted[key] = "[REDACTED]"
 				stats["redacted"] += 1
 			else:
-				redacted[key] = _redact(item, redact_keys, max_length, stats)
+				redacted[key] = _redact(item, redact_keys, stats)
 		return redacted
 	if isinstance(value, list):
-		return [_redact(item, redact_keys, max_length, stats) for item in value[:100]]
+		return [_redact(item, redact_keys, stats) for item in value]
 	if isinstance(value, str):
-		return _truncate(value, max_length)
+		return value
 	return value
 
 
-def _truncate(value: Any, max_length: int) -> str:
-	text = str(value)
-	if len(text) <= max_length:
-		return text
-	omitted = len(text) - max_length
-	return f"{text[:max_length]}...[省略 {omitted} 个字符]"
-
-
-def _error_payload(error: Any, max_length: int, code: str = "trace.error") -> dict[str, Any]:
+def _error_payload(error: Any, code: str = "trace.error") -> dict[str, Any]:
 	if isinstance(error, ErrorEnvelope):
 		return error.to_dict()
 	if isinstance(error, Exception):
 		return ErrorEnvelope(
 			code=code,
-			message=_truncate(str(error), max_length),
+			message=str(error),
 			category=ErrorCategory.INTERNAL,
 			retryable=False,
 			details={"class": error.__class__.__name__},
 		).to_dict()
 	return ErrorEnvelope(
 		code=code,
-		message=_truncate(str(error), max_length),
+		message=str(error),
 		category=ErrorCategory.TOOL,
 		retryable=False,
 	).to_dict()
@@ -686,6 +674,38 @@ def _trace_summary(spans: list[dict[str, Any]]) -> dict[str, Any]:
 		"llm_calls": sum(1 for span in spans if span.get("type") == "llm_call"),
 		"duration_ms": max([span.get("duration_ms", 0) for span in spans], default=0),
 	}
+
+
+def _trace_llm_view(trace_id: str, spans: list[dict[str, Any]]) -> str:
+	lines = [f"Trace {trace_id}", f"Spans: {len(spans)}"]
+	if not spans:
+		lines.append("（无 span）")
+		return "\n".join(lines)
+	for index, span in enumerate(spans, start=1):
+		lines.append(
+			f"{index}. {span.get('span_id', '')} {span.get('type', '')}:{span.get('name', '')} "
+			f"status={span.get('status', '')} success={span.get('success', '')} duration_ms={span.get('duration_ms', '')}"
+		)
+		parent = span.get("parent_span_id")
+		if parent:
+			lines.append(f"   parent_span_id: {parent}")
+		if span.get("error"):
+			lines.append(f"   error: {span['error']}")
+	return "\n".join(lines)
+
+
+def _trace_list_llm_view(traces: list[dict[str, Any]]) -> str:
+	lines = [f"list_traces（{len(traces)} 项）"]
+	if not traces:
+		lines.append("（无 trace）")
+		return "\n".join(lines)
+	for index, trace in enumerate(traces, start=1):
+		lines.append(
+			f"{index}. trace_id={trace.get('trace_id', '')} session_id={trace.get('session_id', '')} "
+			f"agent={trace.get('agent_name', '')} spans={trace.get('span_count', 0)} errors={trace.get('errors', 0)} "
+			f"start_time={trace.get('start_time', '')} last_time={trace.get('last_time', '')}"
+		)
+	return "\n".join(lines)
 
 
 def _bounded_int(value: Any, minimum: int, maximum: int) -> int:

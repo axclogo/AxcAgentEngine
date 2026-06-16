@@ -1,33 +1,10 @@
-"""MCP transport factory.
-中文：此文档说明相关引擎组件的行为。"""
-from typing import Any
-
-from axc_agent_engine.plugins.builtin.mcp.support.models import MCPTransport
+"""MCP transport public exports.
+中文：MCP 传输公开导出。"""
 from axc_agent_engine.plugins.builtin.mcp.support.transports.base import timeout
+from axc_agent_engine.plugins.builtin.mcp.support.transports.factory import build_transport
 from axc_agent_engine.plugins.builtin.mcp.support.transports.http import JsonRpcHttpTransport
 from axc_agent_engine.plugins.builtin.mcp.support.transports.sdk import OfficialSDKTransport
 from axc_agent_engine.plugins.builtin.mcp.support.transports.stdio import JsonRpcStdioTransport
-
-
-def build_transport(config: dict[str, Any]) -> MCPTransport:
-	transport = config.get("transport", "")
-	if config.get("use_sdk", True) and OfficialSDKTransport.available(config):
-		return OfficialSDKTransport(config)
-	if transport in {"stdio", "command"} or "command" in config:
-		return JsonRpcStdioTransport(
-			config.get("command", ""),
-			config.get("args", []),
-			cwd=config.get("cwd", ""),
-			env=config.get("env"),
-			close_timeout=timeout(config, "close_timeout", 5.0),
-		)
-	if transport in {"http", "streamable_http", "sse"} or "url" in config:
-		return JsonRpcHttpTransport(
-			config.get("url", ""),
-			headers=config.get("headers"),
-			timeout=timeout(config, "timeout", 60.0),
-		)
-	raise ValueError("MCP server config requires command or url")
 
 
 __all__ = [

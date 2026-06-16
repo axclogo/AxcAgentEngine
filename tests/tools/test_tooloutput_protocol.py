@@ -1,41 +1,58 @@
 """Tests for ToolOutput protocol enforcement across the system."""
 import pytest
-from axc_agent_engine.tools.tool_output import ToolOutput, ArtifactRef, ResultStore
-from axc_agent_engine.storage.result_store import InMemoryResultStore
-from axc_agent_engine.storage.protocols import ResultStore as ProtocolResultStore
+from axc_agent_engine.tools.tool_output import ToolOutput, ArtifactRef
+from axc_agent_engine.storage.artifact_store import ArtifactStore
+from axc_agent_engine.storage.artifact_store import InMemoryArtifactStore
+from axc_agent_engine.storage.protocols import ArtifactStore as ProtocolArtifactStore
 from axc_agent_engine.tools.executor import ToolResult
 
 
-class TestResultStoreProtocol:
+class TestArtifactStoreProtocol:
 	def test_inmemory_implements_protocol(self):
-		store = InMemoryResultStore()
-		assert isinstance(store, ResultStore)
+		store = InMemoryArtifactStore()
+		assert isinstance(store, ArtifactStore)
 
 	def test_inmemory_implements_storage_protocol(self):
-		store = InMemoryResultStore()
-		assert isinstance(store, ProtocolResultStore)
+		store = InMemoryArtifactStore()
+		assert isinstance(store, ProtocolArtifactStore)
 
 	@pytest.mark.asyncio
 	async def test_custom_store_protocol(self):
-		"""Custom ResultStore implementation works."""
+		"""Custom ArtifactStore implementation works."""
 		class CustomStore:
 			def __init__(self):
 				self._data = {}
-			async def put(self, content, metadata=None):
+			async def put_text(self, content, metadata=None, *, kind="text", run_id="", durable=False, expires_at=None):
 				ref = ArtifactRef(id="custom1", kind="text", size=len(content))
 				self._data["custom1"] = content
 				return ref
-			async def get(self, artifact_id, offset=0, limit=4000):
-				return self._data.get(artifact_id, "")[offset:offset+limit]
-			async def search(self, artifact_id, query):
+			async def put_bytes(self, content, metadata=None, *, kind="binary", run_id="", durable=False, expires_at=None):
+				return ArtifactRef(id="custom-bytes", kind=kind, size=len(content))
+			async def put_file_ref(self, path, metadata=None, *, kind="file", run_id="", durable=False, expires_at=None):
+				return ArtifactRef(id="custom-file", kind=kind, size=0)
+			async def read(self, artifact_id, offset=0, limit=4000):
+				from axc_agent_engine.storage.artifact_store import ArtifactRead
+				content = self._data.get(artifact_id, "")[offset:offset+limit]
+				return ArtifactRead(content=content, artifact_id=artifact_id, offset=offset, limit=limit, size=len(content))
+			async def read_page(self, artifact_id, page=1, page_size=4000):
+				return await self.read(artifact_id, (page - 1) * page_size, page_size)
+			async def search(self, artifact_id, query, max_results=20):
 				return []
+			async def stat(self, artifact_id):
+				return ArtifactRef(id=artifact_id, kind="text", size=len(self._data.get(artifact_id, "")))
+			async def delete(self, artifact_id):
+				self._data.pop(artifact_id, None)
+			async def delete_run(self, run_id):
+				return None
+			async def gc(self, now=None):
+				return {"deleted": 0}
 
 		store = CustomStore()
-		assert isinstance(store, ResultStore)
-		ref = await store.put("test content")
+		assert isinstance(store, ArtifactStore)
+		ref = await store.put_text("test content")
 		assert ref.id == "custom1"
-		content = await store.get("custom1")
-		assert content == "test content"
+		content = await store.read("custom1")
+		assert content.content == "test content"
 
 
 def test_tool_result_copies_mutable_arguments_and_output():
@@ -116,7 +133,7 @@ class TestToolOutputSerialization:
 
 	def test_error_context_view_and_from_dict_defaults(self):
 		out = ToolOutput.error("boom" * 100)
-		assert out.context_view(max_chars=8) == "[错误] boomboom"
+		assert out.context_view(max_chars=8) == "[错误] " + "boom" * 100
 		restored = ToolOutput.from_dict({"content": "x"})
 		assert restored.content_type == "text"
 		assert restored.artifacts == []
@@ -199,23 +216,23 @@ class TestAllBuiltinToolsReturnToolOutput:
 		assert result.is_error
 
 	@pytest.mark.asyncio
-	async def test_result_read_no_store(self):
-		from axc_agent_engine.plugins.builtin.builtin_tools.tool_definitions import _result_read
-		result = await _result_read({"artifact_id": "x"}, {})
+	async def test_artifact_read_no_store(self):
+		from axc_agent_engine.plugins.builtin.builtin_tools.tool_definitions import _artifact_read
+		result = await _artifact_read({"artifact_id": "x"}, {})
 		assert isinstance(result, ToolOutput)
 		assert result.is_error
 
 	@pytest.mark.asyncio
-	async def test_result_search_no_store(self):
-		from axc_agent_engine.plugins.builtin.builtin_tools.tool_definitions import _result_search
-		result = await _result_search({"artifact_id": "x", "query": "q"}, {})
+	async def test_artifact_search_no_store(self):
+		from axc_agent_engine.plugins.builtin.builtin_tools.tool_definitions import _artifact_search
+		result = await _artifact_search({"artifact_id": "x", "query": "q"}, {})
 		assert isinstance(result, ToolOutput)
 		assert result.is_error
 
 	@pytest.mark.asyncio
-	async def test_result_page_no_store(self):
-		from axc_agent_engine.plugins.builtin.builtin_tools.tool_definitions import _result_page
-		result = await _result_page({"artifact_id": "x"}, {})
+	async def test_artifact_page_no_store(self):
+		from axc_agent_engine.plugins.builtin.builtin_tools.tool_definitions import _artifact_page
+		result = await _artifact_page({"artifact_id": "x"}, {})
 		assert isinstance(result, ToolOutput)
 		assert result.is_error
 
@@ -232,7 +249,7 @@ class TestContextViewDoesNotCallLLM:
 	def test_context_view_with_summary_is_instant(self):
 		out = ToolOutput.text("x" * 100000, summary="short")
 		view = out.context_view()
-		assert view == "short"
+		assert view == "x" * 100000
 
 	def test_context_view_json_is_deterministic(self):
 		data = {"items": list(range(1000))}

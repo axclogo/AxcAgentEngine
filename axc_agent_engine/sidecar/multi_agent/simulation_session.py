@@ -35,8 +35,8 @@ class SchedulerActorSelector:
 	def record(self, step: SimulationStep) -> None:
 		"""English: Bilingual documentation follows.
 中文：以下为双语文档说明。
-把已应用动作记录到 SharedContext，以兼容 scheduler。
-		Record applied actions into SharedContext for scheduler compatibility.
+把已应用动作记录到 SharedContext，供 scheduler 选择下一步。
+		Record applied actions into SharedContext so schedulers can select the next actor.
 		"""
 		self._shared.add_message(
 			step.actor,

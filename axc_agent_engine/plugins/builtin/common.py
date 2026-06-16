@@ -50,16 +50,16 @@ def exec_ctx_from_tool_context(context: dict) -> Any:
 	return context.get("exec_ctx") if isinstance(context, dict) else None
 
 
-def result_store_from_context(context: dict, plugin_ctx: Any = None) -> Any:
+def artifact_store_from_context(context: dict, plugin_ctx: Any = None) -> Any:
 	"""English: Bilingual documentation follows.
 中文：以下为双语文档说明。
-优先从工具上下文获取 ResultStore，否则回退到 PluginContext。
+优先从工具上下文获取 ArtifactStore，否则回退到 PluginContext。
 
-	English: Resolve ResultStore from tool context first, then PluginContext.
+	English: Resolve ArtifactStore from tool context first, then PluginContext.
 	"""
-	if isinstance(context, dict) and context.get("result_store"):
-		return context["result_store"]
-	return getattr(plugin_ctx, "result_store", None)
+	if isinstance(context, dict) and context.get("artifact_store"):
+		return context["artifact_store"]
+	return getattr(plugin_ctx, "artifact_store", None)
 
 
 def agent_event_callback(exec_ctx: Any):
@@ -77,7 +77,7 @@ def agent_event_callback(exec_ctx: Any):
 
 async def externalize_text(
 	content: Any,
-	result_store: Any,
+	artifact_store: Any,
 	threshold_bytes: int,
 	metadata: dict[str, Any],
 	logger: logging.Logger,
@@ -86,16 +86,13 @@ async def externalize_text(
 ) -> tuple[Any, Any]:
 	"""English: Bilingual documentation follows.
 中文：以下为双语文档说明。
-把超阈值文本外置到 ResultStore。
+把超阈值文本外置到 ArtifactStore。
 
-	English: Externalize oversized text into ResultStore and return (payload, artifact_ref).
+	English: Externalize oversized text into ArtifactStore and return (payload, artifact_ref).
 	"""
 	text = str(content)
 	size = len(text.encode("utf-8"))
-	if not result_store or size <= threshold_bytes:
+	if not artifact_store or size <= threshold_bytes:
 		return content, None
-	ref = await result_store.put(text, metadata=metadata)
-	payload = {"artifact_id": ref.id, "size": ref.size, "truncated": True}
-	if preview_chars > 0:
-		payload["preview"] = text[:preview_chars]
-	return payload, ref
+	ref = await artifact_store.put_text(text, metadata=metadata, kind=str(metadata.get("kind") or "text"))
+	return {"artifact_id": ref.id, "size": ref.size, "externalized": True}, ref

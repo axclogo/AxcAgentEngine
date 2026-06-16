@@ -83,7 +83,6 @@ class ToolCallFlow:
 					artifact_refs,
 					metadata={
 						"context_view": context_content,
-						"display_truncated": False,
 					},
 				)
 				event.metadata["duration_ms"] = result.duration_ms

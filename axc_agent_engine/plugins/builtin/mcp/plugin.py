@@ -7,14 +7,14 @@ import time
 from typing import Any, TYPE_CHECKING
 
 from axc_agent_engine.plugins.base import BasePlugin
-from axc_agent_engine.plugins.builtin.common import bounded_int, externalize_text, result_store_from_context, strict_bounded_int
+from axc_agent_engine.plugins.builtin.common import bounded_int, externalize_text, artifact_store_from_context, strict_bounded_int
 from axc_agent_engine.plugins.builtin.config_schemas import MCP_CONFIG_SCHEMA
 from axc_agent_engine.plugins.builtin.mcp.support import MCPConnection, MCPTool
 from axc_agent_engine.core.schema import ToolDefinition
 
 if TYPE_CHECKING:
 	from axc_agent_engine.core.context import ExecutionContext
-	from axc_agent_engine.plugins import PluginContext
+	from axc_agent_engine.plugins.context import PluginContext
 
 logger = logging.getLogger(__name__)
 
@@ -102,7 +102,7 @@ class MCPOutputPresenter:
 		plugin = self.plugin
 		content, ref = await externalize_text(
 			output._content_as_str(),
-			result_store_from_context(context),
+			artifact_store_from_context(context),
 			plugin._max_result_bytes,
 			{"source": "mcp", "content_type": output.content_type},
 			logger,

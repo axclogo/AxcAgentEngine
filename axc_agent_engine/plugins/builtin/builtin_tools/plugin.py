@@ -7,8 +7,8 @@ from axc_agent_engine.plugins.base import BasePlugin
 from axc_agent_engine.plugins.builtin.config_schemas import BUILTIN_TOOLS_CONFIG_SCHEMA
 from axc_agent_engine.tools.tool_output import ToolOutput
 
-from .registry import ALL_TOOLS as _ALL_TOOLS
-from .registry import DEFAULT_TOOLS as _DEFAULT_TOOLS
+from .registry import DEFAULT_TOOL_NAMES
+from .tool_definitions import builtin_tool_definitions
 
 if TYPE_CHECKING:
 	from axc_agent_engine.core.context import ExecutionContext
@@ -25,6 +25,9 @@ class BuiltinToolsPlugin(BasePlugin):
 		self._load: list[str] = config.get("load", [])
 		self._defer: list[str] = config.get("defer", [])
 		self._plugin_ctx: Any = plugin_ctx
+		self._tools = builtin_tool_definitions()
+		_validate_tool_names(self._load, self._tools, "builtin_tools.load")
+		_validate_tool_names(self._defer, self._tools, "builtin_tools.defer")
 
 	def _active_deferred_for(self, exec_ctx: "ExecutionContext") -> set[str]:
 		"""Return the currently active deferred tool names for this execution.
@@ -43,24 +46,23 @@ class BuiltinToolsPlugin(BasePlugin):
 
 	def get_tools(self) -> list[ToolDefinition]:
 		tools: list[ToolDefinition] = []
-		names_to_load = self._load if self._load else _DEFAULT_TOOLS
+		names_to_load = self._load if self._load else list(DEFAULT_TOOL_NAMES)
 		for name in names_to_load:
-			if name in _ALL_TOOLS:
-				tool = _ALL_TOOLS[name]
-				if name in self._defer:
-					tools.append(ToolDefinition(
-						name=tool.name,
-						description=tool.description,
-						parameters=tool.parameters,
-						execute=tool.execute,
-						is_read_only=tool.is_read_only,
-						timeout=tool.timeout,
-						deferred=True,
-						capability=tool.capability,
-						risk_level=tool.risk_level,
-					))
-				else:
-					tools.append(tool)
+			tool = self._tools[name]
+			if name in self._defer:
+				tools.append(ToolDefinition(
+					name=tool.name,
+					description=tool.description,
+					parameters=tool.parameters,
+					execute=tool.execute,
+					is_read_only=tool.is_read_only,
+					timeout=tool.timeout,
+					deferred=True,
+					capability=tool.capability,
+					risk_level=tool.risk_level,
+				))
+			else:
+				tools.append(tool)
 		if self._defer:
 			tools.append(ToolDefinition(
 				name="tool_search",
@@ -85,11 +87,10 @@ class BuiltinToolsPlugin(BasePlugin):
 		if not active or not tools:
 			return messages, tools
 		for name in active:
-			if name in _ALL_TOOLS:
-				tool = _ALL_TOOLS[name]
-				schema = tool.to_openai_schema()
-				if not any(t.get("function", {}).get("name") == name for t in tools):
-					tools.append(schema)
+			tool = self._tools[name]
+			schema = tool.to_openai_schema()
+			if not any(t.get("function", {}).get("name") == name for t in tools):
+				tools.append(schema)
 		return messages, tools
 
 	async def post_tool_call(
@@ -114,12 +115,17 @@ class BuiltinToolsPlugin(BasePlugin):
 		active = self._active_deferred_for(exec_ctx) if exec_ctx else set()
 		results = []
 		for name in self._defer:
-			if name in _ALL_TOOLS:
-				tool = _ALL_TOOLS[name]
-				if query in name.lower() or query in tool.description.lower():
-					active.add(name)
-					results.append({"name": name, "description": tool.description})
+			tool = self._tools[name]
+			if query in name.lower() or query in tool.description.lower():
+				active.add(name)
+				results.append({"name": name, "description": tool.description})
 		return ToolOutput.json_output(
 			{"tools": results, "message": "工具已激活，可用于下一次调用" if results else "未找到匹配工具"},
 			summary=f"找到 {len(results)} 个工具",
 		)
+
+
+def _validate_tool_names(names: list[str], tools: dict[str, ToolDefinition], field: str) -> None:
+	unknown = [name for name in names if name not in tools]
+	if unknown:
+		raise ValueError(f"{field} contains unknown builtin tools: {', '.join(unknown)}")

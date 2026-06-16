@@ -78,7 +78,7 @@ class OutputValidator:
 		try:
 			data = json.loads(json_str)
 		except json.JSONDecodeError as e:
-			return self._result(False, [f"JSON parse failed: {str(e)[:120]}"], content)
+			return self._result(False, [f"JSON parse failed: {e}"], content)
 		schema = self.config.get("schema", {})
 		if not schema:
 			return self._result(True, content=json_str)
@@ -96,7 +96,7 @@ class OutputValidator:
 				return self._result(False, errors, json_str, degraded=True)
 			return self._result(True, content=json_str, degraded=True)
 		except Exception as e:
-			return self._result(False, [f"schema validation failed: {str(e)[:200]}"], json_str)
+			return self._result(False, [f"schema validation failed: {e}"], json_str)
 		return self._result(True, content=json_str)
 
 	def _validate_markdown(self, content: str) -> ValidationResult:
@@ -160,20 +160,18 @@ class OutputValidator:
 			errors=errors or [],
 			content=content,
 			format_type=self.format_type,
-			schema_id=str(self.config.get("schema_id") or self.config.get("contract_name") or ""),
+			schema_id=str(self.config.get("schema_id") or ""),
 			schema_version=str(self.config.get("schema_version") or ""),
 			degraded=degraded,
 		)
 
 
 class RepairPromptBuilder:
-	def __init__(self, format_type: str, config: dict[str, Any], max_repair_chars: int) -> None:
+	def __init__(self, format_type: str, config: dict[str, Any]) -> None:
 		self.format_type = format_type
 		self.config = config
-		self.max_repair_chars = max_repair_chars
 
 	def build(self, content: str) -> str:
-		content = content[:self.max_repair_chars]
 		if self.format_type == "json_schema":
 			schema_str = json.dumps(self.config.get("schema", {}), ensure_ascii=False, indent=2)
 			return (
@@ -230,16 +228,15 @@ class OutputFormatService:
 中文：此文档说明相关引擎组件的行为。"""
 
 	def __init__(self, format_type: str = "", config: dict[str, Any] | None = None,
-				 utility_model: Any = None, max_repair_chars: int = 3000,
+				 utility_model: Any = None,
 				 repair_timeout: float = 30.0, max_output_chars: int = 0) -> None:
 		self.format_type = format_type
 		self.config = config or {}
 		self.utility_model = utility_model
-		self.max_repair_chars = max_repair_chars
 		self.repair_timeout = max(0.0, float(repair_timeout))
 		self.max_output_chars = max(0, int(max_output_chars or 0))
 		self._validator = OutputValidator(self.format_type, self.config, self.max_output_chars)
-		self._prompt_builder = RepairPromptBuilder(self.format_type, self.config, self.max_repair_chars)
+		self._prompt_builder = RepairPromptBuilder(self.format_type, self.config)
 		self._repairer = OutputRepairer(self.format_type, self.utility_model, self._prompt_builder, self.repair_timeout)
 
 	def validate(self, content: str) -> ValidationResult:
@@ -273,7 +270,7 @@ class OutputFormatService:
 			try:
 				current = await self.repair(current)
 			except Exception as e:
-				errors.append(f"repair attempt {attempts} failed: {str(e)[:160]}")
+				errors.append(f"repair attempt {attempts} failed: {e}")
 				break
 			result = self.validate(current)
 			if result.valid and result.content:

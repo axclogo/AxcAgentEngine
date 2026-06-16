@@ -5,7 +5,6 @@ from axc_agent_engine.runtime.input import PassthroughInputProvider
 from axc_agent_engine.plugins.builtin.compress.context.normalizer import normalize_messages, public_message
 from axc_agent_engine.plugins.builtin.compress.context.packer import pack_context
 from axc_agent_engine.plugins.builtin.compress.context.recent_window import select_recent_window
-from axc_agent_engine.plugins.builtin.compress.context.tool_result import TOOL_COMPACT_MARKER, compact_tool_messages
 from axc_agent_engine.runtime.resources import ResourceRegistry
 
 
@@ -42,16 +41,6 @@ def test_normalizer_public_message_matrix(index):
 	assert result[0]["role"] in {"user", "assistant", "system"}
 	assert result[0]["token_estimate"] >= 1
 	assert set(public_message(result[0])) == {"role", "content"}
-
-
-@pytest.mark.parametrize("index", range(30))
-def test_tool_compaction_matrix(index):
-	length = 20 + index * 40
-	threshold = 30
-	message = {"role": "tool", "tool_call_id": "tc", "content": "x" * length}
-	result = compact_tool_messages([message], max_inline_tokens=threshold)
-	was_compacted = TOOL_COMPACT_MARKER in result[0]["content"]
-	assert was_compacted is (length // 4 > threshold)
 
 
 @pytest.mark.parametrize("index", range(25))

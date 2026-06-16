@@ -22,7 +22,7 @@ from axc_agent_engine.core.session import Session
 from axc_agent_engine.core.session_manager import SessionManager
 from axc_agent_engine.core.schema import RuntimeConfig
 from axc_agent_engine.llm.provider import LLMProvider
-from axc_agent_engine.plugins import agent_info_from_runtime, model_info_from_models
+from axc_agent_engine.plugins.context import agent_info_from_runtime, model_info_from_models
 from axc_agent_engine.plugins.base import BasePlugin
 from axc_agent_engine.runtime.concurrency import ExecutionLimiter, SessionExecutionGate
 from axc_agent_engine.runtime.input import InputProvider, InputProviderResult, PassthroughInputProvider
@@ -145,7 +145,7 @@ class Agent:
 		utility_model: LLMProvider | None = None,
 		session_manager: SessionManager | None = None,
 		registry: ToolRegistry | None = None,
-		result_store: "object | None" = None,
+		artifact_store: "object | None" = None,
 		services: ExecutionServices | None = None,
 		input_provider: InputProvider | None = None,
 		engine_limiter: ExecutionLimiter | None = None,
@@ -162,7 +162,7 @@ class Agent:
 		self._utility_model = utility_model
 		self._session_manager = session_manager or SessionManager()
 		self._registry = registry or ToolRegistry()
-		self._services = services or ExecutionServices(result_store=result_store)
+		self._services = services or ExecutionServices(artifact_store=artifact_store)
 		self._input_provider = input_provider or PassthroughInputProvider()
 		self._workflow_runtime = workflow_runtime or create_workflow_runtime()
 		self._metadata = dict_or_empty(metadata, "metadata")

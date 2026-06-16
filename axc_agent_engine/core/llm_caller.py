@@ -20,7 +20,7 @@ from axc_agent_engine.core.errors import (
 	RetryableProviderError,
 )
 from axc_agent_engine.core.events import Event, EventType
-from axc_agent_engine.plugins import model_info_from_models
+from axc_agent_engine.plugins.context import model_info_from_models
 from axc_agent_engine.core.schema import LLMResponse
 
 if TYPE_CHECKING:

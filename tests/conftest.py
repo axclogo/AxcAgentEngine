@@ -7,7 +7,7 @@ from axc_agent_engine.plugins import PluginContext
 from axc_agent_engine.tools.registry import ToolRegistry
 from axc_agent_engine.tools.tool_output import ToolOutput
 from axc_agent_engine.storage.in_memory import InMemoryKVStore, InMemoryMessagePersistence, InMemorySpanStore
-from axc_agent_engine.storage.result_store import InMemoryResultStore
+from axc_agent_engine.storage.artifact_store import InMemoryArtifactStore
 
 
 @pytest.fixture
@@ -26,13 +26,13 @@ def exec_ctx(exec_config, exec_state):
 
 
 @pytest.fixture
-def result_store():
-	return InMemoryResultStore()
+def artifact_store():
+	return InMemoryArtifactStore()
 
 
 @pytest.fixture
-def exec_ctx_with_services(exec_config, exec_state, result_store):
-	services = ExecutionServices(result_store=result_store)
+def exec_ctx_with_services(exec_config, exec_state, artifact_store):
+	services = ExecutionServices(artifact_store=artifact_store)
 	return ExecutionContext(config=exec_config, state=exec_state, services=services)
 
 
@@ -66,7 +66,7 @@ def plugin_ctx(mock_llm):
 		kv_store=InMemoryKVStore(),
 		message_persistence=InMemoryMessagePersistence(),
 		span_store=InMemorySpanStore(),
-		result_store=InMemoryResultStore(),
+		artifact_store=InMemoryArtifactStore(),
 	)
 
 

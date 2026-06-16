@@ -15,7 +15,7 @@ from axc_agent_engine.plugins.base import BasePlugin
 from axc_agent_engine.plugins.builtin.common import (
 	exec_ctx_from_tool_context,
 	externalize_text,
-	result_store_from_context,
+	artifact_store_from_context,
 	strict_bounded_int,
 )
 from axc_agent_engine.plugins.builtin.config_schemas import SKILL_CONFIG_SCHEMA
@@ -25,7 +25,7 @@ from axc_agent_engine.runtime.sandbox_workspace import WorkspaceCommandExecutor
 
 if TYPE_CHECKING:
 	from axc_agent_engine.core.context import ExecutionContext
-	from axc_agent_engine.plugins import PluginContext
+	from axc_agent_engine.plugins.context import PluginContext
 
 logger = logging.getLogger(__name__)
 
@@ -96,10 +96,8 @@ class SkillScriptPolicy:
 
 
 class SkillScriptRunner:
-	def __init__(self, timeout: int, stdout_limit: int, stderr_limit: int) -> None:
+	def __init__(self, timeout: int) -> None:
 		self.timeout = timeout
-		self.stdout_limit = stdout_limit
-		self.stderr_limit = stderr_limit
 
 	async def run(self, resolved: ResolvedSkillScript, request: SkillScriptRequest, context: dict) -> Any:
 		executor = WorkspaceCommandExecutor(
@@ -111,8 +109,6 @@ class SkillScriptRunner:
 			argv=[resolved.runner, resolved.script_path, *extra_args],
 			cwd=resolved.scripts_path,
 			timeout=self.timeout,
-			stdout_limit=self.stdout_limit,
-			stderr_limit=self.stderr_limit,
 		))
 
 
@@ -130,14 +126,14 @@ class SkillScriptPresenter:
 	) -> tuple[dict[str, Any], list[Any]]:
 		stdout, stdout_ref = await _maybe_externalize_text(
 			result.stdout,
-			result_store_from_context(context, self.plugin_ctx),
+			artifact_store_from_context(context, self.plugin_ctx),
 			self.max_result_bytes,
 			"skill_stdout",
 			{"skill_name": request.skill_name, "script_name": request.script_name},
 		)
 		stderr, stderr_ref = await _maybe_externalize_text(
 			result.stderr,
-			result_store_from_context(context, self.plugin_ctx),
+			artifact_store_from_context(context, self.plugin_ctx),
 			self.max_result_bytes,
 			"skill_stderr",
 			{"skill_name": request.skill_name, "script_name": request.script_name},
@@ -207,8 +203,6 @@ class SkillPlugin(BasePlugin):
 		if self._duplicate_policy not in {"skip", "replace", "error"}:
 			raise ValueError("skill.duplicate_policy must be one of skip, replace, error")
 		self._timeout = strict_bounded_int(config.get("timeout", 60), 1, 3600, "skill.timeout")
-		self._stdout_limit = strict_bounded_int(config.get("stdout_limit", 1500), 1, 10 * 1024 * 1024, "skill.stdout_limit")
-		self._stderr_limit = strict_bounded_int(config.get("stderr_limit", 500), 1, 10 * 1024 * 1024, "skill.stderr_limit")
 		self._max_skill_content_chars = strict_bounded_int(
 			config.get("max_skill_content_chars", 100_000),
 			1,
@@ -223,7 +217,7 @@ class SkillPlugin(BasePlugin):
 		)
 		self._skills: dict[str, dict] = {}
 		self._load_errors: list[dict[str, str]] = []
-		self._script_command_runner = SkillScriptRunner(self._timeout, self._stdout_limit, self._stderr_limit)
+		self._script_command_runner = SkillScriptRunner(self._timeout)
 		self._script_presenter = SkillScriptPresenter(self._plugin_ctx, self._max_result_bytes)
 		self._audit_recorder = SkillAuditRecorder()
 		self._load_skills()
@@ -484,7 +478,7 @@ class SkillPlugin(BasePlugin):
 		skill = self._skills[skill_name]
 		content, artifact = await _maybe_externalize_text(
 			skill["content"],
-			result_store_from_context(context, self._plugin_ctx),
+			artifact_store_from_context(context, self._plugin_ctx),
 			self._max_skill_content_chars,
 			"skill_content",
 			{"skill_name": skill_name, "content_hash": skill.get("content_hash", "")},
@@ -704,8 +698,6 @@ class SkillPlugin(BasePlugin):
 				"allowed_extensions": sorted(self._allowed_extensions),
 				"duplicate_policy": self._duplicate_policy,
 				"timeout": self._timeout,
-				"stdout_limit": self._stdout_limit,
-				"stderr_limit": self._stderr_limit,
 				"max_skill_content_chars": self._max_skill_content_chars,
 				"max_result_bytes": self._max_result_bytes,
 			},
@@ -806,9 +798,9 @@ def _file_sha256(path: str) -> str:
 	return hasher.hexdigest()
 
 
-async def _maybe_externalize_text(content: str, result_store: Any, threshold: int, kind: str,
+async def _maybe_externalize_text(content: str, artifact_store: Any, threshold: int, kind: str,
 								  metadata: dict[str, Any]) -> tuple[Any, Any]:
-	return await externalize_text(content, result_store, threshold, {**metadata, "kind": kind}, logger, "skill", threshold)
+	return await externalize_text(content, artifact_store, threshold, {**metadata, "kind": kind}, logger, "skill", threshold)
 
 
 def _normalize_relpath(value: Any) -> str:

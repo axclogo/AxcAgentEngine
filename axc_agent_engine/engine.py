@@ -23,7 +23,7 @@ from axc_agent_engine.core.errors import ConfigError, SchemaError
 from axc_agent_engine.core.run_context import dict_or_empty
 from axc_agent_engine.runtime.input import InputProvider, PassthroughInputProvider
 from axc_agent_engine.llm.provider import LLMProvider
-from axc_agent_engine.plugins import PluginContext, agent_info_from_runtime, model_info_from_models
+from axc_agent_engine.plugins.context import PluginContext, agent_info_from_runtime, model_info_from_models
 from axc_agent_engine.plugins.loader import load_plugins
 from axc_agent_engine.plugins.registry import PluginRegistry
 from axc_agent_engine.runtime.policy import PolicyEvaluator
@@ -37,9 +37,9 @@ from axc_agent_engine.storage.protocols import (
 	KVStore,
 	MessageBus,
 	MessagePersistence,
-	ResultStore,
 	SpanStore,
 )
+from axc_agent_engine.storage.artifact_store import ArtifactStore
 from axc_agent_engine.tools.name_mapping import ToolNameMappingConfig
 from axc_agent_engine.tools.registry import ToolRegistry
 
@@ -109,7 +109,7 @@ class Engine:
 		message_persistence: MessagePersistence | None = None,
 		span_store: SpanStore | None = None,
 		message_bus: MessageBus | None = None,
-		result_store: "ResultStore | None" = None,
+		artifact_store: "ArtifactStore | None" = None,
 		audit_sink: AuditSink | None = None,
 		checkpoint_store: CheckpointStore | None = None,
 		command_executor: CommandExecutor | None = None,
@@ -125,7 +125,7 @@ class Engine:
 		self._message_persistence = message_persistence
 		self._span_store = span_store
 		self._message_bus = message_bus
-		self._result_store = result_store
+		self._artifact_store = artifact_store
 		self._audit_sink = audit_sink
 		self._checkpoint_store = checkpoint_store
 		self._command_executor = command_executor
@@ -144,7 +144,7 @@ class Engine:
 		if message_bus:
 			self._dispatcher = AgentMessageDispatcher(message_bus=message_bus)
 		self._execution_services = ExecutionServices(
-			result_store=result_store,
+			artifact_store=artifact_store,
 			message_bus=message_bus,
 			dispatcher=self._dispatcher,
 			audit_sink=audit_sink,
@@ -202,7 +202,7 @@ class Engine:
 			message_persistence=self._message_persistence,
 			span_store=self._span_store,
 			message_bus=self._message_bus,
-			result_store=self._result_store,
+			artifact_store=self._artifact_store,
 			resources=resources,
 			dispatcher=self._dispatcher,
 			workspace=config.runtime.workspace,

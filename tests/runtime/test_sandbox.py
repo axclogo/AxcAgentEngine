@@ -11,7 +11,7 @@ from axc_agent_engine.runtime.sandbox_models import CommandExecutor, CommandResu
 from axc_agent_engine.runtime.sandbox_policy import DefaultCommandPolicy, PolicyCommandExecutor
 from axc_agent_engine.runtime.sandbox_provider import LocalSandboxProvider
 from axc_agent_engine.runtime.sandbox_workspace import WorkspaceCommandExecutor
-from axc_agent_engine.runtime.sandbox_utils import build_env, decode_limited, subprocess_preexec_fn, write_text
+from axc_agent_engine.runtime.sandbox_utils import build_env, decode_output, subprocess_preexec_fn, write_text
 from axc_agent_engine.core.schema import RiskLevel
 
 
@@ -47,16 +47,14 @@ async def test_local_subprocess_timeout(tmp_path):
 	assert "timeout" in result.stderr.lower()
 
 
-async def test_local_subprocess_output_limit(tmp_path):
+async def test_local_subprocess_returns_full_output(tmp_path):
 	executor = LocalSubprocessExecutor()
 	result = await executor.run(CommandSpec(
 		argv=[sys.executable, "-c", "print('x' * 100)"],
 		cwd=str(tmp_path),
 		timeout=10,
-		stdout_limit=10,
 	))
-	assert result.stdout_truncated is True
-	assert len(result.stdout) == 10
+	assert result.stdout == "x" * 100 + "\n"
 
 
 def test_command_executor_protocol():
@@ -103,6 +101,15 @@ class RecordingExecutor:
         return CommandResult(exit_code=0, stdout="ok")
 
 
+class RemovingExecutor(RecordingExecutor):
+	async def run(self, spec: CommandSpec) -> CommandResult:
+		self.specs.append(spec)
+		if spec.argv:
+			from pathlib import Path
+			Path(spec.argv[-1]).unlink()
+		return CommandResult(exit_code=0, stdout="removed")
+
+
 async def test_python_sandbox_uses_configured_command_executor(tmp_path):
     inner = RecordingExecutor()
     executor = PythonSandboxExecutor(str(tmp_path), command_executor=inner, python=sys.executable)
@@ -111,6 +118,16 @@ async def test_python_sandbox_uses_configured_command_executor(tmp_path):
     assert result.stdout == "ok"
     assert len(inner.specs) == 1
     assert inner.specs[0].argv[0] == sys.executable
+
+
+async def test_python_and_powershell_sandbox_ignore_missing_temp_on_cleanup(tmp_path):
+	python_inner = RemovingExecutor()
+	python_executor = PythonSandboxExecutor(str(tmp_path), command_executor=python_inner, python=sys.executable)
+	assert (await python_executor.run_code("print('x')")).stdout == "removed"
+
+	powershell_inner = RemovingExecutor()
+	powershell_executor = PowerShellSandboxExecutor(str(tmp_path), command_executor=powershell_inner, executable="pwsh")
+	assert (await powershell_executor.run_code("Write-Output x")).stdout == "removed"
 
 
 async def test_policy_command_executor_blocks_disallowed_shell(tmp_path):
@@ -143,12 +160,10 @@ def test_sandbox_utils_env_decode_write_and_preexec(tmp_path, monkeypatch):
 	assert env["PATH"] == "/custom"
 	assert env["HOME"] == "/home/test"
 	assert "SECRET" not in env
-	text, truncated = decode_limited("abcdef".encode(), 3)
+	text = decode_output("abcdef".encode())
+	assert text == "abcdef"
+	text = decode_output("abc".encode())
 	assert text == "abc"
-	assert truncated is True
-	text, truncated = decode_limited("abc".encode(), 0)
-	assert text == "abc"
-	assert truncated is False
 	path = tmp_path / "x.txt"
 	write_text(str(path), "hello")
 	assert path.read_text() == "hello"
@@ -157,12 +172,11 @@ def test_sandbox_utils_env_decode_write_and_preexec(tmp_path, monkeypatch):
 
 
 def test_sandbox_utils_decode_invalid_utf8_and_no_truncation():
-	text, truncated = decode_limited(b"\xffabc", 99)
+	text = decode_output(b"\xffabc")
 	assert text.startswith("\ufffd")
-	assert truncated is False
-	text, truncated = decode_limited(b"\xffabc", 2)
-	assert text == "\ufffda"
-	assert truncated is True
+	text = decode_output(b"\xffabc")
+	assert text.startswith("\ufffd")
+	assert text.endswith("abc")
 
 
 def test_sandbox_utils_build_env_ignores_empty_and_unknown(monkeypatch):

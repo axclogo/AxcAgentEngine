@@ -280,6 +280,8 @@ class TestDispatcherConsumer:
 		assert result_step.metadata["step"]["error"] == ""
 		complete = next(item for item in seen if item.type == "sub_agent_complete")
 		assert complete.metadata["success"] is True
+		assert complete.metadata["result"] == "done"
+		assert "result_preview" not in complete.metadata
 		assert complete.metadata["parent_tool_call_id"] == "parent-call"
 		assert complete.metadata["sub_run_id"].startswith("run-1:worker:")
 		await dispatcher.stop_all()

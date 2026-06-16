@@ -8,7 +8,7 @@ from typing import Any, TYPE_CHECKING
 
 if TYPE_CHECKING:
 	from axc_agent_engine.core.context import ExecutionContext
-	from axc_agent_engine.storage.protocols import ResultStore
+	from axc_agent_engine.storage.artifact_store import ArtifactStore
 
 
 @dataclass
@@ -26,12 +26,12 @@ class ToolContext:
 	response_queue: asyncio.Queue | None = None
 
 	@property
-	def result_store(self) -> "ResultStore | None":
+	def artifact_store(self) -> "ArtifactStore | None":
 		"""English: Bilingual documentation follows.
 中文：以下为双语文档说明。
-从 ExecutionContext.services 获取 result_store。"""
+从 ExecutionContext.services 获取 artifact_store。"""
 		if self.exec_ctx and self.exec_ctx.services:
-			return self.exec_ctx.services.result_store
+			return self.exec_ctx.services.artifact_store
 		return None
 
 	def to_dict(self) -> dict[str, Any]:
@@ -47,6 +47,6 @@ class ToolContext:
 			"tool_call_id": self.tool_call_id,
 			"request_queue": self.request_queue,
 			"response_queue": self.response_queue,
-			"result_store": self.result_store,
+			"artifact_store": self.artifact_store,
 			"command_executor": self.exec_ctx.services.command_executor if self.exec_ctx and self.exec_ctx.services else None,
 		}

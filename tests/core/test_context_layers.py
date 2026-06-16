@@ -12,8 +12,6 @@ from axc_agent_engine.plugins.builtin.compress.context.recent_window import sele
 from axc_agent_engine.plugins.builtin.compress.context.scoring import keyword_score
 from axc_agent_engine.plugins.builtin.compress.context.summarizer import SessionSummarizer, summary_message
 from axc_agent_engine.plugins.builtin.compress.context.tool_result import (
-	TOOL_COMPACT_MARKER,
-	compact_tool_messages,
 	externalize_large_tool_output,
 )
 from axc_agent_engine.plugins.builtin.compress.context.tool_summary import (
@@ -22,7 +20,7 @@ from axc_agent_engine.plugins.builtin.compress.context.tool_summary import (
 	observation_from_output,
 	tool_summaries_message,
 )
-from axc_agent_engine.storage.result_store import InMemoryResultStore
+from axc_agent_engine.storage.artifact_store import InMemoryArtifactStore
 from axc_agent_engine.tools.tool_output import ToolOutput
 
 
@@ -52,23 +50,13 @@ class TestNormalizeMessages:
 
 
 class TestToolResultManagement:
-	def test_keeps_small_tool_message(self):
-		messages = [{"role": "tool", "tool_call_id": "x", "content": "small"}]
-		assert compact_tool_messages(messages, max_inline_tokens=100) == messages
-
-	def test_compacts_large_tool_message(self):
-		messages = [{"role": "tool", "tool_call_id": "x", "content": "x" * 1000}]
-		result = compact_tool_messages(messages, max_inline_tokens=20)
-		assert TOOL_COMPACT_MARKER in result[0]["content"]
-		assert len(result[0]["content"]) < 1000
-
 	@pytest.mark.asyncio
 	async def test_externalizes_large_tool_output(self):
-		store = InMemoryResultStore()
+		store = InMemoryArtifactStore()
 		output = ToolOutput.text("x" * 2000)
 		result = await externalize_large_tool_output(output, store, artifact_threshold_tokens=20)
 		assert result.artifacts
-		assert await store.get(result.artifacts[0].id, limit=10) == "x" * 10
+		assert (await store.read(result.artifacts[0].id, limit=10)).content == "x" * 10
 
 	@pytest.mark.asyncio
 	async def test_externalize_noops_without_store(self):
@@ -115,7 +103,7 @@ class TestPacker:
 		])
 		result = pack_context(messages, max_input_tokens=20, reserve_output_tokens=5)
 		assert result.messages[-1]["content"] == "current"
-		assert result.truncated is True
+		assert result.messages[0]["content"] == "old" * 1000
 
 	def test_keeps_tool_call_group_atomic(self):
 		messages = normalize_messages([
@@ -137,8 +125,8 @@ class TestPacker:
 			{"role": "user", "content": "current"},
 		])
 		result = pack_context(messages, max_input_tokens=30, reserve_output_tokens=5)
-		assert not any(message.get("tool_calls") for message in result.messages)
-		assert not any(message.get("role") == "tool" for message in result.messages)
+		assert any(message.get("tool_calls") for message in result.messages)
+		assert any(message.get("role") == "tool" for message in result.messages)
 
 
 class TestRecall:

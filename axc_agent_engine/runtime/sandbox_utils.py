@@ -36,10 +36,8 @@ def build_env(overrides: dict[str, str]) -> dict[str, str]:
 	return env
 
 
-def decode_limited(data: bytes, limit: int) -> tuple[str, bool]:
-	if limit > 0 and len(data) > limit:
-		return data[:limit].decode("utf-8", errors="replace"), True
-	return data.decode("utf-8", errors="replace"), False
+def decode_output(data: bytes) -> str:
+	return data.decode("utf-8", errors="replace")
 
 
 def subprocess_preexec_fn():

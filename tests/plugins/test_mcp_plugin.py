@@ -8,7 +8,7 @@ from axc_agent_engine.plugins import PluginContext
 from axc_agent_engine.plugins.builtin.mcp.plugin import MCPPlugin
 from axc_agent_engine.plugins.builtin.mcp.support.client import MCPConnection, normalize_call_result
 from axc_agent_engine.tools.registry import ToolRegistry
-from axc_agent_engine.storage.result_store import InMemoryResultStore
+from axc_agent_engine.storage.artifact_store import InMemoryArtifactStore
 
 
 SERVER_CODE = r"""
@@ -163,22 +163,22 @@ async def test_mcp_large_result_externalized():
         "max_result_bytes": 10,
         "servers": [{"name": "local", "command": sys.executable, "args": ["-c", SERVER_CODE]}],
     }, ctx)
-    store = InMemoryResultStore()
+    store = InMemoryArtifactStore()
     try:
         await plugin.on_execution_start(None)
         tool = next(tool for tool in plugin.get_tools() if tool.name == "mcp.local.large")
-        result = await tool.execute({}, {"result_store": store})
+        result = await tool.execute({}, {"artifact_store": store})
     finally:
         await plugin.close()
 
     assert result.artifacts
-    assert result.content["truncated"] is True
-    assert await store.get(result.artifacts[0].id, limit=3) == "xxx"
+    assert result.content["externalized"] is True
+    assert (await store.read(result.artifacts[0].id, limit=3)).content == "xxx"
 
 
 async def test_mcp_large_result_externalize_failure_returns_tool_error():
     class FailingStore:
-        async def put(self, content, metadata=None):
+        async def put_text(self, content, metadata=None, *, kind="text", run_id="", durable=False, expires_at=None):
             raise RuntimeError("store down")
 
     ctx = PluginContext()
@@ -191,7 +191,7 @@ async def test_mcp_large_result_externalize_failure_returns_tool_error():
     try:
         await plugin.on_execution_start(None)
         tool = next(tool for tool in plugin.get_tools() if tool.name == "mcp.local.large")
-        result = await tool.execute({}, {"result_store": FailingStore()})
+        result = await tool.execute({}, {"artifact_store": FailingStore()})
     finally:
         await plugin.close()
 

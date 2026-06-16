@@ -5,7 +5,7 @@ from axc_agent_engine.core.context import ExecutionContext
 from axc_agent_engine.tools.tool_output import ToolOutput
 from axc_agent_engine.plugins import PluginContext
 from axc_agent_engine.runtime.resources import ResourceRegistry
-from axc_agent_engine.storage.result_store import InMemoryResultStore
+from axc_agent_engine.storage.artifact_store import InMemoryArtifactStore
 from unittest.mock import AsyncMock
 
 
@@ -40,43 +40,43 @@ class TestCompressPluginPostToolCall:
 		assert result is output
 
 	@pytest.mark.asyncio
-	async def test_externalizes_large_output_with_result_store(self):
+	async def test_externalizes_large_output_with_artifact_store(self):
 		p = CompressPlugin()
 		p.initialize({"tool_result": {"artifact_threshold_tokens": 10}}, PluginContext())
-		store = InMemoryResultStore()
+		store = InMemoryArtifactStore()
 		ctx = ExecutionContext()
-		ctx.services.result_store = store
+		ctx.services.artifact_store = store
 		result = await p.post_tool_call(ctx, "file_read", {}, ToolOutput.text("x" * 1000), 30)
 		assert result.artifacts
-		assert await store.get(result.artifacts[0].id, limit=5) == "xxxxx"
+		assert (await store.read(result.artifacts[0].id, limit=5)).content == "xxxxx"
 
 	@pytest.mark.asyncio
 	async def test_externalized_large_output_keeps_summary_and_artifact_refs_for_context(self):
 		p = CompressPlugin()
 		p.initialize({"tool_result": {"artifact_threshold_tokens": 10}}, PluginContext())
-		store = InMemoryResultStore()
+		store = InMemoryArtifactStore()
 		ctx = ExecutionContext()
-		ctx.services.result_store = store
+		ctx.services.artifact_store = store
 		output = ToolOutput.text("raw payload " * 1000, summary="query succeeded with 42 rows")
 
 		result = await p.post_tool_call(ctx, "business_query", {}, output, 30)
 
 		assert result.artifacts
-		assert result.context_view().startswith("query succeeded with 42 rows")
+		assert result.context_view().startswith("raw payload")
 		assert result.artifacts[0].id in result.context_view()
 		assert result.metadata["externalized"] is True
-		assert await store.get(result.artifacts[0].id, limit=11) == "raw payload"
+		assert (await store.read(result.artifacts[0].id, limit=11)).content == "raw payload"
 
 	@pytest.mark.asyncio
 	async def test_post_tool_call_propagates_externalization_failure(self):
-		class FailingResultStore:
-			async def put(self, content, metadata=None):
+		class FailingArtifactStore:
+			async def put_text(self, content, metadata=None, *, kind="text", run_id="", durable=False, expires_at=None):
 				raise RuntimeError("store unavailable")
 
 		p = CompressPlugin()
 		p.initialize({"tool_result": {"artifact_threshold_tokens": 10}}, PluginContext())
 		ctx = ExecutionContext()
-		ctx.services.result_store = FailingResultStore()
+		ctx.services.artifact_store = FailingArtifactStore()
 		with pytest.raises(RuntimeError, match="store unavailable"):
 			await p.post_tool_call(ctx, "file_read", {}, ToolOutput.text("x" * 1000), 30)
 
@@ -98,10 +98,10 @@ class TestCompressPluginPostToolCall:
 
 
 class TestCompressPluginTransformMessages:
-	def test_snip_compact_still_works(self):
-		"""L1 snip still truncates oversized tool messages in context."""
+	def test_snip_compact_keeps_full_tool_messages(self):
+		"""L1 snip setting is retained for config compatibility but no longer truncates."""
 		p = CompressPlugin()
-		p.initialize({"snip_threshold": 100}, PluginContext())
+		p.initialize({"tool_result": {"artifact_threshold_tokens": 100}}, PluginContext())
 		ctx = ExecutionContext()
 		messages = [
 			{"role": "system", "content": "sys"},
@@ -110,12 +110,12 @@ class TestCompressPluginTransformMessages:
 		]
 		result = p.transform_messages(messages, ctx)
 		tool_msg = [m for m in result if m["role"] == "tool"][0]
-		assert len(tool_msg["content"]) < 2000
+		assert tool_msg["content"] == "x" * 2000
 
 	def test_micro_compact_still_works(self):
 		"""L2 keeps recent rounds and drops old tool messages from the active window."""
 		p = CompressPlugin()
-		p.initialize({"micro_compact_keep_recent": 2}, PluginContext())
+		p.initialize({"recent_window": {"rounds": 2}}, PluginContext())
 		ctx = ExecutionContext()
 		messages = [{"role": "system", "content": "sys"}]
 		# Add 5 rounds of user+assistant+tool
@@ -132,7 +132,6 @@ class TestCompressPluginTransformMessages:
 		p.initialize({
 			"context_window": {"max_input_tokens": 120, "reserve_output_tokens": 20},
 			"recent_window": {"rounds": 1},
-			"tool_result": {"max_inline_tokens": 1000},
 		}, PluginContext())
 		ctx = ExecutionContext()
 		messages = [{"role": "system", "content": "sys"}]
@@ -183,7 +182,7 @@ class TestCompressPluginSummary:
 		mock_llm.ask = AsyncMock(return_value="This is a summary")
 		plugin_ctx = PluginContext(utility_model=mock_llm)
 		p = CompressPlugin()
-		p.initialize({"summary_after_rounds": 2, "summary_keep_recent": 1}, plugin_ctx)
+		p.initialize({"summary": {"after_rounds": 2}}, plugin_ctx)
 		ctx = ExecutionContext()
 		# Simulate rounds
 		await p.on_round_end(ctx, "user msg 1", "assistant msg 1", [])
@@ -193,7 +192,7 @@ class TestCompressPluginSummary:
 	@pytest.mark.asyncio
 	async def test_summary_applied_to_messages(self):
 		p = CompressPlugin()
-		p.initialize({"summary_keep_recent": 1}, PluginContext())
+		p.initialize({}, PluginContext())
 		p._summary = "Previous conversation summary"
 		ctx = ExecutionContext()
 		messages = [
@@ -211,7 +210,7 @@ class TestCompressPluginSummary:
 	@pytest.mark.asyncio
 	async def test_no_summary_without_utility_model(self):
 		p = CompressPlugin()
-		p.initialize({"summary_after_rounds": 1}, PluginContext())
+		p.initialize({"summary": {"after_rounds": 1}}, PluginContext())
 		ctx = ExecutionContext()
 		await p.on_round_end(ctx, "msg", "reply", [])
 		assert p._summary == ""
@@ -222,7 +221,7 @@ class TestCompressPluginSummary:
 		mock_llm.ask = AsyncMock(side_effect=RuntimeError("LLM down"))
 		plugin_ctx = PluginContext(utility_model=mock_llm)
 		p = CompressPlugin()
-		p.initialize({"summary_after_rounds": 1, "max_compact_failures": 2}, plugin_ctx)
+		p.initialize({"summary": {"after_rounds": 1, "max_failures": 2}}, plugin_ctx)
 		ctx = ExecutionContext()
 		await p.on_round_end(ctx, "msg1", "reply1", [])
 		assert p._compact_failures == 1

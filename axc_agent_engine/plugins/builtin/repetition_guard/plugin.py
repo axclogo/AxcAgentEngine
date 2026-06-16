@@ -10,7 +10,7 @@ from axc_agent_engine.plugins.builtin.config_schemas import REPETITION_GUARD_CON
 
 if TYPE_CHECKING:
 	from axc_agent_engine.core.context import ExecutionContext
-	from axc_agent_engine.plugins import PluginContext
+	from axc_agent_engine.plugins.context import PluginContext
 	from axc_agent_engine.tools.tool_output import ToolOutput
 
 logger = logging.getLogger(__name__)

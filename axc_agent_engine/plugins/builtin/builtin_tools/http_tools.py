@@ -6,15 +6,16 @@ import socket
 from typing import Any
 from urllib.parse import urlparse
 
-from axc_agent_engine.tools.tool_output import ToolOutput
+from axc_agent_engine.tools.tool_output import ArtifactRef, ToolOutput
 
-from .result_store import ResultStoreReader
-from .support import bounded_int, truncate_by_bytes
+from .artifact_store import ArtifactStoreReader
+from .support import bounded_int
 
 BLOCKED_HTTP_HOSTS = frozenset({"localhost", "metadata.google.internal"})
 MAX_TOOL_TIMEOUT = 600
 DEFAULT_HTTP_MAX_BYTES = 2000
 MAX_HTTP_BYTES = 5 * 1024 * 1024
+HTTP_RESULT_EXTERNALIZE_BYTES = 10 * 1024 * 1024
 
 
 def is_blocked_ip(ip: str) -> bool:
@@ -68,11 +69,11 @@ class BuiltinHttpTools:
 		self,
 		httpx_module: Any,
 		http_policy: BuiltinHttpPolicy | None = None,
-		result_reader: ResultStoreReader | None = None,
+		artifact_reader: ArtifactStoreReader | None = None,
 	) -> None:
 		self._httpx = httpx_module
 		self._http_policy = http_policy or BuiltinHttpPolicy()
-		self._result_reader = result_reader or ResultStoreReader()
+		self._artifact_reader = artifact_reader or ArtifactStoreReader()
 
 	async def request(self, args: dict[str, Any], context: dict[str, Any]) -> ToolOutput:
 		url = args.get("url", "")
@@ -82,7 +83,6 @@ class BuiltinHttpTools:
 		if url_error:
 			return ToolOutput.error(url_error)
 		timeout = bounded_int(args.get("timeout", 30), 1, MAX_TOOL_TIMEOUT, 30)
-		max_bytes = bounded_int(args.get("max_bytes", DEFAULT_HTTP_MAX_BYTES), 1, MAX_HTTP_BYTES, DEFAULT_HTTP_MAX_BYTES)
 		try:
 			async with self._httpx.AsyncClient(timeout=timeout) as client:
 				resp = await client.request(
@@ -93,24 +93,41 @@ class BuiltinHttpTools:
 				)
 				body = resp.text
 				artifacts = []
-				body_preview = truncate_by_bytes(body, max_bytes)
+				artifact_store = self._artifact_reader.store(context)
 				artifact_id = ""
-				result_store = self._result_reader.store(context)
-				if result_store and len(body.encode()) > max_bytes:
-					ref = await result_store.put(body, {"kind": "text", "url": url})
+				if artifact_store and len(body.encode()) > HTTP_RESULT_EXTERNALIZE_BYTES:
+					ref = await artifact_store.put_text(body, {"url": url}, kind="text")
 					artifacts.append(ref)
 					artifact_id = ref.id
 				content_data: dict[str, Any] = {
 					"status": resp.status_code,
 					"headers": dict(resp.headers),
 					"content_type": resp.headers.get("content-type", ""),
-					"body_preview": body_preview,
-					"truncated": len(body.encode()) > max_bytes,
-					"max_bytes": max_bytes,
+					"body": "" if artifact_id else body,
+					"externalized": bool(artifact_id),
 				}
 				if artifact_id:
 					content_data["body_artifact_id"] = artifact_id
 				summary = f"HTTP {resp.status_code} 来自 {url}（{len(body)} 字节）"
-				return ToolOutput(content=content_data, content_type="json", summary=summary, artifacts=artifacts)
+				llm_view = _http_llm_view(url, content_data, artifacts[0] if artifacts else None)
+				return ToolOutput(content=content_data, content_type="json", summary=summary, llm_view=llm_view, artifacts=artifacts)
 		except Exception as e:
 			return ToolOutput.error(str(e))
+
+
+def _http_llm_view(url: str, content: dict[str, Any], artifact: ArtifactRef | None) -> str:
+	lines = [
+		f"http_request {url}",
+		f"status: {content['status']}",
+		f"content_type: {content.get('content_type', '')}",
+	]
+	if artifact:
+		lines.extend([
+			"完整响应体已外部化。",
+			f"artifact_id: {artifact.id}",
+			f"size: {artifact.size} bytes",
+			"内容已完整外部化；请用 artifact_read/artifact_page 按需读取。",
+		])
+	else:
+		lines.extend(["body:", str(content.get("body", ""))])
+	return "\n".join(lines)

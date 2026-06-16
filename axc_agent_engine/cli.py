@@ -13,7 +13,7 @@ from axc_agent_engine.llm.client import OpenAIClient
 from axc_agent_engine.llm.rate_limited import RateLimitedProvider
 from axc_agent_engine.core.events import EventType
 from axc_agent_engine.observability.logging import setup_logging
-from axc_agent_engine.plugins.builtin import AVAILABLE_BUILTIN_PLUGINS
+from axc_agent_engine.plugins.builtin.registry import AVAILABLE_BUILTIN_PLUGINS
 from axc_agent_engine.plugins.registry import PluginRegistry
 
 

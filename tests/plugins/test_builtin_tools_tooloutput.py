@@ -1,25 +1,36 @@
 """Tests for builtin tools returning ToolOutput — file_read, file_write, shell, etc."""
 import pytest
 from axc_agent_engine.plugins.builtin.builtin_tools.plugin import BuiltinToolsPlugin
+from axc_agent_engine.plugins.builtin import AVAILABLE_BUILTIN_PLUGINS
 from axc_agent_engine.plugins.builtin.builtin_tools.command_tools import (
 	BuiltinCommandTools,
 	ensure_venv,
 	get_command_executor,
 	store_command_artifacts,
 )
-from axc_agent_engine.plugins.builtin.builtin_tools.file_tools import BuiltinFileTools
+from axc_agent_engine.plugins.builtin.builtin_tools.file_tools import (
+	BuiltinFileTools,
+	_build_tree,
+	_entry_line,
+	_file_glob_llm_view,
+	_file_list_llm_view,
+	_resolve_line_ranges,
+)
 from axc_agent_engine.plugins.builtin.builtin_tools.path_policy import BuiltinPathPolicy, PathValidationError
-from axc_agent_engine.plugins.builtin.builtin_tools.support import bounded_int, truncate_by_bytes
+from axc_agent_engine.plugins.builtin.builtin_tools.support import bounded_int
 from axc_agent_engine.plugins.builtin.builtin_tools.tool_definitions import (
 	_file_read, _file_write, _file_append, _file_edit, _file_list, _file_glob, _file_info, _get_time,
+	_file_tree,
 	_http_request, _pip_install, _python_exec, _shell,
-	_result_read, _result_search, _result_page,
+	_artifact_read, _artifact_search, _artifact_page,
 )
 from axc_agent_engine.plugins.builtin.builtin_tools.http_tools import BuiltinHttpPolicy, is_blocked_ip
 from axc_agent_engine.core.context import ExecutionContext
 from axc_agent_engine.runtime.sandbox_models import CommandResult
 from axc_agent_engine.tools.tool_output import ToolOutput
-from axc_agent_engine.storage.result_store import InMemoryResultStore
+from axc_agent_engine.storage.artifact_store import InMemoryArtifactStore
+from axc_agent_engine import Engine, PluginRegistry, AgentModels
+from axc_agent_engine.llm.provider import LLMProvider
 
 
 class TestGetTime:
@@ -70,12 +81,13 @@ class TestFileRead:
 		assert "workspace" in result.content.lower()
 
 	@pytest.mark.asyncio
-	async def test_line_window(self, tmp_path):
+	async def test_default_read_returns_full_file(self, tmp_path):
 		f = tmp_path / "big.txt"
 		f.write_text("\n".join(f"line{i}" for i in range(500)))
 		result = await _file_read({"path": "big.txt"}, {"workspace": str(tmp_path)})
-		assert result.content["truncated"] is True
-		assert result.content["end_line"] == 200  # default window
+		assert result.content["partial"] is False
+		assert result.content["end_line"] == 500
+		assert "500: line499" in result.context_view()
 
 	@pytest.mark.asyncio
 	async def test_custom_line_range(self, tmp_path):
@@ -90,21 +102,24 @@ class TestFileRead:
 	@pytest.mark.asyncio
 	async def test_large_file_stores_artifact(self, tmp_path):
 		f = tmp_path / "large.txt"
-		f.write_text("\n".join(f"line{i}" for i in range(500)))
-		store = InMemoryResultStore()
-		result = await _file_read({"path": "large.txt"}, {"workspace": str(tmp_path), "result_store": store})
+		f.write_text("x" * (10 * 1024 * 1024 + 1))
+		store = InMemoryArtifactStore()
+		result = await _file_read({"path": "large.txt"}, {"workspace": str(tmp_path), "artifact_store": store})
 		assert len(result.artifacts) == 1
 		assert result.artifacts[0].kind == "file"
+		assert result.content["externalized"] is True
+		assert result.content["artifact_id"] == result.artifacts[0].id
+		assert "artifact_read/artifact_page" in result.context_view()
 		# Verify artifact content is retrievable
-		content = await store.get(result.artifacts[0].id, offset=0, limit=100)
-		assert "line0" in content
+		content = (await store.read(result.artifacts[0].id, offset=0, limit=100)).content
+		assert content == "x" * 100
 
 	@pytest.mark.asyncio
 	async def test_small_file_no_artifact(self, tmp_path):
 		f = tmp_path / "small.txt"
 		f.write_text("short file")
-		store = InMemoryResultStore()
-		result = await _file_read({"path": "small.txt"}, {"workspace": str(tmp_path), "result_store": store})
+		store = InMemoryArtifactStore()
+		result = await _file_read({"path": "small.txt"}, {"workspace": str(tmp_path), "artifact_store": store})
 		assert len(result.artifacts) == 0
 
 	@pytest.mark.asyncio
@@ -123,7 +138,7 @@ class TestFileRead:
 		f.write_text("x" * (10 * 1024 * 1024 + 1))
 		result = await _file_read({"path": "huge.txt"}, {"workspace": str(tmp_path)})
 		assert result.is_error
-		assert "too large" in result.content.lower()
+		assert "artifact_store" in result.content
 
 	@pytest.mark.asyncio
 	async def test_start_line_clamps_and_end_line_limits_to_total(self, tmp_path):
@@ -136,6 +151,31 @@ class TestFileRead:
 		assert result.content["start_line"] == 1
 		assert result.content["end_line"] == 3
 
+	@pytest.mark.asyncio
+	async def test_ranges_read_multiple_segments(self, tmp_path):
+		f = tmp_path / "ranges.txt"
+		f.write_text("\n".join(f"L{i}" for i in range(1, 101)))
+		result = await _file_read(
+			{"path": "ranges.txt", "ranges": [[1, 3], [50, 52], [98, 110]]},
+			{"workspace": str(tmp_path)},
+		)
+
+		assert result.content["ranges"] == [[1, 3], [50, 52], [98, 100]]
+		view = result.context_view()
+		assert "Lines shown: 1-3, 50-52, 98-100 of 100" in view
+		assert "1: L1" in view
+		assert "50: L50" in view
+		assert "100: L100" in view
+
+	@pytest.mark.asyncio
+	async def test_invalid_ranges_fail_fast(self, tmp_path):
+		f = tmp_path / "bad_ranges.txt"
+		f.write_text("a\nb")
+		result = await _file_read({"path": "bad_ranges.txt", "ranges": [[1]]}, {"workspace": str(tmp_path)})
+
+		assert result.is_error
+		assert "ranges items" in result.content
+
 
 class TestFileList:
 	@pytest.mark.asyncio
@@ -146,6 +186,10 @@ class TestFileList:
 		assert not result.is_error
 		names = {item["name"] for item in result.content["entries"]}
 		assert {"a.txt", "dir"}.issubset(names)
+		view = result.context_view()
+		assert "file_list .（2 项" in view
+		assert "[d] dir/" in view
+		assert "[f] a.txt" in view
 
 	@pytest.mark.asyncio
 	async def test_recursive_list(self, tmp_path):
@@ -157,12 +201,39 @@ class TestFileList:
 		assert "dir/nested.txt" in paths
 
 	@pytest.mark.asyncio
-	async def test_limit(self, tmp_path):
+	async def test_limit_argument_is_ignored_for_complete_list(self, tmp_path):
 		for i in range(5):
 			(tmp_path / f"{i}.txt").write_text(str(i))
 		result = await _file_list({"path": ".", "limit": 2}, {"workspace": str(tmp_path)})
-		assert len(result.content["entries"]) == 2
-		assert result.content["truncated"] is True
+		assert len(result.content["entries"]) == 5
+		assert "4.txt" in result.context_view()
+
+	@pytest.mark.asyncio
+	async def test_large_list_externalizes_without_truncating_names(self, tmp_path):
+		for i in range(1005):
+			(tmp_path / f"{i:04}.txt").write_text(str(i))
+		store = InMemoryArtifactStore()
+		result = await _file_list({"path": "."}, {"workspace": str(tmp_path), "artifact_store": store})
+
+		assert result.content["externalized"] is True
+		assert result.content["count"] == 1005
+		assert len(result.artifacts) == 1
+		assert "artifact_id" in result.content
+		view = result.context_view()
+		assert "已外部化" in view
+		assert "artifact_read/artifact_page" in view
+		artifact = (await store.read(result.artifacts[0].id, offset=0, limit=200)).content
+		assert "[f] 0000.txt" in artifact
+
+	@pytest.mark.asyncio
+	async def test_large_list_without_store_returns_full_view(self, tmp_path):
+		for i in range(1005):
+			(tmp_path / f"{i:04}.txt").write_text(str(i))
+		result = await _file_list({"path": "."}, {"workspace": str(tmp_path)})
+
+		assert result.content["externalized"] is False
+		assert len(result.content["entries"]) == 1005
+		assert "1004.txt" in result.context_view()
 
 	@pytest.mark.asyncio
 	async def test_workspace_boundary(self, tmp_path):
@@ -214,19 +285,29 @@ class TestFileGlob:
 		assert not result.is_error
 		paths = {item["path"] for item in result.content["matches"]}
 		assert paths == {"a.py", "pkg/c.py"}
+		view = result.context_view()
+		assert "file_glob **/*.py（2 项）" in view
+		assert "a.py" in view
+		assert "pkg/c.py" in view
 
 	@pytest.mark.asyncio
-	async def test_glob_limit(self, tmp_path):
+	async def test_glob_limit_argument_is_ignored_for_complete_matches(self, tmp_path):
 		for i in range(5):
 			(tmp_path / f"{i}.txt").write_text(str(i))
 		result = await _file_glob({"pattern": "*.txt", "limit": 2}, {"workspace": str(tmp_path)})
-		assert len(result.content["matches"]) == 2
-		assert result.content["truncated"] is True
+		assert len(result.content["matches"]) == 5
+		assert "4.txt" in result.context_view()
 
 	@pytest.mark.asyncio
 	async def test_glob_requires_pattern(self):
 		result = await _file_glob({"pattern": ""}, {})
 		assert result.is_error
+
+	@pytest.mark.asyncio
+	async def test_glob_workspace_resolution_error(self):
+		result = await _file_glob({"pattern": "*.txt"}, {})
+		assert result.is_error
+		assert "workspace" in result.content.lower()
 
 	@pytest.mark.asyncio
 	async def test_glob_rejects_parent_pattern(self, tmp_path):
@@ -240,8 +321,43 @@ class TestFileGlob:
 		result = await _file_glob({"pattern": "**", "include_dirs": True, "limit": 0}, {"workspace": str(tmp_path)})
 		assert not result.is_error
 		assert len(result.content["matches"]) >= 1
-		assert result.content["limit"] == 200
 		assert any(item["type"] == "directory" for item in result.content["matches"])
+
+
+class TestFileTree:
+	@pytest.mark.asyncio
+	async def test_tree_uses_default_ignores_and_depth(self, tmp_path):
+		(tmp_path / "apps" / "api" / "src").mkdir(parents=True)
+		(tmp_path / "apps" / "api" / "src" / "main.py").write_text("x")
+		(tmp_path / "node_modules" / "pkg").mkdir(parents=True)
+		(tmp_path / ".git").mkdir()
+		result = await _file_tree({"path": ".", "max_depth": 4}, {"workspace": str(tmp_path)})
+
+		assert not result.is_error
+		view = result.context_view()
+		assert view.startswith(".")
+		assert "apps/" in view
+		assert "api/" in view
+		assert "main.py" in view
+		assert "node_modules" not in view
+		assert ".git" not in view
+
+	@pytest.mark.asyncio
+	async def test_tree_can_override_ignores(self, tmp_path):
+		(tmp_path / "node_modules").mkdir()
+		(tmp_path / "node_modules" / "pkg.json").write_text("{}")
+		result = await _file_tree({"path": ".", "ignore": []}, {"workspace": str(tmp_path)})
+
+		assert "node_modules/" in result.context_view()
+
+	@pytest.mark.asyncio
+	async def test_tree_errors(self, tmp_path):
+		file_path = tmp_path / "file.txt"
+		file_path.write_text("x")
+
+		assert (await _file_tree({"path": ".", "max_depth": "bad"}, {"workspace": str(tmp_path)})).is_error
+		assert (await _file_tree({"path": "file.txt"}, {"workspace": str(tmp_path)})).is_error
+		assert (await _file_tree({"path": "."}, {})).is_error
 
 
 class TestFileWrite:
@@ -377,7 +493,7 @@ class TestPythonExec:
 		result = await _python_exec({"code": "print('hello')"}, {"allow_unsafe_workspace": True})
 		assert isinstance(result, ToolOutput)
 		assert not result.is_error
-		assert "hello" in result.content["stdout_preview"]
+		assert "hello" in result.content["stdout"]
 
 	@pytest.mark.asyncio
 	async def test_empty_code(self):
@@ -392,13 +508,13 @@ class TestPythonExec:
 
 	@pytest.mark.asyncio
 	async def test_large_stdout_artifact(self):
-		store = InMemoryResultStore()
+		store = InMemoryArtifactStore()
 		code = "print('x' * 5000)"
-		result = await _python_exec({"code": code}, {"result_store": store, "allow_unsafe_workspace": True})
+		result = await _python_exec({"code": code}, {"artifact_store": store, "allow_unsafe_workspace": True})
 		assert not result.is_error
 		if "stdout_artifact_id" in result.content:
 			aid = result.content["stdout_artifact_id"]
-			content = await store.get(aid, offset=0, limit=100)
+			content = (await store.read(aid, offset=0, limit=100)).content
 			assert len(content) > 0
 
 	@pytest.mark.asyncio
@@ -426,7 +542,7 @@ class TestShell:
 		result = await _shell({"command": "echo hello"}, {"workspace": str(tmp_path)})
 		assert isinstance(result, ToolOutput)
 		assert not result.is_error
-		assert "hello" in result.content["stdout_preview"]
+		assert "hello" in result.content["stdout"]
 
 	@pytest.mark.asyncio
 	async def test_empty_command(self):
@@ -483,7 +599,7 @@ class TestHttpRequest:
 		assert "unsafe" in result.content.lower() or "blocked" in result.content.lower()
 
 	@pytest.mark.asyncio
-	async def test_max_bytes_truncates_response(self, monkeypatch):
+	async def test_max_bytes_argument_does_not_truncate_response(self, monkeypatch):
 		class FakeResponse:
 			status_code = 200
 			text = "abcdef"
@@ -506,8 +622,9 @@ class TestHttpRequest:
 		monkeypatch.setattr(builtin_tools.httpx, "AsyncClient", FakeClient)
 		result = await _http_request({"url": "https://example.com", "max_bytes": 3, "timeout": 5}, {})
 		assert not result.is_error
-		assert result.content["body_preview"] == "abc"
-		assert result.content["truncated"] is True
+		assert result.content["body"] == "abcdef"
+		assert result.content["externalized"] is False
+		assert "abcdef" in result.context_view()
 
 	@pytest.mark.asyncio
 	async def test_empty_url_invalid_scheme_and_dns_failure(self):
@@ -522,7 +639,7 @@ class TestHttpRequest:
 	async def test_http_request_externalizes_large_body(self, monkeypatch):
 		class FakeResponse:
 			status_code = 201
-			text = "abcdef"
+			text = "x" * (10 * 1024 * 1024 + 1)
 			headers = {"content-type": "text/plain"}
 
 		class FakeClient:
@@ -541,16 +658,63 @@ class TestHttpRequest:
 				return FakeResponse()
 
 		import axc_agent_engine.plugins.builtin.builtin_tools.tool_definitions as builtin_tools
-		store = InMemoryResultStore()
+		store = InMemoryArtifactStore()
 		monkeypatch.setattr(builtin_tools.httpx, "AsyncClient", FakeClient)
-		result = await _http_request(
-			{"url": "https://example.com", "method": "post", "body": {"x": 1}, "max_bytes": 3},
-			{"result_store": store},
-		)
+		result = await _http_request({"url": "https://example.com", "method": "post", "body": {"x": 1}}, {"artifact_store": store})
 
 		assert not result.is_error
+		assert result.content["externalized"] is True
 		assert result.content["body_artifact_id"]
-		assert await store.get(result.content["body_artifact_id"], 0, 20) == "abcdef"
+		assert (await store.read(result.content["body_artifact_id"], 0, 3)).content == "xxx"
+		assert "artifact_read/artifact_page" in result.context_view()
+
+	@pytest.mark.asyncio
+	async def test_http_large_body_without_store_returns_full_body(self, monkeypatch):
+		class FakeResponse:
+			status_code = 200
+			text = "x" * (10 * 1024 * 1024 + 1)
+			headers = {"content-type": "text/plain"}
+
+		class FakeClient:
+			def __init__(self, timeout):
+				self.timeout = timeout
+
+			async def __aenter__(self):
+				return self
+
+			async def __aexit__(self, exc_type, exc, tb):
+				return None
+
+			async def request(self, method, url, headers, json):
+				return FakeResponse()
+
+		import axc_agent_engine.plugins.builtin.builtin_tools.tool_definitions as builtin_tools
+		monkeypatch.setattr(builtin_tools.httpx, "AsyncClient", FakeClient)
+		result = await _http_request({"url": "https://example.com"}, {})
+
+		assert result.content["externalized"] is False
+		assert result.content["body"].startswith("xxx")
+
+	@pytest.mark.asyncio
+	async def test_http_policy_dns_errors_and_unsafe_resolution(self, monkeypatch):
+		import axc_agent_engine.plugins.builtin.builtin_tools.http_tools as http_tools
+		policy = BuiltinHttpPolicy()
+
+		def raise_gaierror(hostname):
+			raise http_tools.socket.gaierror()
+
+		def raise_oserror(hostname):
+			raise OSError("resolver down")
+
+		def private_ip(hostname):
+			return ["127.0.0.1"]
+
+		monkeypatch.setattr(http_tools, "resolve_host_ips", raise_gaierror)
+		assert await policy.validate_url("https://example.com") == "Failed to resolve host: example.com"
+		monkeypatch.setattr(http_tools, "resolve_host_ips", raise_oserror)
+		assert "resolver down" in await policy.validate_url("https://example.com")
+		monkeypatch.setattr(http_tools, "resolve_host_ips", private_ip)
+		assert "unsafe resolved" in await policy.validate_url("https://example.com")
 
 
 class TestPipInstall:
@@ -592,43 +756,43 @@ class TestPipInstall:
 class TestResultRead:
 	@pytest.mark.asyncio
 	async def test_basic_read(self):
-		store = InMemoryResultStore()
-		ref = await store.put("hello world content")
-		result = await _result_read({"artifact_id": ref.id}, {"result_store": store})
+		store = InMemoryArtifactStore()
+		ref = await store.put_text("hello world content")
+		result = await _artifact_read({"artifact_id": ref.id}, {"artifact_store": store})
 		assert isinstance(result, ToolOutput)
 		assert "hello world" in result.content
 
 	@pytest.mark.asyncio
 	async def test_empty_id(self):
-		result = await _result_read({"artifact_id": ""}, {"result_store": InMemoryResultStore()})
+		result = await _artifact_read({"artifact_id": ""}, {"artifact_store": InMemoryArtifactStore()})
 		assert result.is_error
 
 	@pytest.mark.asyncio
 	async def test_no_store(self):
-		result = await _result_read({"artifact_id": "x"}, {})
+		result = await _artifact_read({"artifact_id": "x"}, {})
 		assert result.is_error
 		assert "not available" in result.content.lower()
 
 	@pytest.mark.asyncio
 	async def test_not_found(self):
-		store = InMemoryResultStore()
-		result = await _result_read({"artifact_id": "nonexistent"}, {"result_store": store})
+		store = InMemoryArtifactStore()
+		result = await _artifact_read({"artifact_id": "nonexistent"}, {"artifact_store": store})
 		assert result.is_error
 
 	@pytest.mark.asyncio
 	async def test_with_offset_limit(self):
-		store = InMemoryResultStore()
-		ref = await store.put("0123456789")
-		result = await _result_read({"artifact_id": ref.id, "offset": 3, "limit": 4}, {"result_store": store})
+		store = InMemoryArtifactStore()
+		ref = await store.put_text("0123456789")
+		result = await _artifact_read({"artifact_id": ref.id, "offset": 3, "limit": 4}, {"artifact_store": store})
 		assert result.content == "3456"
 
 
 class TestResultSearch:
 	@pytest.mark.asyncio
 	async def test_basic_search(self):
-		store = InMemoryResultStore()
-		ref = await store.put("line1\nfoo bar\nline3")
-		result = await _result_search({"artifact_id": ref.id, "query": "foo"}, {"result_store": store})
+		store = InMemoryArtifactStore()
+		ref = await store.put_text("line1\nfoo bar\nline3")
+		result = await _artifact_search({"artifact_id": ref.id, "query": "foo"}, {"artifact_store": store})
 		assert not result.is_error
 		assert len(result.content["matches"]) == 1
 		assert "Search results for: foo" in result.context_view()
@@ -636,50 +800,50 @@ class TestResultSearch:
 
 	@pytest.mark.asyncio
 	async def test_no_matches(self):
-		store = InMemoryResultStore()
-		ref = await store.put("nothing here")
-		result = await _result_search({"artifact_id": ref.id, "query": "xyz"}, {"result_store": store})
+		store = InMemoryArtifactStore()
+		ref = await store.put_text("nothing here")
+		result = await _artifact_search({"artifact_id": ref.id, "query": "xyz"}, {"artifact_store": store})
 		assert not result.is_error
 		assert result.content["matches"] == []
 		assert result.context_view() == "No matches for query: xyz"
 
 	@pytest.mark.asyncio
 	async def test_empty_query(self):
-		result = await _result_search({"artifact_id": "x", "query": ""}, {"result_store": InMemoryResultStore()})
+		result = await _artifact_search({"artifact_id": "x", "query": ""}, {"artifact_store": InMemoryArtifactStore()})
 		assert result.is_error
 
 	@pytest.mark.asyncio
 	async def test_no_store(self):
-		result = await _result_search({"artifact_id": "x", "query": "q"}, {})
+		result = await _artifact_search({"artifact_id": "x", "query": "q"}, {})
 		assert result.is_error
 
 
 class TestResultPage:
 	@pytest.mark.asyncio
 	async def test_basic_page(self):
-		store = InMemoryResultStore()
-		ref = await store.put("a" * 10000)
-		result = await _result_page({"artifact_id": ref.id, "page": 1, "page_size": 100}, {"result_store": store})
+		store = InMemoryArtifactStore()
+		ref = await store.put_text("a" * 10000)
+		result = await _artifact_page({"artifact_id": ref.id, "page": 1, "page_size": 100}, {"artifact_store": store})
 		assert not result.is_error
 		assert len(result.content) == 100
 
 	@pytest.mark.asyncio
 	async def test_page_2(self):
-		store = InMemoryResultStore()
-		ref = await store.put("0123456789" * 100)
-		result = await _result_page({"artifact_id": ref.id, "page": 2, "page_size": 10}, {"result_store": store})
+		store = InMemoryArtifactStore()
+		ref = await store.put_text("0123456789" * 100)
+		result = await _artifact_page({"artifact_id": ref.id, "page": 2, "page_size": 10}, {"artifact_store": store})
 		assert result.content == "0123456789"
 
 	@pytest.mark.asyncio
 	async def test_page_beyond_content(self):
-		store = InMemoryResultStore()
-		ref = await store.put("short")
-		result = await _result_page({"artifact_id": ref.id, "page": 100, "page_size": 100}, {"result_store": store})
+		store = InMemoryArtifactStore()
+		ref = await store.put_text("short")
+		result = await _artifact_page({"artifact_id": ref.id, "page": 100, "page_size": 100}, {"artifact_store": store})
 		assert result.is_error
 
 	@pytest.mark.asyncio
 	async def test_no_store(self):
-		result = await _result_page({"artifact_id": "x"}, {})
+		result = await _artifact_page({"artifact_id": "x"}, {})
 		assert result.is_error
 
 
@@ -694,6 +858,33 @@ class TestBuiltinToolsPluginDefaults:
 		plugin = BuiltinToolsPlugin()
 		plugin.initialize({"load": ["file_list", "file_glob", "file_info", "file_append"]}, None)
 		assert {tool.name for tool in plugin.get_tools()} == {"file_list", "file_glob", "file_info", "file_append"}
+
+	def test_standard_builtin_plugin_entry_loads_file_tool_schemas(self, tmp_path):
+		registry = PluginRegistry()
+		for cls in AVAILABLE_BUILTIN_PLUGINS.values():
+			registry.register(cls)
+		engine = Engine(plugin_registry=registry)
+		path = tmp_path / "agent.yaml"
+		path.write_text(
+			"""
+name: tools_agent
+plugins:
+  builtin_tools:
+    enabled: true
+    load: [file_read, file_list, file_glob, file_tree, file_info]
+""",
+			encoding="utf-8",
+		)
+
+		agent = engine.load_agent_template(str(path)).instantiate(models=AgentModels(default=_DummyLLM()))
+		names = {schema["function"]["name"] for schema in agent.registry.get_openai_schemas()}
+
+		assert {"file_read", "file_list", "file_glob", "file_tree", "file_info"}.issubset(names)
+
+	def test_unknown_builtin_tool_config_fails_fast(self):
+		plugin = BuiltinToolsPlugin()
+		with pytest.raises(ValueError, match="builtin_tools.load contains unknown builtin tools: missing_tool"):
+			plugin.initialize({"load": ["missing_tool"]}, None)
 
 	@pytest.mark.asyncio
 	async def test_deferred_tool_search_activates_and_post_call_deactivates(self):
@@ -723,6 +914,18 @@ class TestBuiltinToolsPluginDefaults:
 		result = await tool.execute({"query": "missing"}, {})
 
 		assert result.content["tools"] == []
+
+
+class _DummyLLM(LLMProvider):
+	async def chat(self, messages, tools=None, **kwargs):
+		raise AssertionError("not used")
+
+	async def stream(self, messages, tools=None, **kwargs):
+		raise AssertionError("not used")
+		yield
+
+	async def ask(self, prompt: str, **kwargs) -> str:
+		raise AssertionError("not used")
 
 
 class TestBuiltinPathPolicy:
@@ -795,17 +998,16 @@ class TestBuiltinCommandHelpers:
 			await ensure_venv(str(tmp_path / "badvenv"), {"command_executor": FailingExecutor()})
 		assert get_command_executor({"command_executor": "x"}) == "x"
 		content, artifacts = await store_command_artifacts(
-			CommandResult(exit_code=0, stdout="abcdef", stderr="ghijkl", stdout_truncated=True, stderr_truncated=True),
-			{"result_store": InMemoryResultStore()},
-			stdout_limit=3,
-			stderr_limit=3,
+			CommandResult(exit_code=0, stdout="abcdef", stderr="ghijkl"),
+			{"artifact_store": InMemoryArtifactStore()},
 		)
+		assert content["stdout"] == "abcdef"
+		assert content["stderr"] == "ghijkl"
 		assert content["stdout_artifact_id"]
 		assert content["stderr_artifact_id"]
 		assert len(artifacts) == 2
 		assert bounded_int("bad", 1, 3, 2) == 2
 		assert bounded_int(9, 1, 3, 2) == 3
-		assert truncate_by_bytes("你好abc", 4) == "你"
 
 
 class TestBuiltinFileToolExceptionBranches:
@@ -833,3 +1035,14 @@ class TestBuiltinFileToolExceptionBranches:
 		result = await _file_edit({"path": "readonly.txt", "old_string": "a", "new_string": "b"}, {"workspace": str(tmp_path)})
 		assert result.is_error
 		assert not (tmp_path / "readonly.txt.tmp").exists()
+
+	def test_file_view_helpers_cover_empty_and_depth_branches(self, tmp_path):
+		assert "（无条目）" in _file_list_llm_view(".", [], False)
+		assert "（无匹配）" in _file_glob_llm_view("*.missing", [])
+		assert _entry_line({"path": "dir/file.txt", "type": "file"}, include_type=False) == "dir/file.txt"
+		assert _resolve_line_ranges({}, 0) == [(1, 1)]
+
+		(tmp_path / "ignored").mkdir()
+		lines, entries = _build_tree(str(tmp_path), ".", 0, {"ignored"}, BuiltinPathPolicy(), {"workspace": str(tmp_path)})
+		assert lines == ["."]
+		assert entries == []

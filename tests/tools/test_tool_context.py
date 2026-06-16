@@ -58,7 +58,7 @@ class TestToolContext:
 		d = ctx.to_dict()
 		expected_keys = {
 			"workspace", "exec_ctx", "session_id", "agent_name", "tool_name", "tool_call_id",
-			"request_queue", "response_queue", "result_store", "command_executor",
+			"request_queue", "response_queue", "artifact_store", "command_executor",
 		}
 		assert set(d.keys()) == expected_keys
 

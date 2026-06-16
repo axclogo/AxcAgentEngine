@@ -30,8 +30,8 @@ class ToolObservation:
 	is_error: bool = False
 
 	def compact(self, max_chars: int = 1200) -> str:
-		args = _truncate(str(self.arguments), 400)
-		result = _truncate(self.result, max_chars)
+		args = str(self.arguments)
+		result = self.result
 		status = "error" if self.is_error else "ok"
 		return f"- {self.name}({args}) [{status}, {self.duration_ms}ms]\n  {result}"
 
@@ -52,10 +52,10 @@ class ToolSummaryService:
 		if utility_model:
 			try:
 				summary = await utility_model.ask(TOOL_SUMMARY_PROMPT.format(activity=activity, max_chars=self.max_chars))
-				return _truncate(str(summary).strip(), self.max_chars)
+				return str(summary).strip()
 			except Exception:
 				pass
-		return _truncate(activity, self.max_chars)
+		return activity
 
 
 def observation_from_output(
@@ -79,12 +79,3 @@ def tool_summaries_message(summaries: list[str]) -> dict[str, str] | None:
 	if not lines:
 		return None
 	return {"role": "system", "content": "[工具摘要]\n" + "\n".join(f"- {item}" for item in lines)}
-
-
-def _truncate(text: str, max_chars: int) -> str:
-	if len(text) <= max_chars:
-		return text
-	head_len = max_chars * 3 // 4
-	tail_len = max_chars - head_len
-	omitted = len(text) - head_len - tail_len
-	return f"{text[:head_len]}\n...[省略 {omitted} 个字符]...\n{text[-tail_len:]}"

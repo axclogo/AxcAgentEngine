@@ -1,7 +1,12 @@
 """Tests for #33 __init__.py minimal public API."""
+import ast
 import importlib.util
+from pathlib import Path
 
 import axc_agent_engine
+
+
+ROOT = Path(__file__).resolve().parents[2]
 
 
 class TestMinimalExports:
@@ -9,14 +14,14 @@ class TestMinimalExports:
 		expected = {"Engine", "AgentModels", "AgentTemplate", "LLMConfig", "Agent", "Event", "EventType", "BasePlugin", "ToolDefinition", "tool",
 					"ConcurrencyConfig", "ExecutionLimiter", "RateLimiter", "SessionExecutionGate",
 				"LLMMessage", "LLMUsage", "LLMResponse", "LLMStreamChunk", "Capability",
-				"ToolOutput", "ArtifactRef", "ResultStore",
+			"ToolOutput", "ArtifactRef", "ArtifactStore", "InMemoryArtifactStore",
 				"AuditEvent", "AuditEventType", "InMemoryAuditSink", "ErrorEnvelope", "ErrorCategory",
 				"Checkpoint", "CheckpointStatus", "CheckpointStore", "InMemoryCheckpointStore",
 			"CapabilityPolicyEvaluator", "PolicyDecision", "PolicyEvaluator", "PolicyRequest",
 			"InputProviderResult", "InputProvider", "PassthroughInputProvider",
 			"ResourceRegistry", "ResourceError", "ResourceNotFoundError",
 			"ResourceTypeError", "DuplicateResourceError",
-			"PluginRegistry"}
+			"PluginRegistry", "__version__"}
 		assert set(axc_agent_engine.__all__) == expected
 
 	def test_no_tool_result_in_top_level(self):
@@ -71,3 +76,20 @@ class TestMinimalExports:
 	def test_version_string(self):
 		assert isinstance(axc_agent_engine.__version__, str)
 		assert len(axc_agent_engine.__version__) > 0
+
+
+def test_package_init_files_only_export_symbols():
+	offenders = []
+	for path in sorted((ROOT / "axc_agent_engine").rglob("__init__.py")):
+		tree = ast.parse(path.read_text(encoding="utf-8"))
+		for node in tree.body:
+			if isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant):
+				continue
+			if isinstance(node, (ast.Import, ast.ImportFrom)):
+				continue
+			if isinstance(node, ast.Assign):
+				names = [target.id for target in node.targets if isinstance(target, ast.Name)]
+				if names == ["__all__"]:
+					continue
+			offenders.append(f"{path.relative_to(ROOT)}:{node.lineno} {type(node).__name__}")
+	assert offenders == []

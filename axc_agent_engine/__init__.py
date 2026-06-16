@@ -9,7 +9,8 @@ from axc_agent_engine.core.schema import ToolDefinition, LLMMessage, LLMUsage, L
 from axc_agent_engine.plugins.base import BasePlugin
 from axc_agent_engine.plugins.registry import PluginRegistry
 from axc_agent_engine.tools.decorator import tool
-from axc_agent_engine.tools.tool_output import ToolOutput, ArtifactRef, ResultStore
+from axc_agent_engine.tools.tool_output import ToolOutput, ArtifactRef
+from axc_agent_engine.storage.artifact_store import ArtifactStore, InMemoryArtifactStore
 from axc_agent_engine.observability.audit import AuditEvent, AuditEventType, InMemoryAuditSink
 from axc_agent_engine.runtime.checkpoint import Checkpoint, CheckpointStatus, CheckpointStore, InMemoryCheckpointStore
 from axc_agent_engine.runtime.policy import CapabilityPolicyEvaluator, PolicyDecision, PolicyEvaluator, PolicyRequest
@@ -21,6 +22,7 @@ from axc_agent_engine.runtime.resources import (
 	ResourceTypeError,
 	DuplicateResourceError,
 )
+from axc_agent_engine._version import __version__
 
 __all__ = [
 	#English: Bilingual note. 中文：核心公开 API
@@ -37,17 +39,12 @@ __all__ = [
 	#English: Source note. 中文：能力模型
 	"Capability",
 	#English: Source note. 中文：工具输出
-	"ToolOutput", "ArtifactRef", "ResultStore",
+	"ToolOutput", "ArtifactRef", "ArtifactStore", "InMemoryArtifactStore",
 	#English: Source note. 中文：输入和共享资源边界
 	"InputProviderResult", "InputProvider", "PassthroughInputProvider",
 	"ResourceRegistry", "ResourceError", "ResourceNotFoundError",
 	"ResourceTypeError", "DuplicateResourceError",
 	#English: Source note. 中文：插件开发
 	"BasePlugin", "PluginRegistry", "ToolDefinition", "tool",
+	"__version__",
 ]
-
-try:
-	from importlib.metadata import version as _get_version
-	__version__ = _get_version("axc-agent-engine")
-except Exception:
-	__version__ = "2.3.2"

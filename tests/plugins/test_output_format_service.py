@@ -151,10 +151,10 @@ def test_output_format_extract_strip_and_prompt_builders():
 	assert extract_json("prefix [1,2] suffix") == "[1,2]"
 	assert extract_json("none") == ""
 	assert strip_code_fence("```json\nx\n```") == "x"
-	assert RepairPromptBuilder("json_schema", {"schema": {"type": "object"}}, 5).build("abcdef")
-	assert RepairPromptBuilder("markdown", {"template": "## A"}, 100).build("x")
-	assert RepairPromptBuilder("text", {"max_length": 3, "must_contain": ["a"], "must_not_contain": ["b"]}, 100).build("x")
-	assert RepairPromptBuilder("", {}, 100).build("x") == ""
+	assert RepairPromptBuilder("json_schema", {"schema": {"type": "object"}}).build("abcdef")
+	assert RepairPromptBuilder("markdown", {"template": "## A"}).build("x")
+	assert RepairPromptBuilder("text", {"max_length": 3, "must_contain": ["a"], "must_not_contain": ["b"]}).build("x")
+	assert RepairPromptBuilder("", {}).build("x") == ""
 	assert ValidationResult(True, content="abc").to_dict()["content_length"] == 3
 
 
@@ -211,10 +211,10 @@ def test_json_schema_fallback_path_when_jsonschema_is_missing(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_output_repairer_uses_local_repair_without_prompt_or_model():
-	assert await OutputRepairer("json_schema", None, RepairPromptBuilder("json_schema", {}, 10), 0).repair(
+	assert await OutputRepairer("json_schema", None, RepairPromptBuilder("json_schema", {}), 0).repair(
 		"prefix {\"a\":1} suffix"
 	) == '{"a":1}'
-	assert await OutputRepairer("unknown", None, RepairPromptBuilder("unknown", {}, 10), 0).repair("raw") == "raw"
+	assert await OutputRepairer("unknown", None, RepairPromptBuilder("unknown", {}), 0).repair("raw") == "raw"
 
 
 @pytest.mark.asyncio
@@ -223,7 +223,7 @@ async def test_output_repairer_timeout_zero_and_empty_model_result_use_local():
 		async def ask(self, prompt):
 			return ""
 
-	repairer = OutputRepairer("json_schema", EmptyUtility(), RepairPromptBuilder("json_schema", {}, 10), 0)
+	repairer = OutputRepairer("json_schema", EmptyUtility(), RepairPromptBuilder("json_schema", {}), 0)
 
 	assert await repairer.repair("prefix {\"a\":1} suffix") == '{"a":1}'
 

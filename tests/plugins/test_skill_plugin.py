@@ -5,7 +5,7 @@ import pytest
 from axc_agent_engine.observability.audit import InMemoryAuditSink
 from axc_agent_engine.core.context import ExecutionContext, ExecutionServices
 from axc_agent_engine.runtime.sandbox_models import CommandResult
-from axc_agent_engine.storage.result_store import InMemoryResultStore
+from axc_agent_engine.storage.artifact_store import InMemoryArtifactStore
 
 
 def _create_skill(root, name: str = "demo", body: str = "body"):
@@ -114,7 +114,7 @@ async def test_run_skill_script_uses_limits_metadata_and_audit(tmp_path):
 	ctx.state.metadata.update({"agent_name": "agent-a", "session_id": "sess-1"})
 	executor = FakeExecutor()
 	plugin = SkillPlugin()
-	plugin.initialize({"paths": [str(tmp_path)], "timeout": 7, "stdout_limit": 11, "stderr_limit": 13}, None)
+	plugin.initialize({"paths": [str(tmp_path)], "timeout": 7}, None)
 
 	result = await plugin._tool_run_script(
 		{"skill_name": "demo", "script_name": "run.py"},
@@ -124,8 +124,6 @@ async def test_run_skill_script_uses_limits_metadata_and_audit(tmp_path):
 
 	assert not result.is_error
 	assert executor.spec.timeout == 7
-	assert executor.spec.stdout_limit == 11
-	assert executor.spec.stderr_limit == 13
 	assert ctx.state.metadata["skill"]["last_action"] == "run_script"
 	assert events[-1].type == "skill_script_executed"
 	assert events[-1].actor == "agent-a"
@@ -136,16 +134,16 @@ async def test_load_skill_large_content_externalized(tmp_path):
 	from axc_agent_engine.plugins.builtin.skill.plugin import SkillPlugin
 
 	_create_skill(tmp_path, body="x" * 64)
-	store = InMemoryResultStore()
+	store = InMemoryArtifactStore()
 	plugin = SkillPlugin()
 	plugin.initialize({"paths": [str(tmp_path)], "max_skill_content_chars": 8}, None)
 
-	result = await plugin._tool_load_skill({"skill_name": "demo"}, {"result_store": store})
+	result = await plugin._tool_load_skill({"skill_name": "demo"}, {"artifact_store": store})
 
 	assert not result.is_error
-	assert result.content["content"]["truncated"] is True
+	assert result.content["content"]["externalized"] is True
 	assert result.artifacts
-	assert await store.get(result.artifacts[0].id, 0, 64) == "x" * 64
+	assert (await store.read(result.artifacts[0].id, 0, 64)).content == "x" * 64
 
 
 @pytest.mark.asyncio
@@ -157,19 +155,19 @@ async def test_script_large_stdout_externalized(tmp_path):
 			return CommandResult(exit_code=0, stdout="x" * 64, stderr="")
 
 	_create_skill(tmp_path)
-	store = InMemoryResultStore()
+	store = InMemoryArtifactStore()
 	plugin = SkillPlugin()
 	plugin.initialize({"paths": [str(tmp_path)], "max_result_bytes": 8}, None)
 
 	result = await plugin._tool_run_script(
 		{"skill_name": "demo", "script_name": "run.py"},
-		{"command_executor": FakeExecutor(), "result_store": store},
+		{"command_executor": FakeExecutor(), "artifact_store": store},
 	)
 
 	assert not result.is_error
-	assert result.content["stdout"]["truncated"] is True
+	assert result.content["stdout"]["externalized"] is True
 	assert result.artifacts
-	assert await store.get(result.artifacts[0].id, 0, 64) == "x" * 64
+	assert (await store.read(result.artifacts[0].id, 0, 64)).content == "x" * 64
 
 
 def test_skill_initialize_raises_on_missing_directory(tmp_path):

@@ -15,11 +15,11 @@ class TestMessageStoreToolOutput:
 
 	def test_append_uses_context_view_not_display_view(self):
 		ms = MessageStore()
-		output = ToolOutput.text("full result", summary="context summary")
+		output = ToolOutput.text("full result", llm_view="context view")
 		results = [ToolResult(tool_call_id="1", tool_name="t", arguments={}, output=output, success=True)]
 		ms.append_tool_results(results)
 		assert output.display_view() == "full result"
-		assert ms.get_all()[0]["content"] == "context summary"
+		assert ms.get_all()[0]["content"] == "context view"
 
 	def test_append_error_uses_error_message(self):
 		ms = MessageStore()
@@ -27,21 +27,20 @@ class TestMessageStoreToolOutput:
 		ms.append_tool_results(results)
 		assert "[错误] bad" in ms.get_all()[0]["content"]
 
-	def test_append_long_content_truncated(self):
+	def test_append_long_content_not_truncated_by_default(self):
 		ms = MessageStore()
 		output = ToolOutput.text("x" * 5000)
 		results = [ToolResult(tool_call_id="1", tool_name="t", arguments={}, output=output, success=True)]
 		ms.append_tool_results(results)
 		content = ms.get_all()[0]["content"]
-		assert len(content) < 5000
-		assert "省略" in content
+		assert content == "x" * 5000
 
-	def test_append_with_summary_uses_summary(self):
+	def test_append_with_summary_keeps_content_for_llm_context(self):
 		ms = MessageStore()
 		output = ToolOutput.text("very long " * 500, summary="brief")
 		results = [ToolResult(tool_call_id="1", tool_name="t", arguments={}, output=output, success=True)]
 		ms.append_tool_results(results)
-		assert ms.get_all()[0]["content"] == "brief"
+		assert ms.get_all()[0]["content"] == "very long " * 500
 
 	def test_append_json_output(self):
 		ms = MessageStore()
@@ -92,11 +91,12 @@ class TestMessageStoreToolOutput:
 		ms.append_tool_results(results)
 		assert ms.get_all()[0]["role"] == "tool"
 
-	def test_large_json_content_truncated(self):
+	def test_large_json_content_not_truncated_by_default(self):
 		ms = MessageStore()
 		big_data = {"items": [{"id": i, "name": f"item_{i}" * 50} for i in range(100)]}
 		output = ToolOutput.json_output(big_data)
 		results = [ToolResult(tool_call_id="1", tool_name="t", arguments={}, output=output, success=True)]
 		ms.append_tool_results(results)
 		content = ms.get_all()[0]["content"]
-		assert len(content) <= 2100  # context_view default 2000 + marker overhead
+		assert "item_99" in content
+		assert "省略" not in content

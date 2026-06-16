@@ -15,7 +15,7 @@ from axc_agent_engine.plugins.builtin.common import agent_event_callback, bounde
 from axc_agent_engine.plugins.builtin.config_schemas import SWARM_CONFIG_SCHEMA
 
 if TYPE_CHECKING:
-	from axc_agent_engine.plugins import PluginContext
+	from axc_agent_engine.plugins.context import PluginContext
 
 logger = logging.getLogger(__name__)
 
@@ -138,7 +138,7 @@ class SwarmPlugin(BasePlugin):
 						result_payload = str(reply.content)
 						content, artifact = await _externalize_result(
 							result_payload,
-							context.get("result_store"),
+							context.get("artifact_store"),
 							self._max_result_bytes,
 							{"kind": "swarm_result", "agent_name": task["agent_name"], "task_id": task["task_id"], "swarm_id": swarm_id},
 						)
@@ -337,7 +337,7 @@ def _swarm_llm_view(payload: dict[str, Any]) -> str:
 		result = str(item.get("result", "")).strip()
 		error = str(item.get("error", "")).strip()
 		if result:
-			lines.append(f"   Result: {_swarm_short_text(result, 500)}")
+			lines.append(f"   Result: {result}")
 		if error:
 			lines.append(f"   Error: {error}")
 		if item.get("artifact_id"):
@@ -345,19 +345,13 @@ def _swarm_llm_view(payload: dict[str, Any]) -> str:
 	return "\n".join(lines)
 
 
-def _swarm_short_text(text: str, limit: int) -> str:
-	if len(text) <= limit:
-		return text
-	return f"{text[:limit - 20].rstrip()} ...[truncated]"
-
-
 async def _externalize_result(
 	content: str,
-	result_store: Any,
+	artifact_store: Any,
 	max_result_bytes: int,
 	metadata: dict[str, Any],
 ) -> tuple[Any, Any]:
-	return await externalize_text(content, result_store, max_result_bytes, metadata, logger, "swarm")
+	return await externalize_text(content, artifact_store, max_result_bytes, metadata, logger, "swarm")
 
 
 def _bounded_timeout(value: Any, default: float) -> float:

@@ -11,7 +11,7 @@ from axc_agent_engine.tools.tool_output import ToolOutput
 
 if TYPE_CHECKING:
 	from axc_agent_engine.core.context import ExecutionContext
-	from axc_agent_engine.plugins import PluginContext
+	from axc_agent_engine.plugins.context import PluginContext
 
 logger = logging.getLogger(__name__)
 
@@ -145,7 +145,7 @@ class HumanInTheLoopPlugin(BasePlugin):
 		await request_queue.put(request)
 		try:
 			response = await asyncio.wait_for(response_queue.get(), timeout=self._timeout)
-			return ToolOutput.json_output({"answer": response}, summary=f"用户回复：{str(response)[:100]}")
+			return ToolOutput.json_output({"answer": response}, summary=f"用户回复：{response}")
 		except asyncio.TimeoutError:
 			return ToolOutput.error(f"Waiting for user reply timeout ({self._timeout}s)")
 

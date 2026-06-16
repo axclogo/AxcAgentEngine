@@ -371,7 +371,7 @@ def _sub_agent_complete_envelope(
 			"success": success,
 			"duration_ms": int((time.time() - started) * 1000),
 			"error": error,
-			"result_preview": result[:500],
+			"result": result,
 			**_parent_metadata(envelope),
 		},
 	)

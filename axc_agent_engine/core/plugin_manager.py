@@ -233,30 +233,30 @@ def _normalize_pre_tool_decision(raw: Any, plugin: BasePlugin,
 								 previous_arguments: dict) -> PreToolCallDecision:
 	plugin_name = str(getattr(plugin, "name", "") or plugin.__class__.__name__)
 	if isinstance(raw, PreToolCallDecision):
-		return raw
-	if isinstance(raw, dict):
+		if raw.plugin_name:
+			return raw
 		return PreToolCallDecision(
-			allowed=bool(raw.get("allowed", True)),
-			arguments=dict(raw.get("arguments") or previous_arguments),
-			plugin_name=str(raw.get("plugin_name") or plugin_name),
-			reason=str(raw.get("reason") or raw.get("message") or ""),
-			code=str(raw.get("code") or "tool.rejected_by_plugin"),
-			details=dict(raw.get("details") or {}),
+			allowed=raw.allowed,
+			arguments=dict(raw.arguments),
+			plugin_name=plugin_name if not raw.allowed else "",
+			reason=raw.reason,
+			code=raw.code,
+			details=dict(raw.details or {}) if raw.details is not None else None,
 		)
-	if isinstance(raw, tuple):
-		allowed = bool(raw[0]) if len(raw) > 0 else True
-		arguments = dict(raw[1] if len(raw) > 1 and raw[1] is not None else previous_arguments)
-		reason = str(raw[2]) if len(raw) > 2 and raw[2] else _plugin_rejection_reason(plugin)
-		code = str(raw[3]) if len(raw) > 3 and raw[3] else _plugin_rejection_code(plugin)
-		return PreToolCallDecision(
-			allowed=allowed,
-			arguments=arguments,
-			plugin_name=plugin_name if not allowed else "",
-			reason=reason,
-			code=code,
-			details=_plugin_rejection_details(plugin) if not allowed else None,
-		)
-	return PreToolCallDecision(bool(raw), previous_arguments, plugin_name=plugin_name)
+	if not isinstance(raw, tuple) or len(raw) != 2:
+		raise TypeError(f"{plugin_name}.pre_tool_call must return (allowed, arguments) or PreToolCallDecision")
+	allowed, arguments = raw
+	if not isinstance(arguments, dict):
+		raise TypeError(f"{plugin_name}.pre_tool_call arguments must be a dict")
+	allowed = bool(allowed)
+	return PreToolCallDecision(
+		allowed=allowed,
+		arguments=dict(arguments),
+		plugin_name=plugin_name if not allowed else "",
+		reason=_plugin_rejection_reason(plugin) if not allowed else "",
+		code=_plugin_rejection_code(plugin) if not allowed else "tool.rejected_by_plugin",
+		details=_plugin_rejection_details(plugin) if not allowed else None,
+	)
 
 
 def _plugin_rejection_reason(plugin: BasePlugin) -> str:

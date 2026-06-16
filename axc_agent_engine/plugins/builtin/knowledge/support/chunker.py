@@ -147,8 +147,8 @@ class SemanticChunker:
 			content=content,
 			content_with_context=content_with_context,
 			source=source,
-			heading_path=heading_path[:500],
+			heading_path=heading_path,
 			chunk_index=idx,
 			content_hash=hashlib.sha256(content.encode("utf-8")).hexdigest(),
-			metadata={"source": source, "heading_path": heading_path[:500]},
+			metadata={"source": source, "heading_path": heading_path},
 		)

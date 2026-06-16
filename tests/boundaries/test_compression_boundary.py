@@ -63,7 +63,6 @@ async def test_compress_plugin_restores_file_cache_after_summary():
 			"start_line": 1,
 			"end_line": 1,
 			"total_lines": 1,
-			"truncated": False,
 		}),
 		8,
 	)

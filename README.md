@@ -143,7 +143,7 @@ system_prompt: |
 plugins:
   builtin_tools:
     enabled: true
-    load: ["get_time", "file_read", "file_write", "http_request", "result_read"]
+    load: ["get_time", "file_read", "file_write", "http_request", "artifact_read"]
     defer: ["file_write", "http_request"]
 
   knowledge:
@@ -307,11 +307,30 @@ Unsupported part types fail immediately. Official plugins do not fetch host medi
 
 `ToolOutput` separates the LLM context view from the UI display view:
 
-- `context_view(max_chars=2000)` is written into `MessageStore` for the next LLM round. It prefers `durable_summary`, then `summary`, then compact content, and preserves artifact refs.
-- `display_view(max_chars=0)` is used by `tool_result` events for host/UI display. It can expose full content or artifact refs without polluting LLM context.
-- `compact_view()` is not a UI contract. New code should call `context_view()` or `display_view()` explicitly.
+- `content` remains the structured tool payload for hosts, UI, artifacts, and programmatic handling.
+- `llm_view` is an optional text view written for LLM reasoning. Use it when structured JSON would be harder for the model to read.
+- `context_view()` is written into `MessageStore` for the next LLM round. It prefers `durable_summary`, then `llm_view`, then full `content`, and preserves artifact refs. `summary` is metadata, not a replacement for the LLM view.
+- `display_view()` is used by `tool_result` events for host/UI display. It exposes full content; UI preview limits belong in the host UI layer.
+- New code should call `context_view()` or `display_view()` explicitly.
 
 Hosts should not monkey patch `ToolOutput` to change LLM context behavior.
+
+Tool implementations must not use default truncation, omission, or count-only `llm_view` text. List-style tools must include item identifiers such as names, paths, or ids. Content-style tools must return full content unless the caller explicitly requested ranges or pages. Oversized results should be externalized to an `ArtifactStore` artifact and the `llm_view` must include the `artifact_id` and tell the model to use `artifact_read` or `artifact_page`; it must not emit vague omitted text.
+
+Official high-signal tools such as `agent_list`, `agent_call`, `knowledge_search`, `graph_search`, `memory_search`, `swarm_dispatch`, `file_read`, `file_list`, `file_glob`, `file_tree`, `list_traces`, `get_trace`, and `artifact_search` provide LLM-friendly `llm_view` text while keeping structured `content` for hosts.
+
+## ArtifactStore
+
+`ArtifactStore` is the host-owned storage boundary for large tool results and generated artifacts. The engine defines the protocol and ships `InMemoryArtifactStore` for local development. Production hosts should inject a durable backend through `Engine(artifact_store=...)`.
+
+The protocol supports text, bytes, and file-reference artifacts:
+
+- `put_text(...)` and `put_bytes(...)` store inline content in the backend.
+- `put_file_ref(path, ...)` registers a file path without copying the file into memory or duplicating a large file.
+- `read(...)`, `read_page(...)`, and `search(...)` are exposed to the model through `artifact_read`, `artifact_page`, and `artifact_search`.
+- `stat(...)`, `delete(...)`, `delete_run(...)`, and `gc(...)` let the host manage lifecycle.
+
+Artifacts can carry `run_id`, `expires_at`, and `durable` metadata. Non-durable artifacts should be garbage-collected by run/session policy; durable artifacts are retained by host policy.
 
 ## Durable Tool Results and Sub-Agent Events
 
@@ -517,7 +536,13 @@ class MyPlugin(BasePlugin):
         return True, arguments
 
     async def _execute(self, args: dict, context: dict) -> ToolOutput:
-        return ToolOutput.text(f"Result for {args['query']}")
+        data = {"query": args["query"], "matches": [{"title": "Example", "score": 0.92}]}
+        return ToolOutput(
+            content=data,
+            content_type="json",
+            summary="Found 1 match",
+            llm_view="Search results:\n1. Example | score=0.92",
+        )
 ```
 
 Plugins must inherit `BasePlugin`, declare `config_schema`, and return tools as `ToolDefinition` instances. `ToolRegistry` does not accept dicts.
@@ -562,6 +587,7 @@ CLI logging flags are global and must be placed before the subcommand.
 - **LLM config lives in code.** Agent YAML describes runtime limits, capabilities, and plugins.
 - **Fatal errors are not hidden by fallback logic.** Invalid configuration, invalid runtime resources, broken tool contracts, and flow errors must fail clearly.
 - **Official plugins stay lean.** They may strengthen Agent behavior, but they do not own host network clients, deployment API keys, external services, or deployment-specific protocols.
+- **Package `__init__.py` files only re-export symbols.** Implementations, registries, factories, version constants, and protocols live in normal modules.
 - **Runtime resources use mounts.** Do not pass resources through YAML or `overrides`.
 - **Request correlation uses metadata.** Hosts pass external trace identifiers through `metadata`; tracing spans persist them directly.
 - **The API is a subset.** Request-level `tools`, `tool_choice`, `n > 1` are rejected.
@@ -569,8 +595,8 @@ CLI logging flags are global and must be placed before the subcommand.
 ## Tests
 
 ```bash
-python3 -m pytest -q
-python3 -m pytest --cov --cov-report=term-missing:skip-covered -q
+.venv/bin/python -m pytest --cov=axc_agent_engine -q
+make test-core-cov
 ```
 
-The release gate requires at least 95% total coverage.
+The release gate requires at least 95% total coverage. The engine-body coverage target is 98%.

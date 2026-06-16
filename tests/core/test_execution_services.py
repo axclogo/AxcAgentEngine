@@ -3,7 +3,7 @@ import pytest
 from axc_agent_engine.core.context import (
 	ExecutionConfig, ExecutionState, ExecutionContext, ExecutionServices,
 )
-from axc_agent_engine.storage.result_store import InMemoryResultStore
+from axc_agent_engine.storage.artifact_store import InMemoryArtifactStore
 from axc_agent_engine.tools.context import ToolContext
 from axc_agent_engine.tools.tool_output import ToolOutput
 from axc_agent_engine.tools.executor import execute_tool
@@ -16,28 +16,28 @@ from axc_agent_engine.core.plugin_manager import PluginManager
 class TestExecutionServices:
 	def test_default_none(self):
 		services = ExecutionServices()
-		assert services.result_store is None
+		assert services.artifact_store is None
 		assert services.message_bus is None
 
-	def test_with_result_store(self):
-		store = InMemoryResultStore()
-		services = ExecutionServices(result_store=store)
-		assert services.result_store is store
+	def test_with_artifact_store(self):
+		store = InMemoryArtifactStore()
+		services = ExecutionServices(artifact_store=store)
+		assert services.artifact_store is store
 
 	def test_context_has_services(self):
-		store = InMemoryResultStore()
-		services = ExecutionServices(result_store=store)
+		store = InMemoryArtifactStore()
+		services = ExecutionServices(artifact_store=store)
 		ctx = ExecutionContext(services=services)
-		assert ctx.services.result_store is store
+		assert ctx.services.artifact_store is store
 
 	def test_context_default_services(self):
 		ctx = ExecutionContext()
 		assert ctx.services is not None
-		assert ctx.services.result_store is None
+		assert ctx.services.artifact_store is None
 
 	def test_fork_for_child_inherits_services_identity_and_cancel(self):
-		store = InMemoryResultStore()
-		services = ExecutionServices(result_store=store)
+		store = InMemoryArtifactStore()
+		services = ExecutionServices(artifact_store=store)
 		ctx = ExecutionContext(services=services)
 		ctx.state.metadata["agent_name"] = "agent-a"
 		ctx.state.metadata["session_id"] = "session-a"
@@ -58,65 +58,65 @@ class TestExecutionServices:
 			child.check_cancelled()
 
 
-class TestToolContextResultStore:
-	def test_result_store_from_services(self):
-		store = InMemoryResultStore()
-		services = ExecutionServices(result_store=store)
+class TestToolContextArtifactStore:
+	def test_artifact_store_from_services(self):
+		store = InMemoryArtifactStore()
+		services = ExecutionServices(artifact_store=store)
 		exec_ctx = ExecutionContext(services=services)
 		tool_ctx = ToolContext(exec_ctx=exec_ctx)
-		assert tool_ctx.result_store is store
+		assert tool_ctx.artifact_store is store
 
-	def test_result_store_none_without_services(self):
+	def test_artifact_store_none_without_services(self):
 		exec_ctx = ExecutionContext()
 		tool_ctx = ToolContext(exec_ctx=exec_ctx)
-		assert tool_ctx.result_store is None
+		assert tool_ctx.artifact_store is None
 
-	def test_result_store_none_without_exec_ctx(self):
+	def test_artifact_store_none_without_exec_ctx(self):
 		tool_ctx = ToolContext()
-		assert tool_ctx.result_store is None
+		assert tool_ctx.artifact_store is None
 
-	def test_to_dict_includes_result_store(self):
-		store = InMemoryResultStore()
-		services = ExecutionServices(result_store=store)
+	def test_to_dict_includes_artifact_store(self):
+		store = InMemoryArtifactStore()
+		services = ExecutionServices(artifact_store=store)
 		exec_ctx = ExecutionContext(services=services)
 		tool_ctx = ToolContext(exec_ctx=exec_ctx)
 		d = tool_ctx.to_dict()
-		assert d["result_store"] is store
+		assert d["artifact_store"] is store
 
-	def test_to_dict_result_store_none(self):
+	def test_to_dict_artifact_store_none(self):
 		tool_ctx = ToolContext()
 		d = tool_ctx.to_dict()
-		assert d["result_store"] is None
+		assert d["artifact_store"] is None
 
 
 class TestOrchestratorServiceInjection:
 	@pytest.mark.asyncio
-	async def test_result_store_reaches_tool(self):
-		"""Verify result_store from services reaches tool via context dict."""
+	async def test_artifact_store_reaches_tool(self):
+		"""Verify artifact_store from services reaches tool via context dict."""
 		received = {}
 
 		async def capture(args, ctx):
-			received["result_store"] = ctx.get("result_store")
+			received["artifact_store"] = ctx.get("artifact_store")
 			return ToolOutput.text("ok")
 
 		reg = ToolRegistry()
 		reg.register(ToolDefinition(name="t", execute=capture,
 			parameters={"type": "object", "properties": {}}))
-		store = InMemoryResultStore()
-		services = ExecutionServices(result_store=store)
+		store = InMemoryArtifactStore()
+		services = ExecutionServices(artifact_store=store)
 		ctx = ExecutionContext(config=ExecutionConfig(), state=ExecutionState(), services=services)
 		pm = PluginManager([])
 		results = await execute_tool_calls(
 			[{"name": "t", "arguments": {}, "id": "x"}], reg, pm.plugins, ctx)
 		assert results[0].success
-		assert received["result_store"] is store
+		assert received["artifact_store"] is store
 
 	@pytest.mark.asyncio
-	async def test_no_result_store_passes_none(self):
+	async def test_no_artifact_store_passes_none(self):
 		received = {}
 
 		async def capture(args, ctx):
-			received["result_store"] = ctx.get("result_store")
+			received["artifact_store"] = ctx.get("artifact_store")
 			return ToolOutput.text("ok")
 
 		reg = ToolRegistry()
@@ -127,7 +127,7 @@ class TestOrchestratorServiceInjection:
 		results = await execute_tool_calls(
 			[{"name": "t", "arguments": {}, "id": "x"}], reg, pm.plugins, ctx)
 		assert results[0].success
-		assert received["result_store"] is None
+		assert received["artifact_store"] is None
 
 
 class TestExecutorToolOutputEnforcement:
@@ -219,5 +219,4 @@ class TestToolResultContextView:
 		output = ToolOutput.text("x" * 5000)
 		tr = ToolResult(tool_call_id="1", tool_name="t", arguments={}, output=output, success=True)
 		view = tr.context_view()
-		assert len(view) < 5000
-		assert "省略" in view
+		assert view == "x" * 5000

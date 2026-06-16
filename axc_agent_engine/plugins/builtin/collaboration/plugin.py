@@ -11,7 +11,7 @@ from axc_agent_engine.plugins.builtin.common import agent_event_callback
 from axc_agent_engine.plugins.builtin.config_schemas import COLLABORATION_CONFIG_SCHEMA
 
 if TYPE_CHECKING:
-	from axc_agent_engine.plugins import PluginContext
+	from axc_agent_engine.plugins.context import PluginContext
 
 logger = logging.getLogger(__name__)
 

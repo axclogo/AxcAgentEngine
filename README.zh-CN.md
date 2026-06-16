@@ -144,7 +144,7 @@ system_prompt: |
 plugins:
   builtin_tools:
     enabled: true
-    load: ["get_time", "file_read", "file_write", "http_request", "result_read"]
+    load: ["get_time", "file_read", "file_write", "http_request", "artifact_read"]
     defer: ["file_write", "http_request"]
 
   knowledge:
@@ -308,11 +308,30 @@ messages = [{
 
 `ToolOutput` 明确分离 LLM 上下文视图和 UI 展示视图：
 
-- `context_view(max_chars=2000)` 写入 `MessageStore`，供下一轮 LLM 使用。它优先使用 `durable_summary`，其次 `summary`，最后才压缩 content，并保留 artifact refs。
-- `display_view(max_chars=0)` 用于 `tool_result` 事件和宿主/UI 展示，可以暴露完整内容或 artifact refs，但不会污染 LLM 上下文。
-- `compact_view()` 不是 UI 协议。新代码应显式调用 `context_view()` 或 `display_view()`。
+- `content` 继续作为结构化工具结果，给宿主、UI、artifact 和程序化处理使用。
+- `llm_view` 是可选的 LLM 文本视图。结构化 JSON 不利于模型理解时，工具应显式提供它。
+- `context_view()` 写入 `MessageStore`，供下一轮 LLM 使用。它优先使用 `durable_summary`，其次 `llm_view`，最后使用完整 `content`，并保留 artifact refs。`summary` 是元数据，不替代 LLM 视图。
+- `display_view()` 用于 `tool_result` 事件和宿主/UI 展示，暴露完整内容；UI 预览限制属于宿主 UI 层。
+- 新代码应显式调用 `context_view()` 或 `display_view()`。
 
 宿主不要 monkey patch `ToolOutput` 来改变 LLM 上下文行为。
+
+工具实现禁止默认截断、省略或只给计数式 `llm_view`。列表类工具必须包含条目标识，例如名称、路径或 id。内容类工具默认返回完整内容，除非调用方显式请求 ranges 或分页。超大结果应外部化到 `ArtifactStore` artifact，`llm_view` 必须给出 `artifact_id` 并提示模型使用 `artifact_read` 或 `artifact_page`，不能输出含糊的省略文本。
+
+官方高收益工具已经提供 LLM 友好的 `llm_view`，包括 `agent_list`、`agent_call`、`knowledge_search`、`graph_search`、`memory_search`、`swarm_dispatch`、`file_read`、`file_list`、`file_glob`、`file_tree`、`list_traces`、`get_trace`、`artifact_search`；它们仍保留结构化 `content` 给宿主使用。
+
+## ArtifactStore
+
+`ArtifactStore` 是大工具结果和工具产物的宿主存储边界。引擎定义协议，并提供 `InMemoryArtifactStore` 给本地开发和测试使用；生产宿主应通过 `Engine(artifact_store=...)` 注入自己的持久化实现。
+
+协议支持三类写入：
+
+- `put_text(...)` / `put_bytes(...)`：把文本或字节内容写入后端。
+- `put_file_ref(path, ...)`：只注册文件路径引用，不把大文件读入内存，也不复制一份 10GB 文件。
+- `read(...)` / `read_page(...)` / `search(...)`：分别由 `artifact_read`、`artifact_page`、`artifact_search` 暴露给模型继续读取。
+- `stat(...)` / `delete(...)` / `delete_run(...)` / `gc(...)`：给宿主管理生命周期。
+
+artifact 可携带 `run_id`、`expires_at`、`durable` 元数据。非 durable artifact 应按 run/session 策略清理；durable artifact 由宿主保留策略决定。
 
 ## 持久工具结果与子 Agent 事件
 
@@ -494,7 +513,13 @@ class MyPlugin(BasePlugin):
         return True, arguments
 
     async def _execute(self, args: dict, context: dict) -> ToolOutput:
-        return ToolOutput.text(f"Result for {args['query']}")
+        data = {"query": args["query"], "matches": [{"title": "Example", "score": 0.92}]}
+        return ToolOutput(
+            content=data,
+            content_type="json",
+            summary="Found 1 match",
+            llm_view="Search results:\n1. Example | score=0.92",
+        )
 ```
 
 插件必须继承 `BasePlugin`，必须声明 `config_schema`，工具必须返回 `ToolDefinition` 实例，`ToolRegistry` 不接受 dict。
@@ -539,6 +564,7 @@ CLI 日志参数是全局参数，需要放在子命令前。
 - **LLM 配置在代码中。** Agent YAML 只描述运行时限制、能力和插件。
 - **致命错误不做兜底隐藏。** 配置错误、运行时资源错误、工具协议错误、流程错误都必须明确失败。
 - **官方插件保持精简。** 可以强化 Agent 能力，但不持有宿主网络 client、部署 API key、外部服务或部署协议。
+- **包 `__init__.py` 只做符号导出。** 实现、注册表、factory、版本常量和协议都放在正常模块中。
 - **运行时资源走 mounts。** 不要通过 YAML 或 `overrides` 传资源对象。
 - **请求关联走 metadata。** 宿主通过 `metadata` 传外部 trace 标识，tracing span 原样携带落库。
 - **API 是明确子集。** 请求级 `tools`、`tool_choice`、`n > 1` 会被拒绝。
@@ -546,8 +572,8 @@ CLI 日志参数是全局参数，需要放在子命令前。
 ## 测试
 
 ```bash
-python3 -m pytest -q
-python3 -m pytest --cov --cov-report=term-missing:skip-covered -q
+.venv/bin/python -m pytest --cov=axc_agent_engine -q
+make test-core-cov
 ```
 
-发布门禁要求总覆盖率不低于 95%。
+发布门禁要求总覆盖率不低于 95%，引擎本体覆盖率目标是 98%。

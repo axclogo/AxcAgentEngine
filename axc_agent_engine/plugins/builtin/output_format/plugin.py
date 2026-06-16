@@ -11,7 +11,7 @@ from axc_agent_engine.plugins.builtin.output_format.support import OutputFormatS
 
 if TYPE_CHECKING:
 	from axc_agent_engine.core.context import ExecutionContext
-	from axc_agent_engine.plugins import PluginContext
+	from axc_agent_engine.plugins.context import PluginContext
 
 logger = logging.getLogger(__name__)
 
@@ -35,12 +35,11 @@ class OutputFormatPlugin(BasePlugin):
 		self._template = config.get("template", "")
 		self._constraints = config.get("constraints", "")
 		self._strict = config.get("strict", False)
-		self._auto_repair = config.get("auto_repair", config.get("repair", True))
+		self._auto_repair = config.get("auto_repair", True)
 		self._repair_attempts = int(config.get("repair_attempts", 1))
 		self._repair_timeout = float(config.get("repair_timeout", 30))
-		self._max_repair_chars = int(config.get("max_repair_chars", 3000))
 		self._max_output_chars = int(config.get("max_output_chars", 0) or 0)
-		self._schema_id = str(config.get("schema_id") or config.get("contract_name") or "")
+		self._schema_id = str(config.get("schema_id") or "")
 		self._schema_version = str(config.get("schema_version") or "")
 		self._plugin_ctx = plugin_ctx
 
@@ -135,7 +134,6 @@ class OutputFormatPlugin(BasePlugin):
 			self._type,
 			config,
 			utility_model=getattr(self._plugin_ctx, "utility_model", None),
-			max_repair_chars=self._max_repair_chars,
 			repair_timeout=self._repair_timeout,
 			max_output_chars=self._max_output_chars,
 		)

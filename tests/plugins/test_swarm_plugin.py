@@ -16,7 +16,7 @@ from axc_agent_engine.plugins.builtin.swarm.plugin import (
 	_swarm_metadata,
 	_task_result,
 )
-from axc_agent_engine.storage.result_store import InMemoryResultStore
+from axc_agent_engine.storage.artifact_store import InMemoryArtifactStore
 
 
 class RecordingDispatcher:
@@ -158,19 +158,19 @@ async def test_swarm_fail_fast_cancels_remaining_tasks():
 
 
 async def test_swarm_large_result_externalized():
-	store = InMemoryResultStore()
+	store = InMemoryArtifactStore()
 	dispatcher = RecordingDispatcher({"worker": "x" * 100})
 	plugin = _plugin([SimpleNamespace(name="worker", description="")], dispatcher, {"max_result_bytes": 10})
 
 	result = await plugin._tool_swarm_dispatch(
 		{"goal": "ship", "tasks": [{"agent_name": "worker", "description": "do"}]},
-		{"agent_name": "caller", "result_store": store},
+		{"agent_name": "caller", "artifact_store": store},
 	)
 
 	assert result.artifacts
 	task = result.content["results"][0]
-	assert task["result"]["truncated"] is True
-	assert await store.get(result.artifacts[0].id, limit=3) == "xxx"
+	assert task["result"]["externalized"] is True
+	assert (await store.read(result.artifacts[0].id, limit=3)).content == "xxx"
 
 
 def test_swarm_tool_has_capability_and_risk():

@@ -14,7 +14,9 @@ from axc_agent_engine.plugins.config_schema import config_field, config_schema
 from axc_agent_engine.plugins.registry import PluginRegistry
 from axc_agent_engine.runtime.resources import ResourceRegistry
 from axc_agent_engine.runtime.checkpoint import InMemoryCheckpointStore
+from axc_agent_engine.runtime.input import InputProviderResult
 from axc_agent_engine.runtime.sandbox_local import LocalSubprocessExecutor
+from axc_agent_engine.workflow import WorkflowResumePlan, WorkflowStatus
 
 
 @pytest.fixture
@@ -60,6 +62,46 @@ class CapturePlugin(BasePlugin):
 		super().initialize(config, plugin_ctx)
 		type(self).last_config = config
 		type(self).last_ctx = plugin_ctx
+
+
+class CloseErrorPlugin(BasePlugin):
+	name = "close_error"
+
+	async def close(self):
+		raise RuntimeError("close down")
+
+
+class CloseTimeoutPlugin(BasePlugin):
+	name = "close_timeout"
+
+	async def close(self):
+		import asyncio
+		await asyncio.sleep(10)
+
+
+class MetadataInputProvider:
+	async def process(self, messages, context):
+		return InputProviderResult(
+			messages=[{"role": "user", "content": [{"type": "text", "text": "processed"}]}],
+			artifacts=[{"artifact_id": "a1"}],
+			metadata={"source": context["agent_name"]},
+		)
+
+
+class MissingWorkflowRuntime:
+	async def run(self, request):
+		if False:
+			yield None
+
+	async def resume(self, request):
+		async for event in request.handler(WorkflowResumePlan(run_id=request.run_id, kind="missing")):
+			yield event
+
+	async def pause(self, run_id: str, reason: str = "") -> None:
+		pass
+
+	async def status(self, run_id: str):
+		return WorkflowStatus.MISSING
 
 
 @pytest.fixture
@@ -306,6 +348,31 @@ plugins:
 		assert seen["run_options"] == {"run_id": "run-1"}
 		assert seen["metadata"] == metadata
 
+	@pytest.mark.asyncio
+	async def test_chat_with_messages_extracts_text_and_invalid_agent_call_depth_becomes_zero(self, mock_llm, tmp_path):
+		path = tmp_path / "agent.yaml"
+		path.write_text("name: messages_agent\nsystem_prompt: base\n", encoding="utf-8")
+		agent = Engine().load_agent_template(str(path)).instantiate(models=AgentModels(default=mock_llm))
+		seen = {}
+
+		async def execute(**kwargs):
+			seen.update(kwargs)
+			return "ok"
+
+		agent._execute = execute
+		result = await agent.chat_with_messages(
+			[{"role": "user", "content": [{"type": "text", "text": "first"}, {"type": "text", "text": "second"}]}],
+			metadata={"agent_call_depth": "bad"},
+		)
+		assert result == "ok"
+		assert seen["user_message"] == "first\nsecond"
+
+		request = RunRequest.create(user_message="hi", metadata={"agent_call_depth": "bad"})
+		ctx = agent._executor_factory.context_factory.create(request)
+		assert ctx.runtime.agent_call_depth == 0
+		ctx = agent._executor_factory.context_factory.create(RunRequest.create(user_message="hi", llm_options={"temperature": 0}))
+		assert ctx.runtime.llm_options == {"temperature": 0}
+
 	def test_run_request_metadata_reaches_execution_context(self, mock_llm, tmp_path):
 		path = tmp_path / "agent.yaml"
 		path.write_text("name: metadata_agent\nsystem_prompt: base\n", encoding="utf-8")
@@ -404,3 +471,71 @@ plugins:
 		engine = Engine()
 		await engine.close()
 		# Should complete without error
+
+	@pytest.mark.asyncio
+	async def test_agent_input_provider_metadata_reset_and_error_paths(self, mock_llm, tmp_path):
+		from axc_agent_engine.core.errors import ProviderError
+
+		path = tmp_path / "agent.yaml"
+		path.write_text("name: input_agent\nsystem_prompt: base\n", encoding="utf-8")
+		agent = Engine(input_provider=MetadataInputProvider()).load_agent_template(str(path)).instantiate(
+			models=AgentModels(default=mock_llm),
+		)
+		executor_ctx = []
+		original_create = agent._create_executor
+
+		def capture_create(*args, **kwargs):
+			executor = original_create(*args, **kwargs)
+			executor_ctx.append(executor._ctx)
+			return executor
+
+		agent._create_executor = capture_create
+		assert await agent.chat("raw", session_id="s1") == "hello"
+		assert executor_ctx[0].state.metadata["input_artifacts"] == [{"artifact_id": "a1"}]
+		assert executor_ctx[0].state.metadata["input_metadata"] == {"source": "input_agent"}
+		assert mock_llm.chat.call_args.args[0][-1]["content"] == [{"type": "text", "text": "processed"}]
+		assert executor_ctx[0].state.total_input_tokens == 10
+		assert await agent.get_session("s1") is not None
+		await agent.reset_session("s1")
+		assert await agent.get_session("s1") is None
+		await agent.chat("raw", session_id="s2")
+		await agent.reset_session()
+		assert await agent.get_session("s2") is None
+
+		async def error_stream(**kwargs):
+			from axc_agent_engine.core.events import Event
+			yield Event.error("llm down")
+
+		agent._execute_stream = error_stream
+		with pytest.raises(ProviderError, match="llm down"):
+			await agent.chat("raw")
+
+	@pytest.mark.asyncio
+	async def test_agent_resume_missing_error_and_close_failures(self, mock_llm, tmp_path, monkeypatch):
+		import asyncio
+		from axc_agent_engine.core.errors import ProviderError
+
+		path = tmp_path / "agent.yaml"
+		path.write_text("name: resume_agent\nsystem_prompt: base\n", encoding="utf-8")
+		agent = Engine().load_agent_template(str(path)).instantiate(models=AgentModels(default=mock_llm))
+		agent._workflow_runtime = MissingWorkflowRuntime()
+		events = [event async for event in agent.resume_stream("missing-run")]
+		assert events[0].content == "CheckpointStore is required for resume"
+		with pytest.raises(ProviderError, match="CheckpointStore is required"):
+			await agent.resume("missing-run")
+
+		real_wait_for = asyncio.wait_for
+
+		async def immediate_wait_for(awaitable, timeout):
+			awaitable.close()
+			raise asyncio.TimeoutError()
+
+		async def selective_wait_for(awaitable, timeout):
+			qualname = getattr(getattr(awaitable, "cr_code", None), "co_qualname", "")
+			if qualname.endswith("CloseTimeoutPlugin.close"):
+				return await immediate_wait_for(awaitable, timeout)
+			return await real_wait_for(awaitable, timeout)
+
+		monkeypatch.setattr("axc_agent_engine.agent.asyncio.wait_for", selective_wait_for)
+		agent._plugins = [CloseErrorPlugin(), CloseTimeoutPlugin()]
+		await agent.close()

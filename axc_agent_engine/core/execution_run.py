@@ -67,10 +67,6 @@ def execution_checkpoint_state(
 		},
 		"payload": {},
 		"metadata": metadata,
-		#English: Backward-compatible fields for existing stores/tests. 中文：源码说明。
-		"current_round": ctx.state.current_round,
-		"input_tokens": ctx.state.total_input_tokens,
-		"output_tokens": ctx.state.total_output_tokens,
 	}
 	if extra_state:
 		payload = dict(extra_state)

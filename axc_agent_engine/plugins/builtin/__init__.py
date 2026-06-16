@@ -25,27 +25,7 @@ from axc_agent_engine.plugins.builtin.safety.plugin import SafetyPlugin
 from axc_agent_engine.plugins.builtin.skill.plugin import SkillPlugin
 from axc_agent_engine.plugins.builtin.swarm.plugin import SwarmPlugin
 from axc_agent_engine.plugins.builtin.tracing.plugin import TracingPlugin
-
-AVAILABLE_BUILTIN_PLUGINS = {
-	"builtin_tools": BuiltinToolsPlugin,
-	"collaboration": CollaborationPlugin,
-	"compress": CompressPlugin,
-	"cost_statistics": CostStatisticsPlugin,
-	"graph": GraphPlugin,
-	"hooks": HooksPlugin,
-	"human_in_the_loop": HumanInTheLoopPlugin,
-	"knowledge": KnowledgePlugin,
-	"mcp": MCPPlugin,
-	"memory": MemoryPlugin,
-	"output_format": OutputFormatPlugin,
-	"reflexion": ReflexionPlugin,
-	"repetition_guard": RepetitionGuardPlugin,
-	"risk_guard": RiskGuardPlugin,
-	"safety": SafetyPlugin,
-	"skill": SkillPlugin,
-	"swarm": SwarmPlugin,
-	"tracing": TracingPlugin,
-}
+from axc_agent_engine.plugins.builtin.registry import AVAILABLE_BUILTIN_PLUGINS
 
 __all__ = [
 	"AVAILABLE_BUILTIN_PLUGINS",

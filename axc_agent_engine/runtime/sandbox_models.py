@@ -18,8 +18,6 @@ class CommandSpec:
 	timeout: int = 60
 	env: dict[str, str] = field(default_factory=dict)
 	use_shell: bool = False
-	stdout_limit: int = 1_000_000
-	stderr_limit: int = 1_000_000
 
 
 @dataclass(frozen=True)
@@ -31,8 +29,6 @@ class CommandResult:
 	stderr: str = ""
 	duration_ms: int = 0
 	timed_out: bool = False
-	stdout_truncated: bool = False
-	stderr_truncated: bool = False
 
 
 @runtime_checkable

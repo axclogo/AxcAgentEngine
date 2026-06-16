@@ -118,11 +118,17 @@ class TestExecuteToolCalls:
 	@pytest.mark.asyncio
 	async def test_plugin_rejection_preserves_reason(self):
 		from axc_agent_engine.plugins.base import BasePlugin
+		from axc_agent_engine.core.plugin_manager import PreToolCallDecision
 
 		class RejectPlugin(BasePlugin):
 			name = "reject_guard"
 			async def pre_tool_call(self, exec_ctx, tool_name, arguments):
-				return False, arguments, "record_id is required before loading related owner_id", "tool.rejected_by_test"
+				return PreToolCallDecision(
+					allowed=False,
+					arguments=arguments,
+					reason="record_id is required before loading related owner_id",
+					code="tool.rejected_by_test",
+				)
 
 		async def noop(args, ctx):
 			return ToolOutput.text("ok")
@@ -141,10 +147,10 @@ class TestExecuteToolCalls:
 		assert results[0].error != "Operation rejected by plugin"
 
 	@pytest.mark.asyncio
-	async def test_result_store_accessible_via_context(self):
-		"""Verify result_store from services reaches the tool via context dict."""
+	async def test_artifact_store_accessible_via_context(self):
+		"""Verify artifact_store from services reaches the tool via context dict."""
 		from axc_agent_engine.core.context import ExecutionServices
-		from axc_agent_engine.storage.result_store import InMemoryResultStore
+		from axc_agent_engine.storage.artifact_store import InMemoryArtifactStore
 
 		received_context = {}
 
@@ -155,13 +161,13 @@ class TestExecuteToolCalls:
 		reg = ToolRegistry()
 		reg.register(ToolDefinition(name="t", execute=capture_tool,
 			parameters={"type": "object", "properties": {}}))
-		store = InMemoryResultStore()
-		services = ExecutionServices(result_store=store)
+		store = InMemoryArtifactStore()
+		services = ExecutionServices(artifact_store=store)
 		ctx = ExecutionContext(config=ExecutionConfig(), state=ExecutionState(), services=services)
 		pm = PluginManager([])
 		results = await execute_tool_calls([{"name": "t", "arguments": {}, "id": "x"}], reg, pm.plugins, ctx)
 		assert results[0].success
-		assert received_context.get("result_store") is store
+		assert received_context.get("artifact_store") is store
 
 	@pytest.mark.asyncio
 	async def test_passes_tool_call_metadata_to_tool_context(self):

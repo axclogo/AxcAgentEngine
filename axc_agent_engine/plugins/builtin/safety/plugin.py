@@ -112,8 +112,6 @@ def sanitize_input(text: str) -> str:
 	text = re.sub(r'<[^>]+>', '', text)
 	text = re.sub(r':\w+:', '', text)
 	text = re.sub(r'\n{3,}', '\n\n', text)
-	if len(text) > INPUT_MAX_LENGTH:
-		text = text[:INPUT_MAX_LENGTH] + "\n...[输入已截断]"
 	return text
 
 

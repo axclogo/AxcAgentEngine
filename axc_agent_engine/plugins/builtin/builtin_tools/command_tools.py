@@ -100,16 +100,12 @@ class BuiltinCommandTools:
 				argv=[pip_path, "install", package],
 				cwd=workspace,
 				timeout=120,
-				stdout_limit=500,
-				stderr_limit=500,
 			))
 			data = {
 				"stdout": result.stdout,
 				"stderr": result.stderr,
 				"returncode": result.exit_code,
 				"timed_out": result.timed_out,
-				"stdout_truncated": result.stdout_truncated,
-				"stderr_truncated": result.stderr_truncated,
 			}
 			return ToolOutput.json_output(data, summary=f"pip install {package}: returncode={result.exit_code}")
 		except Exception as e:
@@ -131,8 +127,6 @@ async def ensure_venv(venv_dir: str, context: dict[str, Any]) -> str:
 		argv=[sys.executable, "-m", "venv", venv_dir],
 		cwd=context.get("workspace") or None,
 		timeout=120,
-		stdout_limit=500,
-		stderr_limit=500,
 	))
 	if result.exit_code != 0:
 		raise RuntimeError(result.stderr or f"venv creation failed: exit_code={result.exit_code}")
@@ -148,9 +142,7 @@ def get_command_executor(context: dict[str, Any]):
 async def store_command_artifacts(
 	result: CommandResult,
 	context: dict[str, Any],
-	stdout_limit: int = 1500,
-	stderr_limit: int = 500,
 ):
 	"""Build command output content and artifact refs.
 中文：此文档说明相关引擎组件的行为。"""
-	return await BuiltinCommandPresenter().store_artifacts(result, context, stdout_limit, stderr_limit)
+	return await BuiltinCommandPresenter().store_artifacts(result, context)

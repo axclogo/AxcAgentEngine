@@ -24,7 +24,6 @@ class PluginConfigField(BaseModel):
 	children: list["PluginConfigField"] = Field(default_factory=list)
 	item_schema: "PluginConfigField | None" = None
 	advanced: bool = False
-	deprecated: bool = False
 
 
 class PluginConfigSchema(BaseModel):
@@ -50,7 +49,6 @@ def config_field(
 	children: list[PluginConfigField] | None = None,
 	item_schema: PluginConfigField | None = None,
 	advanced: bool = False,
-	deprecated: bool = False,
 ) -> PluginConfigField:
 	"""Build one field descriptor with compact call sites.
 中文：用紧凑调用方式构建字段描述。"""
@@ -66,7 +64,6 @@ def config_field(
 		children=list(children or []),
 		item_schema=item_schema,
 		advanced=advanced,
-		deprecated=deprecated,
 	)
 
 
@@ -80,7 +77,6 @@ def object_field(
 	default: Any = None,
 	required: bool = False,
 	advanced: bool = False,
-	deprecated: bool = False,
 ) -> PluginConfigField:
 	"""Build a nested object field.
 中文：构建嵌套对象字段。"""
@@ -94,7 +90,6 @@ def object_field(
 		required=required,
 		children=children,
 		advanced=advanced,
-		deprecated=deprecated,
 	)
 
 
@@ -108,7 +103,6 @@ def array_field(
 	default: Any = None,
 	required: bool = False,
 	advanced: bool = False,
-	deprecated: bool = False,
 ) -> PluginConfigField:
 	"""Build an array field with item schema.
 中文：构建带元素 Schema 的数组字段。"""
@@ -122,7 +116,6 @@ def array_field(
 		required=required,
 		item_schema=item_schema,
 		advanced=advanced,
-		deprecated=deprecated,
 	)
 
 

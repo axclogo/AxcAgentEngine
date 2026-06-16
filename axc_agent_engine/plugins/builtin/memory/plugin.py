@@ -14,7 +14,7 @@ from axc_agent_engine.plugins.builtin.config_schemas import MEMORY_CONFIG_SCHEMA
 
 if TYPE_CHECKING:
 	from axc_agent_engine.core.context import ExecutionContext
-	from axc_agent_engine.plugins import PluginContext
+	from axc_agent_engine.plugins.context import PluginContext
 
 from axc_agent_engine.plugins.builtin.memory.prompts import EXTRACT_PROMPT
 
@@ -828,14 +828,8 @@ def _memory_search_llm_view(query: str, memories: list[dict]) -> str:
 			header += f" importance={importance}"
 		lines.append(header)
 		if content:
-			lines.append(f"   {_memory_short_text(content, 500)}")
+			lines.append(f"   {content}")
 	return "\n".join(lines)
-
-
-def _memory_short_text(text: str, limit: int) -> str:
-	if len(text) <= limit:
-		return text
-	return f"{text[:limit - 20].rstrip()} ...[truncated]"
 
 
 def _layer_counts(memories: list[dict]) -> dict[str, int]:

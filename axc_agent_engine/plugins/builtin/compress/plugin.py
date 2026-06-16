@@ -29,13 +29,12 @@ from axc_agent_engine.plugins.builtin.compress.context.tool_summary import (
 	tool_summaries_message,
 )
 from axc_agent_engine.plugins.builtin.compress.context.tool_result import (
-	compact_tool_messages,
 	externalize_large_tool_output,
 )
 
 if TYPE_CHECKING:
 	from axc_agent_engine.core.context import ExecutionContext
-	from axc_agent_engine.plugins import PluginContext
+	from axc_agent_engine.plugins.context import PluginContext
 	from axc_agent_engine.tools.tool_output import ToolOutput
 
 
@@ -50,9 +49,8 @@ class ContextCompressionPipeline:
 	def transform(self, messages: list[dict], current_message: str = "") -> list[dict]:
 		plugin = self.plugin
 		normalized = normalize_messages(messages)
-		managed = compact_tool_messages(normalized, plugin._tool_max_inline)
-		recent = select_recent_window(managed, plugin._recent_rounds)
-		assembled = plugin._assemble_messages(managed, recent, current_message)
+		recent = select_recent_window(normalized, plugin._recent_rounds)
+		assembled = plugin._assemble_messages(normalized, recent, current_message)
 		return pack_context(assembled, plugin._max_input, plugin._reserve_output).messages
 
 
@@ -159,18 +157,14 @@ class CompressPlugin(BasePlugin):
 	def initialize(self, config: dict, plugin_ctx: "PluginContext") -> None:
 		super().initialize(config, plugin_ctx)
 		self._config = config
-		self._tool_max_inline = _nested(config, "tool_result", "max_inline_tokens", config.get("snip_threshold", 1200))
 		self._artifact_threshold = _nested(config, "tool_result", "artifact_threshold_tokens", 4000)
-		self._recent_rounds = _nested(config, "recent_window", "rounds", config.get("micro_compact_keep_recent", 4))
+		self._recent_rounds = _nested(config, "recent_window", "rounds", 4)
 		self._max_input = _nested(config, "context_window", "max_input_tokens", 24000)
 		self._reserve_output = _nested(config, "context_window", "reserve_output_tokens", 4000)
-		self._summary_after = _nested(config, "summary", "after_rounds", config.get("summary_after_rounds", 8))
-		self._summary_keep_recent = _nested(config, "summary", "keep_recent_rounds", config.get("summary_keep_recent", 3))
+		self._summary_after = _nested(config, "summary", "after_rounds", 8)
 		self._summary_enabled = _nested(config, "summary", "enabled", True)
 		self._file_cache = FileReadCache(
 			max_files=_nested(config, "file_restore", "max_files", 5),
-			max_chars_per_file=_nested(config, "file_restore", "max_chars_per_file", 4000),
-			max_total_chars=_nested(config, "file_restore", "max_total_chars", 12000),
 		)
 		self._file_restore_enabled = _nested(config, "file_restore", "enabled", True)
 		self._tool_summary_enabled = _nested(config, "tool_summary", "enabled", False)
@@ -198,8 +192,8 @@ class CompressPlugin(BasePlugin):
 		self._conversation_buffer: list[str] = []
 		self._summary = ""
 		self._summarizer = SessionSummarizer(
-			max_tokens=_nested(config, "summary", "max_tokens", config.get("summary_max_length", 800)),
-			max_failures=_nested(config, "summary", "max_failures", config.get("max_compact_failures", 3)),
+			max_tokens=_nested(config, "summary", "max_tokens", 800),
+			max_failures=_nested(config, "summary", "max_failures", 3),
 		)
 		self._compact_failures = 0
 		self._compact_broken = False
@@ -231,7 +225,7 @@ class CompressPlugin(BasePlugin):
 		self._record_durable_result(tool_name, result)
 		return await externalize_large_tool_output(
 			result,
-			exec_ctx.services.result_store,
+			exec_ctx.services.artifact_store,
 			self._artifact_threshold,
 		)
 
@@ -354,7 +348,7 @@ def _format_recall_item(item, full_threshold: float, compressed_threshold: float
 	if item.score >= full_threshold:
 		return f"- {item.text}"
 	if item.score >= compressed_threshold:
-		return f"- {item.text[:300]} [压缩召回]"
+		return f"- {item.text} [压缩召回]"
 	return ""
 
 

@@ -6,7 +6,7 @@ import asyncio
 import time
 
 from axc_agent_engine.runtime.sandbox_models import CommandResult, CommandSpec
-from axc_agent_engine.runtime.sandbox_utils import build_env, decode_limited, subprocess_preexec_fn
+from axc_agent_engine.runtime.sandbox_utils import build_env, decode_output, subprocess_preexec_fn
 
 
 class LocalSubprocessExecutor:
@@ -43,15 +43,11 @@ class LocalSubprocessExecutor:
 				)
 			stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=spec.timeout)
 			duration_ms = int((time.time() - start) * 1000)
-			stdout_str, stdout_truncated = decode_limited(stdout, spec.stdout_limit)
-			stderr_str, stderr_truncated = decode_limited(stderr, spec.stderr_limit)
 			return CommandResult(
 				exit_code=proc.returncode or 0,
-				stdout=stdout_str,
-				stderr=stderr_str,
+				stdout=decode_output(stdout),
+				stderr=decode_output(stderr),
 				duration_ms=duration_ms,
-				stdout_truncated=stdout_truncated,
-				stderr_truncated=stderr_truncated,
 			)
 		except asyncio.TimeoutError:
 			proc.kill()

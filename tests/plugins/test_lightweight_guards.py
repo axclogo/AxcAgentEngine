@@ -4,7 +4,9 @@ from axc_agent_engine.plugins.builtin.reflexion.plugin import ReflexionPlugin
 from axc_agent_engine.plugins.builtin.repetition_guard.plugin import RepetitionGuardPlugin, _count_consecutive_tail, _hash_args
 from axc_agent_engine.plugins.builtin.risk_guard.plugin import RiskGuardPlugin, classify_risk
 from axc_agent_engine.plugins.builtin.safety.plugin import SafetyPlugin, _detect_injection, _mask_pii, sanitize_input
+from axc_agent_engine.plugins.builtin.common import externalize_text, artifact_store_from_context
 from axc_agent_engine.core.schema import RiskLevel
+from axc_agent_engine.storage.artifact_store import InMemoryArtifactStore
 from axc_agent_engine.tools.tool_output import ToolOutput
 
 
@@ -25,6 +27,22 @@ class PluginCtx:
 		self.default_model = llm
 
 
+async def test_common_artifact_store_and_externalize_text_helpers():
+	store = InMemoryArtifactStore()
+	ctx = type("Ctx", (), {"artifact_store": store})()
+
+	assert artifact_store_from_context({"artifact_store": store}) is store
+	assert artifact_store_from_context({}, ctx) is store
+	payload, ref = await externalize_text("abcdef", store, 3, {"kind": "text"}, __import__("logging").getLogger("test"), "test")
+	small, no_ref = await externalize_text("abc", store, 3, {}, __import__("logging").getLogger("test"), "test")
+
+	assert payload["externalized"] is True
+	assert payload["artifact_id"] == ref.id
+	assert (await store.read(ref.id, 0, 6)).content == "abcdef"
+	assert small == "abc"
+	assert no_ref is None
+
+
 async def test_post_process_appends_stats_when_enabled():
 	plugin = PostProcessPlugin()
 	plugin.initialize({"append_stats": True})
@@ -34,11 +52,11 @@ async def test_post_process_appends_stats_when_enabled():
 
 async def test_reflexion_injects_context_and_handles_paths():
 	plugin = ReflexionPlugin()
-	plugin.initialize({"start_after_round": 1, "max_reflection_len": 5}, PluginCtx(AskLLM("fix this")))
+	plugin.initialize({"start_after_round": 1}, PluginCtx(AskLLM("fix this")))
 	ctx = ExecutionContext()
 	ctx.state.current_round = 1
 	await plugin.on_round_end(ctx, "u", "bad", [{"name": "tool"}])
-	assert plugin.inject_context(ctx) == "【上轮反思】fix t"
+	assert plugin.inject_context(ctx) == "【上轮反思】fix this"
 	await plugin.on_execution_end(ctx, "", "err")
 	assert "执行出错" in plugin.inject_context(ctx)
 
@@ -133,7 +151,7 @@ async def test_safety_sanitizes_detects_and_masks_pii():
 async def test_safety_disabled_paths_and_truncation():
 	long_text = "x" * 30001
 	assert sanitize_input("") == ""
-	assert sanitize_input(long_text).endswith("...[输入已截断]")
+	assert sanitize_input(long_text) == long_text
 	assert not _detect_injection("short")
 	assert "110105********001X" in _mask_pii("id 11010519491231001X")
 	assert "6222 **** **** 8888" in _mask_pii("card 6222020202028888")

@@ -34,9 +34,6 @@ def plan_to_state(plan: Plan, current_step_id: int | None = None, phase: str = "
 		"cursor": {"current_step_id": current_step_id},
 		"payload": {"plan": plan_payload},
 		"metadata": {},
-		#English: Backward-compatible fields. 中文：源码说明。
-		"current_step_id": current_step_id,
-		"plan": plan_payload,
 	}
 
 
@@ -45,8 +42,6 @@ def plan_from_state(state: dict[str, Any]) -> Plan | None:
 中文：此文档说明相关引擎组件的行为。"""
 	payload = state.get("payload") if isinstance(state.get("payload"), dict) else {}
 	raw = payload.get("plan") if isinstance(payload, dict) else None
-	if not isinstance(raw, dict):
-		raw = state.get("plan")
 	if not isinstance(raw, dict):
 		return None
 	steps = []

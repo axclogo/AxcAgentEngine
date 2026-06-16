@@ -15,7 +15,7 @@ from axc_agent_engine.plugins.builtin.graph.tool_handlers import GraphToolHandle
 
 if TYPE_CHECKING:
 	from axc_agent_engine.core.context import ExecutionContext
-	from axc_agent_engine.plugins import PluginContext
+	from axc_agent_engine.plugins.context import PluginContext
 
 
 class GraphPlugin(BasePlugin):

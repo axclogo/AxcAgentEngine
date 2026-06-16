@@ -40,8 +40,6 @@ class PythonSandboxExecutor:
 				argv=[self.python, script_path],
 				cwd=self.workspace,
 				timeout=timeout,
-				stdout_limit=1_000_000,
-				stderr_limit=1_000_000,
 			))
 		finally:
 			try:
@@ -79,8 +77,6 @@ class PowerShellSandboxExecutor:
 				argv=[self.executable, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script_path],
 				cwd=self.workspace,
 				timeout=timeout,
-				stdout_limit=1_000_000,
-				stderr_limit=1_000_000,
 			))
 		finally:
 			try:

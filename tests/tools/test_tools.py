@@ -147,6 +147,25 @@ class TestToolRegistry:
 		assert log[-1]["reason"] == "discovery"
 		assert log[-1]["frozen"] is True
 
+	def test_frozen_registry_rejects_initial_registration_but_accepts_late_many(self):
+		reg = ToolRegistry()
+		reg.freeze()
+		with pytest.raises(RuntimeError, match="frozen"):
+			reg.register(ToolDefinition(name="initial"))
+		reg.register_late_many([ToolDefinition(name="a"), ToolDefinition(name="b")], plugin_name="", reason="late")
+		assert [tool.name for tool in reg.get_all()] == ["a", "b"]
+		log = reg.registration_log()
+		log.clear()
+		assert reg.registration_log()
+
+	def test_clear_resets_schema_version_and_registration_log(self):
+		reg = ToolRegistry()
+		reg.register(ToolDefinition(name="x"))
+		assert reg.schema_version == 1
+		reg.clear()
+		assert reg.schema_version == 0
+		assert reg.registration_log() == []
+
 
 class TestToolNameMapper:
 	def test_sanitize_preserves_valid_name(self):

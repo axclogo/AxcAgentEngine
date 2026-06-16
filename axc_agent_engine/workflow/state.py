@@ -24,10 +24,10 @@ def resume_snapshot_from_checkpoint(checkpoint: Checkpoint) -> dict[str, Any]:
 	cursor = state.get("cursor") if isinstance(state.get("cursor"), dict) else {}
 	usage = state.get("usage") if isinstance(state.get("usage"), dict) else {}
 	return {
-		"current_round": cursor.get("current_round", state.get("current_round", 0)),
+		"current_round": cursor.get("current_round", 0),
 		"messages": state.get("messages", []),
-		"input_tokens": usage.get("input_tokens", state.get("input_tokens", 0)),
-		"output_tokens": usage.get("output_tokens", state.get("output_tokens", 0)),
+		"input_tokens": usage.get("input_tokens", 0),
+		"output_tokens": usage.get("output_tokens", 0),
 		"metadata": state.get("metadata", {}),
 	}
 

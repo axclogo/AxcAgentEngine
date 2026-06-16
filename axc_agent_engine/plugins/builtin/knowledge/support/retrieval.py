@@ -681,7 +681,7 @@ def _parse_rerank_scores(data: Any, size: int) -> list[tuple[int, float]]:
 def _rerank_prompt(query: str, results: list[RetrievalResult], max_chars: int) -> str:
 	docs = []
 	for idx, result in enumerate(results):
-		text = result.text.replace("\n", " ")[:max_chars]
+		text = result.text.replace("\n", " ")
 		docs.append(f"{idx}. {text}")
 	return (
 		"请按 0 到 1 给每个文档与问题的相关性打分。"

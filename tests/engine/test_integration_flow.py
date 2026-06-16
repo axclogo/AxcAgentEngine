@@ -181,8 +181,7 @@ class TestToolCallFlow:
 		events = [event async for event in executor.run_stream("call big")]
 		tool_result = next(event for event in events if event.type == EventType.TOOL_RESULT)
 		assert tool_result.content == "x" * 5000
-		assert tool_result.metadata["context_view"] == "context summary"
-		assert tool_result.metadata["display_truncated"] is False
+		assert tool_result.metadata["context_view"] == "x" * 5000
 
 	@pytest.mark.asyncio
 	async def test_tool_validation_failure_in_flow(self):

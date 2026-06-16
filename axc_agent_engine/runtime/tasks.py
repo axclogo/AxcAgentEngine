@@ -9,9 +9,10 @@ from typing import Any
 async def cancel_and_wait(task: asyncio.Task[Any] | None) -> None:
 	"""Cancel a cleanup task and suppress its terminal exception.
 中文：取消清理任务并吞掉任务结束异常。"""
-	if not task or task.done():
+	if not task:
 		return
-	task.cancel()
+	if not task.done():
+		task.cancel()
 	try:
 		await task
 	except (asyncio.CancelledError, Exception):

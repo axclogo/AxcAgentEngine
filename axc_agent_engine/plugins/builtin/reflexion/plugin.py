@@ -8,7 +8,7 @@ from axc_agent_engine.plugins.builtin.config_schemas import REFLEXION_CONFIG_SCH
 
 if TYPE_CHECKING:
 	from axc_agent_engine.core.context import ExecutionContext
-	from axc_agent_engine.plugins import PluginContext
+	from axc_agent_engine.plugins.context import PluginContext
 
 from axc_agent_engine.plugins.builtin.reflexion.prompts import REFLECT_PROMPT
 
@@ -27,7 +27,6 @@ class ReflexionPlugin(BasePlugin):
 	def initialize(self, config: dict, plugin_ctx: "PluginContext") -> None:
 		self._llm = plugin_ctx.utility_model or plugin_ctx.default_model
 		self._start_after_round = config.get("start_after_round", 3)
-		self._max_len = config.get("max_reflection_len", 200)
 		self._last_reflection = ""
 
 	def inject_context(self, exec_ctx: "ExecutionContext", topic: str = "") -> str:
@@ -58,7 +57,7 @@ class ReflexionPlugin(BasePlugin):
 			if "无问题" in content:
 				self._last_reflection = ""
 			else:
-				self._last_reflection = content[:self._max_len]
+				self._last_reflection = content
 		except Exception as e:
 			logger.warning(f"[reflexion] LLM reflection call failed: {e}")
 			self._last_reflection = ""

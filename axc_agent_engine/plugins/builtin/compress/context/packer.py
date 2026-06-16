@@ -15,27 +15,14 @@ def pack_context(
 ) -> PackedContext:
 	"""Pack messages into the configured input window.
 中文：此文档说明相关引擎组件的行为。"""
-	budget = max(1, max_input_tokens - reserve_output_tokens)
-	groups = _message_groups(messages)
-	required = _required_groups(messages, groups)
-	selected_groups: set[int] = set()
-	used = 0
-	for group_index in required:
-		used += _group_tokens(messages, groups[group_index])
-		selected_groups.add(group_index)
-	for group_index in reversed(range(len(groups))):
-		if group_index in selected_groups:
-			continue
-		cost = _group_tokens(messages, groups[group_index])
-		if used + cost <= budget:
-			selected_groups.add(group_index)
-			used += cost
-	selected = {index for group_index in selected_groups for index in groups[group_index]}
-	truncated = len(selected) < len(messages)
-	packed = [public_message(message) for index, message in enumerate(messages) if index in selected]
-	if truncated:
-		packed.insert(_placeholder_index(packed), {"role": "system", "content": "[上下文已截断]"})
-	return PackedContext(messages=packed, estimated_tokens=used, truncated=truncated)
+	try:
+		int(max_input_tokens)
+		int(reserve_output_tokens)
+	except (TypeError, ValueError) as exc:
+		raise TypeError("context window token budgets must be integers") from exc
+	packed = [public_message(message) for message in messages]
+	used = sum(_message_tokens(message) for message in messages)
+	return PackedContext(messages=packed, estimated_tokens=used)
 
 
 def _message_groups(messages: list[dict[str, Any]]) -> list[list[int]]:

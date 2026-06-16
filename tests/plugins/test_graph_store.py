@@ -12,7 +12,7 @@ from axc_agent_engine.plugins.builtin.graph.support import InMemoryGraphStore
 from axc_agent_engine.plugins.builtin.graph.tool_handlers import GraphToolHandlers
 from axc_agent_engine.plugins import PluginContext
 from axc_agent_engine.plugins.builtin.graph.plugin import GraphPlugin
-from axc_agent_engine.storage.result_store import InMemoryResultStore
+from axc_agent_engine.storage.artifact_store import InMemoryArtifactStore
 
 
 def test_graph_store_upsert_and_search_relation():
@@ -158,17 +158,17 @@ async def test_graph_plugin_audits_writes_and_syncs_metadata():
 
 @pytest.mark.asyncio
 async def test_graph_plugin_externalizes_large_export():
-	store = InMemoryResultStore()
+	store = InMemoryArtifactStore()
 	plugin = GraphPlugin()
 	plugin.initialize({"max_result_bytes": 64}, PluginContext(resources={"graph.store": InMemoryGraphStore()}))
 	await plugin._tool_upsert_relation({"source": "Alice", "target": "Acme", "description": "x" * 200}, {})
 
-	result = await plugin._tool_export({}, {"result_store": store})
+	result = await plugin._tool_export({}, {"artifact_store": store})
 
 	assert not result.is_error
-	assert result.content["truncated"] is True
+	assert result.content["externalized"] is True
 	assert result.artifacts
-	assert "Alice" in await store.get(result.artifacts[0].id, 0, 1000)
+	assert "Alice" in (await store.read(result.artifacts[0].id, 0, 1000)).content
 
 
 @pytest.mark.asyncio

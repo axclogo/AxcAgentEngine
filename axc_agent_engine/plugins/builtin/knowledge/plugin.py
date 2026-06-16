@@ -38,7 +38,7 @@ from axc_agent_engine.plugins.builtin.knowledge.support import (
 
 if TYPE_CHECKING:
 	from axc_agent_engine.core.context import ExecutionContext
-	from axc_agent_engine.plugins import PluginContext
+	from axc_agent_engine.plugins.context import PluginContext
 
 logger = logging.getLogger(__name__)
 
@@ -156,7 +156,7 @@ class KnowledgePlugin(BasePlugin):
 		return ToolOutput(
 			content=payload,
 			content_type="json",
-			summary=f"knowledge_search：为 '{query[:50]}' 找到 {len(payload.get('results', []))} 条结果",
+			summary=f"knowledge_search：为 '{query}' 找到 {len(payload.get('results', []))} 条结果",
 			llm_view=_knowledge_search_llm_view(query, payload.get("results", [])),
 		)
 
@@ -612,11 +612,5 @@ def _knowledge_search_llm_view(query: str, results: list[dict]) -> str:
 			header += f" | source={source}"
 		lines.append(header)
 		if text:
-			lines.append(f"   {_short_text(text, 700)}")
+			lines.append(f"   {text}")
 	return "\n".join(lines)
-
-
-def _short_text(text: str, limit: int) -> str:
-	if len(text) <= limit:
-		return text
-	return f"{text[:limit - 20].rstrip()} ...[truncated]"

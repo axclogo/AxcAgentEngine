@@ -41,8 +41,8 @@ class GraphToolHandlers:
 			return ToolOutput.error("query 不能为空")
 		payload, _ = self._service.search(query, args.get("depth", 1), args.get("limit", self._service.config.default_limit))
 		self.sync_metadata(exec_ctx_from_tool_context(context), "search")
-		await self.audit(exec_ctx_from_tool_context(context), "graph_search", "graph_search", "graph_read", "safe", started, True, {"query": query[:100], "count": payload["count"], "depth": payload["depth"]})
-		return await self._presenter.json_output(payload, context, f"graph_search：为 '{query[:50]}' 找到 {payload['count']} 个实体", "graph_search_result")
+		await self.audit(exec_ctx_from_tool_context(context), "graph_search", "graph_search", "graph_read", "safe", started, True, {"query": query, "count": payload["count"], "depth": payload["depth"]})
+		return await self._presenter.json_output(payload, context, f"graph_search：为 '{query}' 找到 {payload['count']} 个实体", "graph_search_result")
 
 	async def upsert_entity(self, args: dict, context: dict):
 		from axc_agent_engine.tools.tool_output import ToolOutput

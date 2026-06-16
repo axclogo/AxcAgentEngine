@@ -103,7 +103,7 @@ async def test_agent_resume_stream_delegates_to_workflow_runtime():
 	assert events[-1].content == "done"
 
 
-def test_workflow_state_helpers_support_envelope_and_legacy():
+def test_workflow_state_helpers_read_checkpoint_envelope_only():
 	cp = Checkpoint(
 		run_id="r",
 		kind="round",
@@ -121,7 +121,10 @@ def test_workflow_state_helpers_support_envelope_and_legacy():
 
 	cp = Checkpoint(run_id="r", kind="round", state={}, metadata={"session_id": "m"})
 	assert session_id_from_checkpoint(cp) == "m"
-	cp = Checkpoint(run_id="r", kind="por", state={"plan": {}, "metadata": {"session_id": "p"}})
+	snapshot = resume_snapshot_from_checkpoint(cp)
+	assert snapshot["current_round"] == 0
+	assert snapshot["input_tokens"] == 0
+	cp = Checkpoint(run_id="r", kind="por", state={"payload": {"plan": {}}, "metadata": {"session_id": "p"}})
 	assert "por_checkpoint" in resume_snapshot_from_checkpoint(cp)
 
 

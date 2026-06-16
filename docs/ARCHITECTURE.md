@@ -6,7 +6,7 @@
 Engine.__init__(message_bus, audit_sink, checkpoint_store, plugin_registry, ...)
   → create AgentMessageDispatcher(message_bus) if bus provided
   → receive explicit PluginRegistry (empty by default)
-  → create ExecutionServices(result_store, message_bus, dispatcher,
+  → create ExecutionServices(artifact_store, message_bus, dispatcher,
       audit_sink, checkpoint_store, command_executor, policy_evaluator)
 
 Engine.load_agent_template(yaml)
@@ -153,7 +153,7 @@ orchestrator.execute_tool_calls
   → message_store.append_tool_results uses ToolOutput.context_view()
 ```
 
-Large results stored via ResultStore, retrievable via result_read/result_search/result_page tools.
+Large results stored via ArtifactStore, retrievable via artifact_read/artifact_search/artifact_page tools.
 HTTP tools block localhost/private/link-local/reserved destinations before
 request execution. Command tools use the configured CommandExecutor, falling
 back to LocalSubprocessExecutor for local development.
@@ -166,7 +166,7 @@ Zero external dependencies. Protocol interfaces with in-memory defaults:
 - SpanStore: tracing span persistence
 - VectorStore: embedding search (linear scan, ~1000 entries)
 - MessageBus: pub/sub with max_idle auto-exit
-- ResultStore: large tool output storage with paged retrieval
+- ArtifactStore: large tool output storage with paged retrieval
 - AuditSink: structured tool audit events
 - CheckpointStore: durable execution checkpoints
 

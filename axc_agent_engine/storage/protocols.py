@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from typing import Any, AsyncIterator, Protocol, runtime_checkable
 
+from axc_agent_engine.storage.artifact_store import ArtifactStore
+
 
 @runtime_checkable
 class KVStore(Protocol):
@@ -71,19 +73,6 @@ class MessageBus(Protocol):
 	async def publish(self, channel: str, message: dict) -> None: ...
 	async def subscribe(self, channel: str) -> AsyncIterator[dict]: ...
 	async def request(self, channel: str, message: dict, timeout: float = 30) -> dict: ...
-
-
-@runtime_checkable
-class ResultStore(Protocol):
-	"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-大型工具结果存储 — 支持分页读取和搜索。
-
-	English: Large tool-result storage with paged reads and search.
-	"""
-	async def put(self, content: str | bytes, metadata: dict[str, Any] | None = None) -> Any: ...
-	async def get(self, artifact_id: str, offset: int = 0, limit: int = 4000) -> str: ...
-	async def search(self, artifact_id: str, query: str) -> list[dict[str, Any]]: ...
 
 
 @runtime_checkable

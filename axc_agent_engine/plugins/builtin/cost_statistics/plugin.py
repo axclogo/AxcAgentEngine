@@ -11,7 +11,7 @@ from axc_agent_engine.tools.tool_output import ToolOutput
 
 if TYPE_CHECKING:
 	from axc_agent_engine.core.context import ExecutionContext
-	from axc_agent_engine.plugins import PluginContext
+	from axc_agent_engine.plugins.context import PluginContext
 
 def _to_int(value: Any, default: int = 0) -> int:
 	try:
