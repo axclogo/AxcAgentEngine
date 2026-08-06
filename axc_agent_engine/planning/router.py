@@ -35,15 +35,12 @@ class TransactionRouter:
 
 	def route(self, message: dict[str, Any]) -> RoutingDecision:
 		"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-把标准化 assistant message 分类成运行时 action。"""
+	中文：以下为双语文档说明。
+	把标准化 assistant message 分类成运行时 action。"""
 		tool_calls = message.get("tool_calls", []) or []
-		if not tool_calls:
-			plan = None if self._mode == "react_only" else PlanningService.detect_plan(message)
-			return RoutingDecision(action="por_plan", plan=plan) if plan else RoutingDecision(action="final_answer")
-		if self._mode == "react_only":
+		# English: Explicit tool requests always belong to ReAct; 中文：显式工具请求始终归属 ReAct。
+		# English: Plan-like companion text must not trigger POR; 中文：伴随的类计划文本不得触发 POR。
+		if tool_calls:
 			return RoutingDecision(action="tool_calls")
-		plan = PlanningService.detect_plan(message)
-		if plan:
-			return RoutingDecision(action="por_plan", plan=plan)
-		return RoutingDecision(action="tool_calls")
+		plan = None if self._mode == "react_only" else PlanningService.detect_plan(message)
+		return RoutingDecision(action="por_plan", plan=plan) if plan else RoutingDecision(action="final_answer")

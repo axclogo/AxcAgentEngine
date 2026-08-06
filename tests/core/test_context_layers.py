@@ -102,8 +102,8 @@ class TestPacker:
 			{"role": "user", "content": "current"},
 		])
 		result = pack_context(messages, max_input_tokens=20, reserve_output_tokens=5)
-		assert result.messages[-1]["content"] == "current"
-		assert result.messages[0]["content"] == "old" * 1000
+		assert result.messages == [{"role": "user", "content": "current"}]
+		assert result.estimated_tokens <= 15
 
 	def test_keeps_tool_call_group_atomic(self):
 		messages = normalize_messages([
@@ -112,10 +112,10 @@ class TestPacker:
 			{"role": "tool", "tool_call_id": "tc-1", "content": "tool result"},
 			{"role": "user", "content": "current"},
 		])
-		result = pack_context(messages, max_input_tokens=40, reserve_output_tokens=5)
+		result = pack_context(messages, max_input_tokens=100, reserve_output_tokens=5)
 		call_ids = {call["id"] for message in result.messages for call in message.get("tool_calls", [])}
 		tool_ids = {message.get("tool_call_id") for message in result.messages if message.get("role") == "tool"}
-		assert call_ids <= tool_ids
+		assert call_ids == tool_ids == {"tc-1"}
 
 	def test_drops_oversized_tool_call_group_atomic(self):
 		messages = normalize_messages([
@@ -125,8 +125,30 @@ class TestPacker:
 			{"role": "user", "content": "current"},
 		])
 		result = pack_context(messages, max_input_tokens=30, reserve_output_tokens=5)
-		assert any(message.get("tool_calls") for message in result.messages)
-		assert any(message.get("role") == "tool" for message in result.messages)
+		assert not any(message.get("tool_calls") for message in result.messages)
+		assert not any(message.get("role") == "tool" for message in result.messages)
+		assert result.messages[-1]["content"] == "current"
+		assert result.estimated_tokens <= 25
+
+	def test_keeps_system_last_user_and_durable_context(self):
+		messages = normalize_messages([
+			{"role": "system", "content": "system"},
+			{"role": "user", "content": "old" * 100},
+			{"role": "assistant", "content": "durable", "metadata": {"durable": True}},
+			{"role": "user", "content": "current"},
+		])
+		result = pack_context(messages, max_input_tokens=30, reserve_output_tokens=5)
+		assert [message["content"] for message in result.messages] == ["system", "durable", "current"]
+		assert result.estimated_tokens <= 25
+
+	def test_required_context_can_explicitly_exceed_budget(self):
+		messages = normalize_messages([
+			{"role": "system", "content": "s" * 100},
+			{"role": "user", "content": "u" * 100},
+		])
+		result = pack_context(messages, max_input_tokens=20, reserve_output_tokens=5)
+		assert [message["role"] for message in result.messages] == ["system", "user"]
+		assert result.estimated_tokens > 15
 
 
 class TestRecall:

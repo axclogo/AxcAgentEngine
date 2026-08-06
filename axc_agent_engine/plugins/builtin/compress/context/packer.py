@@ -16,12 +16,31 @@ def pack_context(
 	"""Pack messages into the configured input window.
 中文：此文档说明相关引擎组件的行为。"""
 	try:
-		int(max_input_tokens)
-		int(reserve_output_tokens)
+		max_input = int(max_input_tokens)
+		reserve_output = int(reserve_output_tokens)
 	except (TypeError, ValueError) as exc:
 		raise TypeError("context window token budgets must be integers") from exc
-	packed = [public_message(message) for message in messages]
-	used = sum(_message_tokens(message) for message in messages)
+	if max_input < 0 or reserve_output < 0:
+		raise ValueError("context window token budgets must be non-negative")
+
+	budget = max(0, max_input - reserve_output)
+	groups = _message_groups(messages)
+	required_groups = _required_groups(messages, groups)
+	selected_groups = set(required_groups)
+	used = sum(_group_tokens(messages, groups[index]) for index in required_groups)
+
+	# English: Prefer the newest optional context; 中文：优先保留最新的可选上下文。
+	# English: Required groups may exceed budget to preserve semantics; 中文：必需分组可超预算保留，以维持请求语义。
+	for group_index in range(len(groups) - 1, -1, -1):
+		if group_index in selected_groups:
+			continue
+		group_tokens = _group_tokens(messages, groups[group_index])
+		if used + group_tokens <= budget:
+			selected_groups.add(group_index)
+			used += group_tokens
+
+	selected_indices = sorted({index for group_index in selected_groups for index in groups[group_index]})
+	packed = [public_message(messages[index]) for index in selected_indices]
 	return PackedContext(messages=packed, estimated_tokens=used)
 
 
@@ -82,9 +101,3 @@ def _message_tokens(message: dict[str, Any]) -> int:
 
 def _group_tokens(messages: list[dict[str, Any]], group: list[int]) -> int:
 	return sum(_message_tokens(messages[index]) for index in group)
-
-
-def _placeholder_index(messages: list[dict[str, Any]]) -> int:
-	if messages and messages[0].get("role") == "system":
-		return 1
-	return 0

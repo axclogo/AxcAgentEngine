@@ -1,6 +1,6 @@
 """Integration tests for #31 — full execution flow."""
 import asyncio
-import json
+from copy import deepcopy
 import pytest
 from unittest.mock import MagicMock
 from axc_agent_engine.core.executor import Executor
@@ -48,8 +48,10 @@ def _mock_llm_provider(responses):
 	from axc_agent_engine.core.schema import LLMResponse, LLMMessage, LLMUsage
 	provider = MagicMock()
 	call_count = [0]
+	provider.requests = []
 
 	async def mock_chat(messages, tools=None, **kwargs):
+		provider.requests.append({"messages": deepcopy(messages), "tools": deepcopy(tools), "options": deepcopy(kwargs)})
 		idx = min(call_count[0], len(responses) - 1)
 		call_count[0] += 1
 		resp = responses[idx]
@@ -121,9 +123,11 @@ class TestToolCallFlow:
 		pm = PluginManager([])
 		llm_caller = LLMCaller(primary=provider, fallback=None, plugin_manager=pm)
 		reg = ToolRegistry()
+		seen_arguments = []
 
 		async def echo_tool(args, ctx):
-			return json.dumps({"echo": args.get("msg", "")})
+			seen_arguments.append(deepcopy(args))
+			return ToolOutput.json_output({"echo": args.get("msg", "")})
 
 		reg.register(ToolDefinition(
 			name="echo", execute=echo_tool,
@@ -135,9 +139,21 @@ class TestToolCallFlow:
 		async for event in executor.run_stream("call echo"):
 			events.append(event)
 		types = [e.type for e in events]
-		assert EventType.TOOL_CALL in types
-		assert EventType.TOOL_RESULT in types
-		assert EventType.DONE in types
+		assert seen_arguments == [{"msg": "hi"}]
+		assert types.index(EventType.TOOL_CALL) < types.index(EventType.TOOL_RESULT) < types.index(EventType.DONE)
+		tool_result = next(event for event in events if event.type == EventType.TOOL_RESULT)
+		assert tool_result.content == '{"echo": "hi"}'
+		assert "ToolOutput" not in tool_result.content
+		assert events[-1].type == EventType.DONE
+		assert events[-1].content == "Tool said: hi"
+		assert len(provider.requests) == 2
+		tool_message = provider.requests[1]["messages"][-1]
+		assert tool_message == {
+			"role": "tool",
+			"tool_call_id": "tc-1",
+			"name": "echo",
+			"content": '{"echo": "hi"}',
+		}
 
 	@pytest.mark.asyncio
 	async def test_tool_runtime_events_are_streamed_before_tool_result(self):

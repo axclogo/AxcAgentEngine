@@ -315,7 +315,6 @@ async def _stream_response(agent: Any, messages: list[dict], request: ChatReques
 	resp_id = f"chatcmpl-{uuid.uuid4().hex[:12]}"
 	model_name = _CHAT_OPTIONS.agent_name(request)
 	last_usage: dict[str, int] = {}
-	has_tool_calls = False
 	include_usage = _CHAT_OPTIONS.stream_include_usage(request)
 	#English: Bilingual note. 中文：首个 chunk 发送 role
 	yield _CHAT_PRESENTER.sse(_CHAT_PRESENTER.chunk(resp_id, model_name, [{"index": 0, "delta": {"role": "assistant"}, "finish_reason": None}]))
@@ -331,7 +330,6 @@ async def _stream_response(agent: Any, messages: list[dict], request: ChatReques
 				[{"index": 0, "delta": {"content": event.content}, "finish_reason": None}],
 			))
 		elif event.type == EventType.TOOL_CALL:
-			has_tool_calls = True
 			yield _CHAT_PRESENTER.sse(_CHAT_PRESENTER.chunk(resp_id, model_name, [{
 				"index": 0,
 				"delta": {"tool_calls": [_CHAT_PRESENTER.tool_call_delta(
@@ -343,7 +341,6 @@ async def _stream_response(agent: Any, messages: list[dict], request: ChatReques
 				"finish_reason": None,
 			}]))
 		elif event.type == EventType.TOOL_ARGS_PREVIEW:
-			has_tool_calls = True
 			yield _CHAT_PRESENTER.sse(_CHAT_PRESENTER.chunk(resp_id, model_name, [{
 				"index": 0,
 				"delta": {"tool_calls": [_CHAT_PRESENTER.tool_call_delta(
@@ -355,8 +352,9 @@ async def _stream_response(agent: Any, messages: list[dict], request: ChatReques
 				"finish_reason": None,
 			}]))
 		elif event.type == EventType.DONE:
-			finish_reason = "tool_calls" if has_tool_calls else "stop"
-			yield _CHAT_PRESENTER.sse(_CHAT_PRESENTER.chunk(resp_id, model_name, [{"index": 0, "delta": {}, "finish_reason": finish_reason}]))
+			# English: Agent executes tools internally; 中文：Agent 在内部执行工具。
+			# English: DONE is a completed answer, not a client tool request; 中文：DONE 表示完整回答，而非客户端工具请求。
+			yield _CHAT_PRESENTER.sse(_CHAT_PRESENTER.chunk(resp_id, model_name, [{"index": 0, "delta": {}, "finish_reason": "stop"}]))
 			if include_usage:
 				yield _CHAT_PRESENTER.sse(_CHAT_PRESENTER.chunk(resp_id, model_name, [], usage=last_usage or None))
 		elif event.type == EventType.ERROR:
