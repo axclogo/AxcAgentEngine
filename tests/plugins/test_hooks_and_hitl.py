@@ -94,7 +94,7 @@ async def test_hitl_tools_auto_approval_reject_and_ask_human():
 	plugin.initialize({"ask_human": False}, None)
 	assert plugin.get_tools() == []
 
-	plugin.initialize({"auto_approve": ["safe_tool"], "timeout": 0.01}, None)
+	plugin.initialize({"auto_approve": ["safe_tool"], "approval_timeout": 0.01}, None)
 	allowed, _ = await plugin.pre_tool_call(ExecutionContext(), "safe_tool", {})
 	assert allowed is True
 
@@ -104,13 +104,18 @@ async def test_hitl_tools_auto_approval_reject_and_ask_human():
 
 	request_q = asyncio.Queue()
 	response_q = asyncio.Queue()
-	await response_q.put("yes")
-	result = await plugin._ask_human(
+	task = asyncio.create_task(plugin._ask_human(
 		{"question": "Continue?", "options": ["yes", "no"]},
-		{"request_queue": request_q, "response_queue": response_q},
-	)
+		{"request_queue": request_q, "response_queue": response_q, "tool_call_id": "call-1"},
+	))
+	request = await request_q.get()
+	await response_q.put({"type": "ask_human_response", "request_id": request["request_id"], "answer": "yes"})
+	result = await task
 	assert result.content["answer"] == "yes"
-	assert (await request_q.get())["type"] == "ask_human"
+	assert request["type"] == "ask_human"
+	assert request["tool_call_id"] == "call-1"
+	assert request["timeout_seconds"] == 60
+	assert request["expires_at"] > 0
 	assert (await plugin._ask_human({}, {})).is_error
 	assert (await plugin._ask_human({"question": "q"}, {})).is_error
 	assert _risk_level("dangerous") == 2
@@ -118,7 +123,7 @@ async def test_hitl_tools_auto_approval_reject_and_ask_human():
 
 async def test_hitl_queue_approval_response():
 	plugin = HumanInTheLoopPlugin()
-	plugin.initialize({"timeout": 1}, None)
+	plugin.initialize({"approval_timeout": 1}, None)
 	ctx = ExecutionContext()
 	ctx.runtime.approval_queue = asyncio.Queue()
 
@@ -134,7 +139,7 @@ async def test_hitl_queue_approval_response():
 
 async def test_hitl_queue_rejection_timeout_listener_and_resolve_paths():
 	plugin = HumanInTheLoopPlugin()
-	plugin.initialize({"timeout": 0.01}, None)
+	plugin.initialize({"approval_timeout": 0.01}, None)
 	ctx = ExecutionContext()
 	ctx.runtime.approval_queue = asyncio.Queue()
 
@@ -142,7 +147,7 @@ async def test_hitl_queue_rejection_timeout_listener_and_resolve_paths():
 	assert allowed is False
 	assert plugin._last_rejection_code == "tool.rejected_by_human_in_the_loop"
 
-	plugin.initialize({"timeout": 1}, None)
+	plugin.initialize({"approval_timeout": 1}, None)
 	ctx.runtime.approval_queue = asyncio.Queue()
 
 	async def reject():
@@ -164,9 +169,61 @@ async def test_hitl_queue_rejection_timeout_listener_and_resolve_paths():
 
 async def test_hitl_ask_human_timeout():
 	plugin = HumanInTheLoopPlugin()
-	plugin.initialize({"timeout": 0.01}, None)
+	plugin.initialize({"ask_human_timeout": 0.01}, None)
 	request_q = asyncio.Queue()
 	response_q = asyncio.Queue()
 	result = await plugin._ask_human({"question": "Continue?"}, {"request_queue": request_q, "response_queue": response_q})
-	assert result.is_error
-	assert (await request_q.get())["question"] == "Continue?"
+	request = await request_q.get()
+	assert result.is_error is False
+	assert result.content == {
+		"status": "skipped",
+		"reason": "human_unavailable",
+		"request_id": request["request_id"],
+		"question": "Continue?",
+		"waited_seconds": 0.01,
+	}
+	assert result.is_durable()
+	assert "继续完成不依赖该回答的工作" in result.context_view()
+
+
+async def test_hitl_ask_human_discards_late_response_by_request_id():
+	plugin = HumanInTheLoopPlugin()
+	plugin.initialize({"ask_human_timeout": 0.01}, None)
+	request_q = asyncio.Queue()
+	response_q = asyncio.Queue()
+	await plugin._ask_human({"question": "First?"}, {"request_queue": request_q, "response_queue": response_q})
+	first_request = await request_q.get()
+
+	plugin.initialize({"ask_human_timeout": 1}, None)
+	await response_q.put({
+		"type": "ask_human_response",
+		"request_id": first_request["request_id"],
+		"answer": "late",
+	})
+	second_task = asyncio.create_task(plugin._ask_human(
+		{"question": "Second?"},
+		{"request_queue": request_q, "response_queue": response_q},
+	))
+	second_request = await request_q.get()
+	await response_q.put({
+		"type": "ask_human_response",
+		"request_id": second_request["request_id"],
+		"answer": "current",
+	})
+	result = await second_task
+	assert result.content["answer"] == "current"
+
+
+async def test_hitl_ask_human_rejects_legacy_uncorrelated_response():
+	plugin = HumanInTheLoopPlugin()
+	plugin.initialize({"ask_human_timeout": 1}, None)
+	request_q = asyncio.Queue()
+	response_q = asyncio.Queue()
+	task = asyncio.create_task(plugin._ask_human(
+		{"question": "Continue?"},
+		{"request_queue": request_q, "response_queue": response_q},
+	))
+	await request_q.get()
+	await response_q.put("yes")
+	with pytest.raises(ValueError, match="ask_human_response object"):
+		await task

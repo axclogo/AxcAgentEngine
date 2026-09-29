@@ -484,12 +484,26 @@ class TestHumanInTheLoopPlugin:
 		assert len(tools) == 1
 		assert tools[0].name == "ask_human"
 		assert tools[0].capability == "human_approval"
+		assert tools[0].timeout == 61
+		fields = {field.key: field for field in plugin.config_schema.fields}
+		assert "timeout" not in fields
+		assert fields["approval_timeout"].default == 300
+		assert fields["ask_human_timeout"].default == 60
+		from axc_agent_engine.plugins.config_schema import validate_plugin_config
+		with pytest.raises(ValueError, match="Unknown config field.*timeout"):
+			validate_plugin_config(plugin.name, {"timeout": 1}, plugin.config_schema)
 
 	def test_can_disable_ask_human_tool(self):
 		from axc_agent_engine.plugins.builtin.human_in_the_loop.plugin import HumanInTheLoopPlugin
 		plugin = HumanInTheLoopPlugin()
 		plugin.initialize({"ask_human": False}, None)
 		assert plugin.get_tools() == []
+
+	@pytest.mark.parametrize("field", ["approval_timeout", "ask_human_timeout"])
+	def test_rejects_non_positive_timeout(self, field):
+		from axc_agent_engine.plugins.builtin.human_in_the_loop.plugin import HumanInTheLoopPlugin
+		with pytest.raises(ValueError, match=f"{field} must be a positive number"):
+			HumanInTheLoopPlugin().initialize({field: 0}, None)
 
 
 class TestSkillPlugin:

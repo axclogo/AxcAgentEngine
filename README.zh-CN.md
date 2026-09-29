@@ -394,6 +394,32 @@ agent = engine.load_agent_template("./agents/my_agent.yaml").instantiate(models=
 | `collaboration` | Agent 间调用和宿主编排薄入口 |
 | `swarm` | 轻量并行 fan-out |
 
+### `ask_human` 超时与队列协议
+
+`human_in_the_loop` 分别配置危险工具审批和人工问答的等待时间：
+
+```yaml
+plugins:
+  human_in_the_loop:
+    enabled: true
+    approval_timeout: 300
+    ask_human_timeout: 60
+```
+
+`ask_human` 请求包含 `request_id`、`timeout_seconds` 和 Unix 时间戳 `expires_at`，宿主可据此显示倒计时。宿主必须向
+`response_queue` 写入关联响应：
+
+```python
+await response_queue.put({
+    "type": "ask_human_response",
+    "request_id": request["request_id"],
+    "answer": "用户回答",
+})
+```
+
+等待超时后，工具返回 `status: skipped`，Agent 会跳过依赖该回答的事项、继续处理其他工作，并在最终汇报中列出
+待人工确认项。危险工具审批超时仍然拒绝执行，不使用跳过策略。
+
 ## Sidecar 旁路能力
 
 旁路能力在 `axc_agent_engine.sidecar`，由宿主显式调用，不属于 Agent 核心执行链路。详见 [axc_agent_engine/sidecar/README.md](axc_agent_engine/sidecar/README.md)。

@@ -162,7 +162,8 @@ HUMAN_IN_THE_LOOP_CONFIG_SCHEMA = config_schema(
 	"危险工具调用审批和 ask_human 工具配置。",
 	[
 		config_field("risk_threshold", "风险阈值", "string", "达到该风险等级时请求人工审批。", label_en="Risk threshold", default="dangerous", enum=["safe", "moderate", "dangerous", "blocked"]),
-		config_field("timeout", "审批超时", "integer", "等待人工审批或回复的秒数。", label_en="Timeout", default=300),
+		config_field("approval_timeout", "审批超时", "integer", "等待危险工具人工审批的秒数。", label_en="Approval timeout", default=300),
+		config_field("ask_human_timeout", "人工应答超时", "integer", "ask_human 等待回复的秒数；超时后跳过待确认事项并继续执行。", label_en="Ask human timeout", default=60),
 		array_field("auto_approve", "自动批准工具", "无需审批的工具名列表。", _string_item(), label_en="Auto approve"),
 		config_field("ask_human", "启用询问工具", "boolean", "是否暴露 ask_human 工具。", label_en="Ask human", default=True),
 	],

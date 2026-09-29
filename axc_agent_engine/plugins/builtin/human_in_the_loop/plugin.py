@@ -1,7 +1,9 @@
 """HumanInTheLoop 插件 — 通过 asyncio.Future 审批危险工具调用。"""
 import asyncio
 import logging
-from typing import TYPE_CHECKING
+import time
+import uuid
+from typing import TYPE_CHECKING, Any
 
 from axc_agent_engine.plugins.base import BasePlugin
 from axc_agent_engine.plugins.builtin.config_schemas import HUMAN_IN_THE_LOOP_CONFIG_SCHEMA
@@ -15,6 +17,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+_ASK_HUMAN_TOOL_TIMEOUT_GRACE = 1.0
+
 
 class HumanInTheLoopPlugin(BasePlugin):
 	"""English: This documentation describes the related engine component behavior.
@@ -27,7 +31,8 @@ class HumanInTheLoopPlugin(BasePlugin):
 
 	def initialize(self, config: dict, plugin_ctx: "PluginContext") -> None:
 		self._risk_threshold = config.get("risk_threshold", "dangerous")
-		self._timeout = config.get("timeout", 300)
+		self._approval_timeout = _positive_timeout(config.get("approval_timeout", 300), "approval_timeout")
+		self._ask_human_timeout = _positive_timeout(config.get("ask_human_timeout", 60), "ask_human_timeout")
 		self._auto_approve_tools = set(config.get("auto_approve", []))
 		self._enable_ask_human = bool(config.get("ask_human", True))
 		self._pending_approvals: dict[str, asyncio.Future] = {}
@@ -39,7 +44,10 @@ class HumanInTheLoopPlugin(BasePlugin):
 			return []
 		return [ToolDefinition(
 			name="ask_human",
-			description="向用户提问并等待回复",
+			description=(
+				"向用户提问并等待回复。等待超时后会返回 skipped；此时跳过依赖该回复的事项，"
+				"继续处理其他工作，并在最终汇报中列出待人工确认项。"
+			),
 			parameters={
 				"type": "object",
 				"properties": {
@@ -49,6 +57,7 @@ class HumanInTheLoopPlugin(BasePlugin):
 				"required": ["question"],
 			},
 			execute=self._ask_human,
+			timeout=self._ask_human_timeout + _ASK_HUMAN_TOOL_TIMEOUT_GRACE,
 			capability="human_approval",
 		)]
 
@@ -84,7 +93,7 @@ class HumanInTheLoopPlugin(BasePlugin):
 		try:
 			await approval_queue.put(approval_request)
 			asyncio.ensure_future(self._listen_approval(exec_ctx, request_id, initial_delay=0.01))
-			response = await asyncio.wait_for(future, timeout=self._timeout)
+			response = await asyncio.wait_for(future, timeout=self._approval_timeout)
 			if response.get("approved"):
 				logger.info(f"[hitl] Approved: {tool_name}")
 				return True, arguments
@@ -96,7 +105,7 @@ class HumanInTheLoopPlugin(BasePlugin):
 				return False, arguments
 		except asyncio.TimeoutError:
 			logger.warning(f"[hitl] Approval timeout: {tool_name}")
-			self._last_rejection_reason = f"等待人工审批超时({self._timeout}s)"
+			self._last_rejection_reason = f"等待人工审批超时({_seconds_label(self._approval_timeout)}s)"
 			self._last_rejection_code = "tool.rejected_by_human_in_the_loop"
 			return False, arguments
 		finally:
@@ -141,15 +150,81 @@ class HumanInTheLoopPlugin(BasePlugin):
 		response_queue = context.get("response_queue")
 		if not request_queue or not response_queue:
 			return ToolOutput.error("Human interaction not supported in current environment")
-		request = {"type": "ask_human", "question": question, "options": options}
+		request_id = uuid.uuid4().hex
+		request = {
+			"type": "ask_human",
+			"request_id": request_id,
+			"tool_call_id": context.get("tool_call_id", ""),
+			"question": question,
+			"options": options,
+			"timeout_seconds": self._ask_human_timeout,
+			"expires_at": time.time() + self._ask_human_timeout,
+		}
 		await request_queue.put(request)
 		try:
-			response = await asyncio.wait_for(response_queue.get(), timeout=self._timeout)
-			return ToolOutput.json_output({"answer": response}, summary=f"用户回复：{response}")
+			answer = await self._wait_for_human_response(response_queue, request_id)
+			return ToolOutput.json_output(
+				{"status": "answered", "request_id": request_id, "answer": answer},
+				summary=f"用户回复：{answer}",
+			)
 		except asyncio.TimeoutError:
-			return ToolOutput.error(f"Waiting for user reply timeout ({self._timeout}s)")
+			return self._human_timeout_output(request_id, question)
+
+	async def _wait_for_human_response(self, response_queue, request_id: str) -> Any:
+		loop = asyncio.get_running_loop()
+		deadline = loop.time() + self._ask_human_timeout
+		while True:
+			remaining = deadline - loop.time()
+			if remaining <= 0:
+				raise asyncio.TimeoutError
+			response = await asyncio.wait_for(response_queue.get(), timeout=remaining)
+			if not isinstance(response, dict) or response.get("type") != "ask_human_response":
+				raise ValueError("ask_human response must be an ask_human_response object")
+			if response.get("request_id") != request_id:
+				logger.warning("[hitl] Discarding unmatched ask_human response: %s", response.get("request_id"))
+				continue
+			if "answer" not in response:
+				raise ValueError("ask_human response must contain answer")
+			return response["answer"]
+
+	def _human_timeout_output(self, request_id: str, question: str) -> ToolOutput:
+		timeout_label = _seconds_label(self._ask_human_timeout)
+		guidance = (
+			f"人工应答等待已超时（{timeout_label} 秒），待确认问题：{question}\n"
+			"将依赖该回答的事项视为已跳过；不要猜测答案或立即重复询问。继续完成不依赖该回答的工作，"
+			"并在最终汇报中单独列出该问题以及因此未处理的内容。"
+		)
+		return ToolOutput(
+			content={
+				"status": "skipped",
+				"reason": "human_unavailable",
+				"request_id": request_id,
+				"question": question,
+				"waited_seconds": self._ask_human_timeout,
+			},
+			content_type="json",
+			summary=f"人工应答超时，已跳过待确认事项：{question}",
+			llm_view=guidance,
+			metadata={
+				"durable": True,
+				"durable_summary": guidance,
+				"status": "skipped",
+				"reason": "human_unavailable",
+				"request_id": request_id,
+			},
+		)
 
 
 def _risk_level(risk_name: str) -> int:
 	levels = {"safe": 0, "moderate": 1, "dangerous": 2, "blocked": 3}
 	return levels.get(risk_name, 0)
+
+
+def _positive_timeout(value: Any, name: str) -> float:
+	if isinstance(value, bool) or not isinstance(value, (int, float)) or value <= 0:
+		raise ValueError(f"{name} must be a positive number")
+	return float(value)
+
+
+def _seconds_label(value: float) -> str:
+	return f"{value:g}"

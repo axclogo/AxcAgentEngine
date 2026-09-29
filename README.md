@@ -392,6 +392,32 @@ agent = engine.load_agent_template("./agents/my_agent.yaml").instantiate(models=
 | `collaboration` | Agent-to-agent calls and host orchestration entry |
 | `swarm` | Lightweight parallel fan-out |
 
+### `ask_human` timeout and queue protocol
+
+`human_in_the_loop` configures dangerous-tool approval and human-answer waits independently:
+
+```yaml
+plugins:
+  human_in_the_loop:
+    enabled: true
+    approval_timeout: 300
+    ask_human_timeout: 60
+```
+
+Each `ask_human` request includes a `request_id`, `timeout_seconds`, and Unix `expires_at` timestamp so the host can render a
+countdown. The host must put a correlated response on `response_queue`:
+
+```python
+await response_queue.put({
+    "type": "ask_human_response",
+    "request_id": request["request_id"],
+    "answer": "The user's answer",
+})
+```
+
+On timeout, the tool returns `status: skipped`. The agent skips work that depends on the answer, continues independent work,
+and lists the pending question in its final report. Dangerous-tool approval still rejects execution on timeout.
+
 ## Sidecar Capabilities
 
 Sidecars live under `axc_agent_engine.sidecar` and are invoked explicitly by the host, not part of the agent's core execution path. See [axc_agent_engine/sidecar/README.md](axc_agent_engine/sidecar/README.md).
