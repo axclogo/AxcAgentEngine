@@ -204,6 +204,8 @@ class AgentMessageDispatcher:
 				envelope = AgentEnvelope.from_dict(msg)
 				if envelope.type in ("request", "broadcast"):
 					await self._handle_envelope(agent, envelope)
+				if self._consumers.get(agent.name) is not asyncio.current_task():
+					return
 		except asyncio.CancelledError:
 			pass
 		except Exception as e:

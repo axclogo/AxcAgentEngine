@@ -444,3 +444,30 @@ class TestNoDirectAgentChat:
 		source = inspect.getsource(swarm)
 		assert "agent.chat" not in source
 		assert "target.chat" not in source
+
+
+@pytest.mark.asyncio
+async def test_stop_consumer_exits_when_agent_handles_cancellation():
+	"""Graceful Agent cancellation cannot restart the consumer / Agent 收尾不能重启消费等待。"""
+	bus = InMemoryMessageBus()
+	dispatcher = AgentMessageDispatcher(message_bus=bus)
+	started = asyncio.Event()
+	closed = asyncio.Event()
+	async def stream(*args, **kwargs):
+		started.set()
+		try:
+			await asyncio.Event().wait()
+		except asyncio.CancelledError:
+			closed.set()
+			yield Event.done("cancelled")
+	agent = MagicMock()
+	agent.name = "cancel-handled"
+	agent.stream = stream
+	consumer = dispatcher.run_agent_consumer(agent)
+	await asyncio.sleep(0)
+	await dispatcher.publish(AgentEnvelope(sender="caller", recipient=agent.name, content="wait"))
+	await asyncio.wait_for(started.wait(), 1)
+	await asyncio.wait_for(dispatcher.stop_consumer(agent.name), 1)
+	assert closed.is_set() and consumer.done()
+	assert agent.name not in dispatcher._consumers
+	await dispatcher.stop_consumer(agent.name)
