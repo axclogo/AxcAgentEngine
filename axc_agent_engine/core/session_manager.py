@@ -5,6 +5,7 @@ import asyncio
 import time
 from collections import OrderedDict
 from typing import Any, TYPE_CHECKING
+from uuid import NAMESPACE_URL, uuid5
 
 from axc_agent_engine.core.session import Session
 
@@ -12,11 +13,22 @@ if TYPE_CHECKING:
 	from axc_agent_engine.storage.protocols import MessagePersistence
 
 
-class SessionManager:
-	"""Session 的创建、获取、TTL 淘汰，支持可选持久化"""
+_SESSION_SCOPE_NAMESPACE = uuid5(NAMESPACE_URL, "https://github.com/axclogo/AxcAgentEngine/session-scope")
 
-	def __init__(self, max_sessions: int = 1000, ttl: int = 3600,
+
+def _session_scope_id(identity_seed: str) -> str:
+	return uuid5(_SESSION_SCOPE_NAMESPACE, identity_seed).hex
+
+
+class SessionManager:
+	"""Creates, retrieves, evicts, and persists sessions within an internal scope.
+
+	中文：在内部作用域中创建、获取、淘汰和持久化会话。
+	"""
+
+	def __init__(self, identity_seed: str, max_sessions: int = 1000, ttl: int = 3600,
 				 persistence: "MessagePersistence | None" = None) -> None:
+		self._scope_id = _session_scope_id(identity_seed)
 		self._sessions: OrderedDict[str, _SessionEntry] = OrderedDict()
 		self._max_sessions = max_sessions
 		self._ttl = ttl
@@ -36,7 +48,7 @@ class SessionManager:
 				return entry.session
 			session = Session(session_id=session_id)
 			if self._persistence:
-				messages = await self._persistence.load(session_id)
+				messages = await self._persistence.load(self._scope_id, session_id)
 				if messages:
 					session.messages = messages
 			self._sessions[session_id] = _SessionEntry(session=session, last_access=time.time())
@@ -83,7 +95,7 @@ class SessionManager:
 		async with self._lock:
 			entry = self._sessions.get(session_id)
 			if entry:
-				await self._persistence.save(session_id, entry.session.messages)
+				await self._persistence.save(self._scope_id, session_id, entry.session.messages)
 
 	async def remove(self, session_id: str) -> None:
 		"""English: Bilingual documentation follows.
@@ -92,7 +104,7 @@ class SessionManager:
 		async with self._lock:
 			self._sessions.pop(session_id, None)
 			if self._persistence:
-				await self._persistence.delete(session_id)
+				await self._persistence.delete(self._scope_id, session_id)
 
 	async def clear(self) -> None:
 		"""English: Bilingual documentation follows.
@@ -100,6 +112,8 @@ class SessionManager:
 清空所有 Session"""
 		async with self._lock:
 			self._sessions.clear()
+			if self._persistence:
+				await self._persistence.clear(self._scope_id)
 
 	@property
 	def count(self) -> int:
@@ -115,7 +129,6 @@ class SessionManager:
 		expired = [k for k, v in self._sessions.items() if now - v.last_access > self._ttl]
 		for k in expired:
 			del self._sessions[k]
-
 
 class _SessionEntry:
 	__slots__ = ("session", "last_access")

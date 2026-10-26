@@ -10,13 +10,14 @@ Verifies:
 import asyncio
 import os
 import tempfile
+from copy import deepcopy
 import pytest
 from unittest.mock import AsyncMock
 
 from axc_agent_engine.core.schema import LLMMessage, LLMResponse, LLMStreamChunk, LLMUsage
 from axc_agent_engine.engine import AgentModels, Engine
 from axc_agent_engine.tools.name_mapping import ToolNameMappingConfig
-from axc_agent_engine.storage.in_memory import InMemoryMessageBus
+from axc_agent_engine.storage.in_memory import InMemoryMessageBus, InMemoryMessagePersistence
 from axc_agent_engine.core.dispatcher import AgentEnvelope
 from axc_agent_engine.core.events import Event, EventType
 from axc_agent_engine.core.schema import ToolDefinition
@@ -76,10 +77,12 @@ class SequenceLLMProvider:
 	def __init__(self, responses: list[LLMResponse]) -> None:
 		self.responses = responses
 		self.index = 0
+		self.calls: list[list[dict]] = []
 		self.ask = AsyncMock(return_value="ok")
 		self.close = AsyncMock()
 
 	async def chat(self, messages, tools=None, **kwargs):
+		self.calls.append(deepcopy(messages))
 		index = min(self.index, len(self.responses) - 1)
 		self.index += 1
 		return self.responses[index]
@@ -146,6 +149,43 @@ class TestEngineDispatcherLifecycle:
 			assert result.type == "reply"
 			assert result.content == "worker reply"
 		await engine.close()
+
+	@pytest.mark.asyncio
+	async def test_dispatcher_isolates_same_conversation_across_agents(self):
+		bus = InMemoryMessageBus()
+		persistence = InMemoryMessagePersistence()
+		engine = Engine(message_bus=bus, message_persistence=persistence)
+		alpha_model = SequenceLLMProvider([_response("alpha first"), _response("alpha second")])
+		beta_model = SequenceLLMProvider([_response("beta first")])
+		with tempfile.TemporaryDirectory() as tmp:
+			alpha_path = _write_agent_yaml(tmp, "alpha")
+			beta_path = _write_agent_yaml(tmp, "beta")
+			engine.load_agent_template(alpha_path).instantiate(models=AgentModels(default=alpha_model))
+			engine.load_agent_template(beta_path).instantiate(models=AgentModels(default=beta_model))
+			while "agent.alpha.inbox" not in bus._channels or "agent.beta.inbox" not in bus._channels:
+				await asyncio.sleep(0)
+			dispatcher = engine._dispatcher
+			assert dispatcher is not None
+			for recipient, content in (
+				("alpha", "alpha private"),
+				("beta", "beta only"),
+				("alpha", "alpha follow-up"),
+			):
+				reply = await dispatcher.request(AgentEnvelope(
+					sender="session",
+					recipient=recipient,
+					content=content,
+					conversation_id="shared-conversation",
+				), timeout=5.0)
+				assert reply.type == "reply"
+		await engine.close()
+
+		beta_contents = [message.get("content") for message in beta_model.calls[0]]
+		alpha_contents = [message.get("content") for message in alpha_model.calls[1]]
+		assert "alpha private" not in beta_contents
+		assert "alpha first" not in beta_contents
+		assert "beta only" not in alpha_contents
+		assert "alpha private" in alpha_contents
 
 	@pytest.mark.asyncio
 	async def test_agent_call_stream_forwards_child_agent_events(self):

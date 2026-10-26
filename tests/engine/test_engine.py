@@ -16,6 +16,7 @@ from axc_agent_engine.runtime.resources import ResourceRegistry
 from axc_agent_engine.runtime.checkpoint import InMemoryCheckpointStore
 from axc_agent_engine.runtime.input import InputProviderResult
 from axc_agent_engine.runtime.sandbox_local import LocalSubprocessExecutor
+from axc_agent_engine.storage.in_memory import InMemoryMessagePersistence
 from axc_agent_engine.workflow import WorkflowResumePlan, WorkflowStatus
 
 
@@ -509,6 +510,127 @@ plugins:
 		agent._execute_stream = error_stream
 		with pytest.raises(ProviderError, match="llm down"):
 			await agent.chat("raw")
+
+	@pytest.mark.asyncio
+	async def test_sessions_remain_isolated_when_public_name_changes(self, mock_llm, tmp_path):
+		path = tmp_path / "agent.yaml"
+		path.write_text("name: base\nsystem_prompt: base\n", encoding="utf-8")
+		persistence = InMemoryMessagePersistence()
+		engine = Engine(message_persistence=persistence)
+		template = engine.load_agent_template(str(path))
+		alpha_model = type(mock_llm)()
+		beta_model = type(mock_llm)()
+		alpha = template.instantiate(
+			models=AgentModels(default=alpha_model),
+			overrides={"name": "alpha", "system_prompt": "alpha system"},
+		)
+		beta = template.instantiate(
+			models=AgentModels(default=beta_model),
+			overrides={"name": "beta", "system_prompt": "beta system"},
+		)
+
+		await alpha.chat("alpha secret", session_id="shared")
+		await beta.chat("beta question", session_id="shared")
+		alpha_scope_id = alpha._session_manager._scope_id
+		beta_scope_id = beta._session_manager._scope_id
+		alpha.name = "renamed-alpha"
+		await alpha.chat("alpha follow-up", session_id="shared")
+
+		beta_messages = beta_model.chat.call_args.args[0]
+		alpha_messages = alpha_model.chat.call_args.args[0]
+		assert "alpha secret" not in [message.get("content") for message in beta_messages]
+		assert "beta question" not in [message.get("content") for message in alpha_messages]
+		assert "alpha secret" in [message.get("content") for message in alpha_messages]
+		assert alpha._session_manager._scope_id == alpha_scope_id
+		assert alpha_scope_id != beta_scope_id
+		assert alpha._session_manager is not beta._session_manager
+
+		await alpha.reset_session("shared")
+		assert await persistence.load(alpha_scope_id, "shared") == []
+		assert await persistence.load(beta_scope_id, "shared")
+
+	@pytest.mark.asyncio
+	async def test_agent_session_restores_from_scoped_persistence(self, mock_llm, tmp_path):
+		path = tmp_path / "agent.yaml"
+		path.write_text("name: persistent\nsystem_prompt: base\n", encoding="utf-8")
+		persistence = InMemoryMessagePersistence()
+		first_engine = Engine(message_persistence=persistence)
+		first_agent = first_engine.load_agent_template(str(path)).instantiate(
+			models=AgentModels(default=type(mock_llm)()),
+		)
+		await first_agent.chat("remember me", session_id="s1")
+		await first_engine.close()
+
+		second_model = type(mock_llm)()
+		second_engine = Engine(message_persistence=persistence)
+		second_agent = second_engine.load_agent_template(str(path)).instantiate(
+			models=AgentModels(default=second_model),
+		)
+		await second_agent.chat("what came before?", session_id="s1")
+
+		contents = [message.get("content") for message in second_model.chat.call_args.args[0]]
+		assert "remember me" in contents
+		await second_engine.close()
+
+	@pytest.mark.asyncio
+	async def test_concurrent_agents_isolate_same_session_id(self, mock_llm, tmp_path):
+		import asyncio
+
+		path = tmp_path / "agent.yaml"
+		path.write_text("name: base\nsystem_prompt: base\n", encoding="utf-8")
+		persistence = InMemoryMessagePersistence()
+		engine = Engine(message_persistence=persistence)
+		template = engine.load_agent_template(str(path))
+		alpha_model = type(mock_llm)()
+		beta_model = type(mock_llm)()
+		barrier = asyncio.Barrier(2)
+
+		def wait_for_peer(model):
+			async def chat(*args, **kwargs):
+				await barrier.wait()
+				return model.chat.return_value
+			return chat
+
+		alpha_model.chat.side_effect = wait_for_peer(alpha_model)
+		beta_model.chat.side_effect = wait_for_peer(beta_model)
+		alpha = template.instantiate(models=AgentModels(default=alpha_model), overrides={"name": "alpha"})
+		beta = template.instantiate(models=AgentModels(default=beta_model), overrides={"name": "beta"})
+
+		await asyncio.wait_for(
+			asyncio.gather(
+				alpha.chat("alpha concurrent", session_id="shared"),
+				beta.chat("beta concurrent", session_id="shared"),
+			),
+			timeout=2.0,
+		)
+
+		alpha_contents = [message.get("content") for message in alpha_model.chat.call_args.args[0]]
+		beta_contents = [message.get("content") for message in beta_model.chat.call_args.args[0]]
+		assert "beta concurrent" not in alpha_contents
+		assert "alpha concurrent" not in beta_contents
+		assert await persistence.load(alpha._session_manager._scope_id, "shared")
+		assert await persistence.load(beta._session_manager._scope_id, "shared")
+
+	@pytest.mark.asyncio
+	async def test_reset_all_sessions_clears_only_current_scope(self, mock_llm, tmp_path):
+		path = tmp_path / "agent.yaml"
+		path.write_text("name: base\nsystem_prompt: base\n", encoding="utf-8")
+		persistence = InMemoryMessagePersistence()
+		engine = Engine(message_persistence=persistence)
+		template = engine.load_agent_template(str(path))
+		alpha = template.instantiate(models=AgentModels(default=type(mock_llm)()), overrides={"name": "alpha"})
+		beta = template.instantiate(models=AgentModels(default=type(mock_llm)()), overrides={"name": "beta"})
+		await alpha.chat("alpha one", session_id="one")
+		await alpha.chat("alpha two", session_id="two")
+		await beta.chat("beta shared", session_id="one")
+		alpha_scope_id = alpha._session_manager._scope_id
+		beta_scope_id = beta._session_manager._scope_id
+
+		await alpha.reset_session()
+
+		assert await persistence.load(alpha_scope_id, "one") == []
+		assert await persistence.load(alpha_scope_id, "two") == []
+		assert await persistence.load(beta_scope_id, "one")
 
 	@pytest.mark.asyncio
 	async def test_agent_resume_missing_error_and_close_failures(self, mock_llm, tmp_path, monkeypatch):

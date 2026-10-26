@@ -14,6 +14,7 @@ from axc_agent_engine.plugins.builtin.mcp.support.normalization import (
 	tool_from_payload,
 )
 from axc_agent_engine.plugins.builtin.mcp.support.transports import build_transport
+from axc_agent_engine.plugins.builtin.mcp.support.transports import sdk as sdk_transport
 from axc_agent_engine.plugins.builtin.mcp.support.transports.base import (
 	call_transport_client,
 	client_session_class,
@@ -49,15 +50,15 @@ def test_client_session_class_fallback(monkeypatch):
 
 
 def test_official_sdk_transport_available_branches(monkeypatch):
-	monkeypatch.setattr("importlib.import_module", lambda name: object())
-	monkeypatch.setattr("axc_agent_engine.plugins.builtin.mcp.support.transports.sdk.module_exists", lambda name: name.endswith("stdio"))
+	monkeypatch.setattr(sdk_transport.importlib, "import_module", lambda name: object())
+	monkeypatch.setattr(sdk_transport, "module_exists", lambda name: name.endswith("stdio"))
 	assert OfficialSDKTransport.available({"transport": "command"})
 	assert not OfficialSDKTransport.available({"transport": "sse"})
 
 	def missing(name):
 		raise ImportError(name)
 
-	monkeypatch.setattr("importlib.import_module", missing)
+	monkeypatch.setattr(sdk_transport.importlib, "import_module", missing)
 	assert not OfficialSDKTransport.available({"transport": "stdio"})
 
 
@@ -180,8 +181,8 @@ async def test_official_sdk_transport_open_streams_and_connect_errors(monkeypatc
 			return http_mod
 		raise ImportError(name)
 
-	monkeypatch.setattr("axc_agent_engine.plugins.builtin.mcp.support.transports.sdk.importlib.import_module", fake_import)
-	monkeypatch.setattr("axc_agent_engine.plugins.builtin.mcp.support.transports.sdk.client_session_class", lambda: DummySession)
+	monkeypatch.setattr(sdk_transport.importlib, "import_module", fake_import)
+	monkeypatch.setattr(sdk_transport, "client_session_class", lambda: DummySession)
 
 	stdio = OfficialSDKTransport({"transport": "stdio", "command": "cmd", "args": ["a"], "env": {"X": "1"}, "cwd": "/tmp"})
 	await stdio.connect()

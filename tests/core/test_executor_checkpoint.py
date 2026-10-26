@@ -389,7 +389,9 @@ def test_executor_init_messages_can_skip_user_message():
 
 async def test_agent_resume_stream_restores_latest_execution_checkpoint():
 	from axc_agent_engine.agent import Agent
+	from axc_agent_engine.core.session_manager import SessionManager
 	from axc_agent_engine.core.schema import RuntimeConfig
+	from axc_agent_engine.storage.in_memory import InMemoryMessagePersistence
 
 	captured_messages: list[list[dict]] = []
 	store = InMemoryCheckpointStore()
@@ -410,6 +412,8 @@ async def test_agent_resume_stream_restores_latest_execution_checkpoint():
 			"metadata": {"session_id": "s1", "agent_name": "agent"},
 		},
 	))
+	persistence = InMemoryMessagePersistence()
+	session_manager = SessionManager("agent", persistence=persistence)
 	agent = Agent(
 		name="agent",
 		description="",
@@ -418,6 +422,7 @@ async def test_agent_resume_stream_restores_latest_execution_checkpoint():
 		plugins=[],
 		default_model=_recording_provider([{"content": "resumed"}], captured_messages),
 		fallback_model=None,
+		session_manager=session_manager,
 		services=ExecutionServices(checkpoint_store=store),
 	)
 
@@ -431,3 +436,5 @@ async def test_agent_resume_stream_restores_latest_execution_checkpoint():
 	session = await agent.get_session("s1")
 	assert session is not None
 	assert session.messages[-1]["content"] == "resumed"
+	persisted = await persistence.load(session_manager._scope_id, "s1")
+	assert persisted[-1]["content"] == "resumed"

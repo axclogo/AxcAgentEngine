@@ -106,16 +106,25 @@ class TestMessageStore:
 
 
 class TestSessionManager:
+	def test_scope_id_is_stable_and_opaque(self):
+		first = SessionManager("agent")
+		second = SessionManager("agent")
+		other = SessionManager("other")
+
+		assert first._scope_id == second._scope_id
+		assert first._scope_id != other._scope_id
+		assert first._scope_id != "agent"
+
 	@pytest.mark.asyncio
 	async def test_get_or_create(self):
-		sm = SessionManager()
+		sm = SessionManager("agent")
 		session = await sm.get_or_create("s1")
 		assert session.session_id == "s1"
 		assert session.messages == []
 
 	@pytest.mark.asyncio
 	async def test_get_existing(self):
-		sm = SessionManager()
+		sm = SessionManager("agent")
 		s1 = await sm.get_or_create("s1")
 		s1.messages = [{"role": "user", "content": "hi"}]
 		s2 = await sm.get_or_create("s1")
@@ -123,20 +132,20 @@ class TestSessionManager:
 
 	@pytest.mark.asyncio
 	async def test_get_nonexistent(self):
-		sm = SessionManager()
+		sm = SessionManager("agent")
 		result = await sm.get("nope")
 		assert result is None
 
 	@pytest.mark.asyncio
 	async def test_remove(self):
-		sm = SessionManager()
+		sm = SessionManager("agent")
 		await sm.get_or_create("s1")
 		await sm.remove("s1")
 		assert await sm.get("s1") is None
 
 	@pytest.mark.asyncio
 	async def test_clear(self):
-		sm = SessionManager()
+		sm = SessionManager("agent")
 		await sm.get_or_create("s1")
 		await sm.get_or_create("s2")
 		await sm.clear()
@@ -144,7 +153,7 @@ class TestSessionManager:
 
 	@pytest.mark.asyncio
 	async def test_max_sessions_eviction(self):
-		sm = SessionManager(max_sessions=2)
+		sm = SessionManager("agent", max_sessions=2)
 		await sm.get_or_create("s1")
 		await sm.get_or_create("s2")
 		await sm.get_or_create("s3")
@@ -153,13 +162,13 @@ class TestSessionManager:
 
 	@pytest.mark.asyncio
 	async def test_ttl_eviction(self):
-		sm = SessionManager(ttl=0)  # 0 = no TTL
+		sm = SessionManager("agent", ttl=0)  # 0 = no TTL
 		await sm.get_or_create("s1")
 		assert sm.count == 1
 
 	@pytest.mark.asyncio
 	async def test_ttl_positive_evicts_expired_session(self, monkeypatch):
-		sm = SessionManager(ttl=1)
+		sm = SessionManager("agent", ttl=1)
 		times = [100.0, 100.0, 102.0, 102.0]
 		monkeypatch.setattr("axc_agent_engine.core.session_manager.time.time", lambda: times.pop(0) if times else 102.0)
 		await sm.get_or_create("s1")
@@ -173,29 +182,35 @@ class TestSessionManager:
 			def __init__(self):
 				self.saved = []
 				self.deleted = []
+				self.cleared = []
 
-			async def load(self, session_id):
-				return [{"role": "user", "content": session_id}]
+			async def load(self, scope_id, session_id):
+				return [{"role": "user", "content": f"{scope_id}:{session_id}"}]
 
-			async def save(self, session_id, messages):
-				self.saved.append((session_id, list(messages)))
+			async def save(self, scope_id, session_id, messages):
+				self.saved.append((scope_id, session_id, list(messages)))
 
-			async def delete(self, session_id):
-				self.deleted.append(session_id)
+			async def delete(self, scope_id, session_id):
+				self.deleted.append((scope_id, session_id))
+
+			async def clear(self, scope_id):
+				self.cleared.append(scope_id)
 
 		persistence = Persistence()
-		sm = SessionManager(persistence=persistence)
+		sm = SessionManager("agent", persistence=persistence)
 		session = await sm.get_or_create("s1")
-		assert session.messages == [{"role": "user", "content": "s1"}]
+		assert session.messages == [{"role": "user", "content": f"{sm._scope_id}:s1"}]
 		await sm.save("s1")
 		await sm.save("missing")
-		assert persistence.saved == [("s1", [{"role": "user", "content": "s1"}])]
+		assert persistence.saved == [(sm._scope_id, "s1", [{"role": "user", "content": f"{sm._scope_id}:s1"}])]
 		await sm.remove("s1")
-		assert persistence.deleted == ["s1"]
+		assert persistence.deleted == [(sm._scope_id, "s1")]
+		await sm.clear()
+		assert persistence.cleared == [sm._scope_id]
 
 	@pytest.mark.asyncio
 	async def test_restore_context_basic(self):
-		sm = SessionManager()
+		sm = SessionManager("agent")
 		session = Session(session_id="s1", messages=[{"role": "user", "content": "old"}])
 		ms = MessageStore()
 		ms.append({"role": "user", "content": "new"})
@@ -213,7 +228,7 @@ class TestSessionManager:
 		ms = MessageStore()
 		ms.append({"role": "system", "content": "sys"})
 		ms.append({"role": "user", "content": "new"})
-		SessionManager().restore_context(restored, ms)
+		SessionManager("agent").restore_context(restored, ms)
 		assert [message["content"] for message in ms.get_all()] == ["sys", "old", "new"]
 		restored.clear()
 		assert restored.messages == []

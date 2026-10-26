@@ -61,28 +61,35 @@ class InMemoryKVStore:
 
 
 class InMemoryMessagePersistence:
-	"""Dict-based in-memory message persistence with capacity limit.
-中文：此文档说明相关引擎组件的行为。"""
+	"""Scope-isolated in-memory message persistence with capacity limit.
+中文：按内部作用域隔离且带容量限制的内存会话持久化。"""
 
 	def __init__(self, max_sessions: int = 1000) -> None:
-		self._store: OrderedDict[str, list[dict]] = OrderedDict()
+		self._store: OrderedDict[tuple[str, str], list[dict]] = OrderedDict()
 		self._max_sessions = max_sessions
 		self._lock = asyncio.Lock()
 
-	async def save(self, session_id: str, messages: list[dict]) -> None:
+	async def save(self, scope_id: str, session_id: str, messages: list[dict]) -> None:
 		async with self._lock:
-			self._store[session_id] = list(messages)
-			self._store.move_to_end(session_id)
+			key = (scope_id, session_id)
+			self._store[key] = list(messages)
+			self._store.move_to_end(key)
 			while len(self._store) > self._max_sessions:
 				self._store.popitem(last=False)
 
-	async def load(self, session_id: str) -> list[dict]:
+	async def load(self, scope_id: str, session_id: str) -> list[dict]:
 		async with self._lock:
-			return list(self._store.get(session_id, []))
+			return list(self._store.get((scope_id, session_id), []))
 
-	async def delete(self, session_id: str) -> None:
+	async def delete(self, scope_id: str, session_id: str) -> None:
 		async with self._lock:
-			self._store.pop(session_id, None)
+			self._store.pop((scope_id, session_id), None)
+
+	async def clear(self, scope_id: str) -> None:
+		async with self._lock:
+			keys = [key for key in self._store if key[0] == scope_id]
+			for key in keys:
+				del self._store[key]
 
 
 class InMemorySpanStore:

@@ -80,29 +80,49 @@ class TestInMemoryMessagePersistence:
 	async def test_save_and_load(self):
 		store = InMemoryMessagePersistence()
 		msgs = [{"role": "user", "content": "hi"}]
-		await store.save("s1", msgs)
-		loaded = await store.load("s1")
+		await store.save("agent", "s1", msgs)
+		loaded = await store.load("agent", "s1")
 		assert loaded == msgs
 
 	@pytest.mark.asyncio
 	async def test_load_nonexistent(self):
 		store = InMemoryMessagePersistence()
-		assert await store.load("nope") == []
+		assert await store.load("agent", "nope") == []
 
 	@pytest.mark.asyncio
 	async def test_delete(self):
 		store = InMemoryMessagePersistence()
-		await store.save("s1", [{"role": "user", "content": "hi"}])
-		await store.delete("s1")
-		assert await store.load("s1") == []
+		await store.save("agent", "s1", [{"role": "user", "content": "hi"}])
+		await store.delete("agent", "s1")
+		assert await store.load("agent", "s1") == []
 
 	@pytest.mark.asyncio
 	async def test_max_sessions(self):
 		store = InMemoryMessagePersistence(max_sessions=2)
-		await store.save("s1", [])
-		await store.save("s2", [])
-		await store.save("s3", [])
-		assert await store.load("s1") == []  # evicted
+		await store.save("agent", "s1", [])
+		await store.save("agent", "s2", [])
+		await store.save("agent", "s3", [])
+		assert await store.load("agent", "s1") == []  # evicted
+
+	@pytest.mark.asyncio
+	async def test_scoped_sessions_do_not_collide(self):
+		store = InMemoryMessagePersistence()
+		await store.save("scope-alpha", "shared", [{"role": "user", "content": "alpha"}])
+		await store.save("scope-beta", "shared", [{"role": "user", "content": "beta"}])
+
+		assert await store.load("scope-alpha", "shared") == [{"role": "user", "content": "alpha"}]
+		assert await store.load("scope-beta", "shared") == [{"role": "user", "content": "beta"}]
+
+		await store.delete("scope-alpha", "shared")
+		assert await store.load("scope-alpha", "shared") == []
+		assert await store.load("scope-beta", "shared") == [{"role": "user", "content": "beta"}]
+
+		await store.save("scope-alpha", "one", [{"role": "user", "content": "one"}])
+		await store.save("scope-alpha", "two", [{"role": "user", "content": "two"}])
+		await store.clear("scope-alpha")
+		assert await store.load("scope-alpha", "one") == []
+		assert await store.load("scope-alpha", "two") == []
+		assert await store.load("scope-beta", "shared") == [{"role": "user", "content": "beta"}]
 
 
 class TestInMemorySpanStore:

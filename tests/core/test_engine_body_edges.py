@@ -111,11 +111,11 @@ async def test_in_memory_storage_expiry_capacity_request_and_idle(monkeypatch):
 	assert await kv.list_keys() == []
 
 	messages = InMemoryMessagePersistence(max_sessions=1)
-	await messages.save("s1", [{"role": "user"}])
-	await messages.save("s2", [{"role": "assistant"}])
-	assert await messages.load("s1") == []
-	await messages.delete("s2")
-	assert await messages.load("s2") == []
+	await messages.save("agent", "s1", [{"role": "user"}])
+	await messages.save("agent", "s2", [{"role": "assistant"}])
+	assert await messages.load("agent", "s1") == []
+	await messages.delete("agent", "s2")
+	assert await messages.load("agent", "s2") == []
 
 	spans = InMemorySpanStore(max_spans=1)
 	await spans.save_span({"trace_id": "old", "session_id": "s"})

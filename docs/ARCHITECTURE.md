@@ -19,7 +19,7 @@ AgentTemplate.instantiate(models=AgentModels(...), mounts=..., metadata=..., ove
   → create PluginContext (agent-level LLM, stores, dispatcher)
   → load_plugins() from Engine PluginRegistry → topological sort → initialize()
   → create ToolRegistry → freeze()
-  → create Agent
+  → create Agent with an internally scoped SessionManager
   → dispatcher.run_agent_consumer(agent)  ← auto-start consumer
   → return Agent
 
@@ -162,13 +162,18 @@ back to LocalSubprocessExecutor for local development.
 
 Zero external dependencies. Protocol interfaces with in-memory defaults:
 - KVStore: key-value with TTL
-- MessagePersistence: session message storage
+- MessagePersistence: message storage keyed by opaque scope ID and session ID
 - SpanStore: tracing span persistence
 - VectorStore: embedding search (linear scan, ~1000 entries)
 - MessageBus: pub/sub with max_idle auto-exit
 - ArtifactStore: large tool output storage with paged retrieval
 - AuditSink: structured tool audit events
 - CheckpointStore: durable execution checkpoints
+
+`MessagePersistence` receives an opaque, deterministic `scope_id` from the
+engine for `save`, `load`, `delete`, and `clear`. Persistence implementations
+store the scope as part of the key and do not derive it from the Agent's public
+name at call time.
 
 Engine injects stores, message bus, audit sink, checkpoint store, custom policy,
 and command executor services into every Agent-created ExecutionContext.

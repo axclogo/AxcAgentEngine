@@ -160,7 +160,7 @@ class Agent:
 		self._default_model = default_model
 		self._fallback_model = fallback_model
 		self._utility_model = utility_model
-		self._session_manager = session_manager or SessionManager()
+		self._session_manager = session_manager or SessionManager(name)
 		self._registry = registry or ToolRegistry()
 		self._services = services or ExecutionServices(artifact_store=artifact_store)
 		self._input_provider = input_provider or PassthroughInputProvider()

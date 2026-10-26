@@ -154,7 +154,6 @@ class Engine:
 			run_control=self._run_control,
 		)
 		self._agents: dict[str, Agent] = {}
-		self._session_manager = SessionManager(persistence=message_persistence)
 
 	@property
 	def resources(self) -> ResourceRegistry:
@@ -231,7 +230,7 @@ class Engine:
 			default_model=agent_default,
 			fallback_model=agent_fallback,
 			utility_model=agent_utility,
-			session_manager=self._session_manager,
+			session_manager=SessionManager(config.name, persistence=self._message_persistence),
 			registry=registry,
 			services=self._execution_services,
 			input_provider=self._input_provider,

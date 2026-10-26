@@ -43,3 +43,8 @@ configuration. Do not allow untrusted users to configure MCP commands or URLs.
 Memory and knowledge plugins can persist or retrieve sensitive data. Use
 tenant/user/session scoping and production-grade stores when deploying beyond a
 single-user local process.
+
+Conversation persistence is isolated by an immutable internal scope ID and the
+session ID. Changing an Agent's public name after instantiation does not change
+its persistence scope. Hosts remain responsible for tenant and user isolation
+when sharing one persistence backend.
