@@ -1,5 +1,5 @@
-"""Tool name mapping for model-specific function-call constraints.
-中文：此文档说明相关引擎组件的行为。"""
+"""Tool name mapping for model-specific function-call constraints. 按模型函数调用约束映射工具名。"""
+
 from __future__ import annotations
 
 import hashlib
@@ -8,14 +8,12 @@ from dataclasses import dataclass
 
 
 class ToolNameMappingError(ValueError):
-	"""Raised when a tool name cannot be mapped safely.
-中文：此文档说明相关引擎组件的行为。"""
+	"""Raised when a tool name cannot be mapped safely. 无法安全映射工具名称。"""
 
 
 @dataclass(frozen=True)
 class ToolNameMappingConfig:
-	"""Rules exposed by LLM providers for model-facing tool names.
-中文：此文档说明相关引擎组件的行为。"""
+	"""Rules exposed by LLM providers for model-facing tool names. 供应方对工具调用名称的约束。"""
 
 	pattern: str = r"^[a-zA-Z0-9_-]{1,64}$"
 	replacement: str = "_"
@@ -25,8 +23,7 @@ class ToolNameMappingConfig:
 
 
 class ToolNameMapper:
-	"""Encode internal tool names to model-safe aliases and decode them back.
-中文：此文档说明相关引擎组件的行为。"""
+	"""Encode internal tool names to model-safe aliases and decode them back. 在内部工具名与模型可用别名之间双向转换。"""
 
 	def __init__(self, config: ToolNameMappingConfig | None = None) -> None:
 		self.config = config or ToolNameMappingConfig()
@@ -64,8 +61,7 @@ class ToolNameMapper:
 
 
 def sanitize_tool_name(name: str, config: ToolNameMappingConfig | None = None) -> str:
-	"""Return a model-safe name using a conservative character replacement rule.
-中文：此文档说明相关引擎组件的行为。"""
+	"""Return a model-safe name using a conservative character replacement rule. 按保守的字符替换规则生成模型可用名称。"""
 	config = config or ToolNameMappingConfig()
 	value = name.lower() if config.case == "lower" else name
 	value = re.sub(r"[^a-zA-Z0-9_-]+", config.replacement, value)

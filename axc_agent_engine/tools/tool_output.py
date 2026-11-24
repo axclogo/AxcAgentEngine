@@ -2,6 +2,7 @@
 
 所有工具都必须返回 ToolOutput；非 ToolOutput 返回会被拒绝。
 """
+
 from __future__ import annotations
 
 import json
@@ -13,9 +14,9 @@ from typing import Any
 
 @dataclass
 class ArtifactRef:
-	"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-已存储 artifact 的引用，大内容存储在外部。"""
+	"""Reference to an externally stored artifact.
+	已存储 artifact 的引用，大内容存储在外部。"""
+
 	id: str
 	kind: str  # English: text | file | json | table | binary. 中文：artifact 类型枚举。
 	size: int
@@ -28,18 +29,17 @@ class ArtifactRef:
 		return {"id": self.id, "kind": self.kind, "size": self.size, "metadata": deepcopy(self.metadata)}
 
 	@classmethod
-	def from_dict(cls, d: dict[str, Any]) -> "ArtifactRef":
+	def from_dict(cls, d: dict[str, Any]) -> ArtifactRef:
 		return cls(id=d["id"], kind=d["kind"], size=d["size"], metadata=deepcopy(d.get("metadata", {})))
 
 
 @dataclass
 class ToolOutput:
-	"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-结构化工具执行结果。
+	"""Structured tool execution result.
+	结构化工具执行结果。
 
-	所有工具都必须返回该结构，engine 会拒绝其他返回类型。
-	"""
+	        所有工具都必须返回该结构，engine 会拒绝其他返回类型。"""
+
 	content: str | dict | list
 	content_type: str = "text"  # English: text | json | table | file | error. 中文：内容类型枚举。
 	summary: str = ""
@@ -86,7 +86,7 @@ class ToolOutput:
 		"""English: Whether this result should survive compression. 中文：结果是否应跨压缩保留。"""
 		return bool(self.metadata.get("durable") or self.metadata.get("durable_summary"))
 
-	def with_metadata(self, metadata: dict[str, Any]) -> "ToolOutput":
+	def with_metadata(self, metadata: dict[str, Any]) -> ToolOutput:
 		"""English: Return a copy with merged metadata. 中文：返回合并 metadata 的副本。"""
 		return ToolOutput(
 			content=deepcopy(self.content),
@@ -115,7 +115,7 @@ class ToolOutput:
 		}
 
 	@classmethod
-	def from_dict(cls, d: dict[str, Any]) -> "ToolOutput":
+	def from_dict(cls, d: dict[str, Any]) -> ToolOutput:
 		return cls(
 			content=deepcopy(d["content"]),
 			content_type=d.get("content_type", "text"),
@@ -127,29 +127,25 @@ class ToolOutput:
 		)
 
 	@classmethod
-	def text(cls, content: str, summary: str = "", llm_view: str = "") -> "ToolOutput":
-		"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-便捷创建 text ToolOutput。"""
+	def text(cls, content: str, summary: str = "", llm_view: str = "") -> ToolOutput:
+		"""Build a text result.
+		便捷创建 text ToolOutput。"""
 		return cls(content=content, content_type="text", summary=summary, llm_view=llm_view)
 
 	@classmethod
-	def json_output(cls, content: dict | list, summary: str = "", llm_view: str = "") -> "ToolOutput":
-		"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-便捷创建 JSON ToolOutput。"""
+	def json_output(cls, content: dict | list, summary: str = "", llm_view: str = "") -> ToolOutput:
+		"""Build a JSON result.
+		便捷创建 JSON ToolOutput。"""
 		return cls(content=content, content_type="json", summary=summary, llm_view=llm_view)
 
 	@classmethod
-	def error(cls, message: str) -> "ToolOutput":
-		"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-便捷创建 error ToolOutput。"""
+	def error(cls, message: str) -> ToolOutput:
+		"""Build an error result.
+		便捷创建 error ToolOutput。"""
 		return cls(content=message, content_type="error", is_error=True)
 
 
 def generate_artifact_id() -> str:
-	"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-生成唯一 artifact ID。"""
+	"""Generate a unique artifact identifier.
+	生成唯一 artifact ID。"""
 	return uuid.uuid4().hex[:16]

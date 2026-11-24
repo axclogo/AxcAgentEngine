@@ -7,21 +7,17 @@ import pytest
 
 from axc_agent_engine.core.context import ExecutionConfig, ExecutionContext, ExecutionRuntimeState
 from axc_agent_engine.core.errors import ErrorEnvelope
-from axc_agent_engine.plugins import AgentInfo, ModelInfo, PluginContext
 from axc_agent_engine.core.schema import ToolDefinition
+from axc_agent_engine.plugins import AgentInfo, ModelInfo, PluginContext
+from axc_agent_engine.plugins.builtin.common import bounded_int, strict_bounded_int
 from axc_agent_engine.plugins.builtin.tracing.plugin import (
 	RedactionService,
 	TraceSampler,
-	_bounded_float,
-	_bounded_int,
-	_current_tool_runtime,
 	_error_payload,
 	_log_span,
-	_resource_name,
 	_sampled,
 	_span_metadata,
 	_strict_float,
-	_strict_int,
 	_trace_summary,
 )
 from axc_agent_engine.storage.in_memory import InMemorySpanStore
@@ -88,14 +84,16 @@ async def test_tracing_span_store_receives_execution_metadata_and_parent_id():
 			model_info=ModelInfo(default="model-a"),
 		),
 	)
-	ctx.state.metadata.update({
-		"external_trace_id": "trace-1001",
-		"conversation_id": 123,
-		"agent_profile_id": 9,
-		"run_id": "run-1",
-		"session_id": "session-1",
-		"agent_name": "agent-a",
-	})
+	ctx.state.metadata.update(
+		{
+			"external_trace_id": "trace-1001",
+			"conversation_id": 123,
+			"agent_profile_id": 9,
+			"run_id": "run-1",
+			"session_id": "session-1",
+			"agent_name": "agent-a",
+		}
+	)
 
 	await p.on_execution_start(ctx)
 	await execute_tool_calls([{"name": "tool", "arguments": {}, "id": "call-1"}], reg, [p], ctx)
@@ -184,12 +182,14 @@ async def test_tracing_correlates_same_name_concurrent_tools_by_call_id():
 @pytest.mark.asyncio
 async def test_tracing_redacts_arguments_and_results():
 	spans = []
-	p = _plugin({
-		"enabled": True,
-		"output": "callback",
-		"include_arguments": True,
-		"include_result": True,
-	})
+	p = _plugin(
+		{
+			"enabled": True,
+			"output": "callback",
+			"include_arguments": True,
+			"include_result": True,
+		}
+	)
 	p.set_callback(spans.append)
 	reg = ToolRegistry()
 
@@ -266,7 +266,9 @@ async def test_tracing_closes_unknown_tool_spans():
 	ctx = ExecutionContext()
 	await p.on_execution_start(ctx)
 
-	results = await execute_tool_calls([{"name": "missing", "arguments": {}, "id": "missing-1"}], ToolRegistry(), [p], ctx)
+	results = await execute_tool_calls(
+		[{"name": "missing", "arguments": {}, "id": "missing-1"}], ToolRegistry(), [p], ctx
+	)
 
 	assert results[0].success is False
 	span = next(span for span in spans if span["type"] == "tool_call")
@@ -329,7 +331,9 @@ async def test_tracing_tool_queries_empty_store_failures_and_session_filter():
 	with pytest.raises(RuntimeError, match="store down"):
 		await p._tool_get_trace({"trace_id": ctx.state.metadata["tracing"]["trace_id"]}, {})
 	assert (await p._tool_list_traces({"session_id": "other"}, {})).content["count"] == 0
-	assert (await p._tool_list_traces({"session_id": "sess-a", "limit": "bad"}, {})).content["count"] == 1
+	with pytest.raises(ValueError, match="integer"):
+		await p._tool_list_traces({"session_id": "sess-a", "limit": "bad"}, {})
+	assert (await p._tool_list_traces({"session_id": "sess-a", "limit": 1}, {})).content["count"] == 1
 
 
 @pytest.mark.asyncio
@@ -347,6 +351,7 @@ async def test_tracing_exporter_callback_schedule_and_audit_branches():
 		async_exported.append(span)
 
 	callback_errors = []
+
 	def bad_callback(span):
 		callback_errors.append(span)
 		raise RuntimeError("callback failed")
@@ -360,6 +365,7 @@ async def test_tracing_exporter_callback_schedule_and_audit_branches():
 		"audit_mode": True,
 	}
 	from axc_agent_engine.plugins.builtin.tracing.plugin import TracingPlugin
+
 	p = TracingPlugin()
 	p.initialize(config, PluginContext(kv_store=kv, resources={"tracing.exporter": exporter}))
 	p.set_callback(bad_callback)
@@ -372,7 +378,9 @@ async def test_tracing_exporter_callback_schedule_and_audit_branches():
 
 	reg.register(ToolDefinition(name="tool", execute=tool, is_read_only=True))
 	with pytest.raises(RuntimeError, match="callback failed"):
-		await execute_tool_calls([{"name": "tool", "arguments": {"password": "secret"}, "id": "audit-1"}], reg, [p], ctx)
+		await execute_tool_calls(
+			[{"name": "tool", "arguments": {"password": "secret"}, "id": "audit-1"}], reg, [p], ctx
+		)
 	await p.close()
 
 	assert async_exported
@@ -402,10 +410,12 @@ def test_tracing_helpers_and_logging(caplog):
 	sampler = TraceSampler(0.0, sample_errors=False, slow_span_ms=10)
 	assert sampler.should_emit({"duration_ms": 11, "sampled": False}, False)
 	assert TraceSampler(0.0, sample_errors=True, slow_span_ms=0).should_emit({"sampled": False}, True)
-	assert _trace_summary([
-		{"type": "tool_call", "duration_ms": 3, "error": {"message": "x"}},
-		{"type": "llm_call", "duration_ms": 5},
-	]) == {"span_count": 2, "errors": 1, "tool_calls": 1, "llm_calls": 1, "duration_ms": 5}
+	assert _trace_summary(
+		[
+			{"type": "tool_call", "duration_ms": 3, "error": {"message": "x"}},
+			{"type": "llm_call", "duration_ms": 5},
+		]
+	) == {"span_count": 2, "errors": 1, "tool_calls": 1, "llm_calls": 1, "duration_ms": 5}
 
 	envelope = ErrorEnvelope(code="x", message="m")
 	assert _error_payload(envelope)["code"] == "x"
@@ -417,30 +427,18 @@ def test_tracing_helpers_and_logging(caplog):
 			{"type": "tool_call", "success": True, "name": "t", "duration_ms": 1, "round": 1, "trace_id": "tr"},
 			{"type": "round_end", "round": 1, "input_tokens": 2, "output_tokens": 3, "tool_count": 1, "trace_id": "tr"},
 			{"type": "llm_call", "duration_ms": 2, "round": 1, "trace_id": "tr"},
-			{"type": "execution", "success": False, "duration_ms": 4, "input_tokens": 1, "output_tokens": 1, "trace_id": "tr"},
+			{
+				"type": "execution",
+				"success": False,
+				"duration_ms": 4,
+				"input_tokens": 1,
+				"output_tokens": 1,
+				"trace_id": "tr",
+			},
 			{"type": "error", "name": "RuntimeError", "trace_id": "tr"},
-			]:
-				_log_span(span)
+		]:
+			_log_span(span)
 	assert "[trace]" in caplog.text
-
-
-@pytest.mark.asyncio
-async def test_tracing_disabled_plugin_is_noop():
-	p = _plugin({"enabled": False})
-	ctx = ExecutionContext()
-
-	assert p.get_tools() == []
-	await p.on_execution_start(ctx)
-	await p.on_execution_end(ctx, "done", "err")
-	assert p.pre_llm_call(ctx, [{"role": "user", "content": "x"}], None) == ([{"role": "user", "content": "x"}], None)
-	await p.post_llm_call(ctx, [], {}, 1)
-	await p.on_error(ctx, RuntimeError("ignored"))
-	assert await p.pre_tool_call(ctx, "tool", {"x": 1}) == (True, {"x": 1})
-	result = ToolOutput.text("ok")
-	assert await p.post_tool_call(ctx, "tool", {}, result, 1) is result
-	await p.on_tool_call_failed(ctx, "tool", {}, {}, 1)
-	await p.on_round_end(ctx, "u", "a", [])
-	assert "tracing" not in ctx.state.metadata
 
 
 @pytest.mark.asyncio
@@ -507,32 +505,6 @@ async def test_tracing_execution_end_marks_cancelled_status():
 
 
 @pytest.mark.asyncio
-async def test_tracing_manual_tool_hooks_cover_generated_id_missing_runtime_and_failure_default_error():
-	spans = []
-	p = _plugin({"enabled": True, "output": "callback", "include_arguments": True, "include_result": True})
-	p.set_callback(spans.append)
-	ctx = ExecutionContext()
-	await p.on_execution_start(ctx)
-
-	await p.pre_tool_call(ctx, "manual", {"long": "abcdef", "items": list(range(105))})
-	state = ctx.runtime.plugin_states["tracing"]
-	tool_call_id = next(key for key in state["active_spans"])
-	await p.post_tool_call(ctx, "manual", {}, ToolOutput.text("ok"), 5)
-	state["active_spans"].pop(tool_call_id)
-	ctx.runtime.plugin_states["_tool_runtime_contexts"] = {
-		id(asyncio.current_task()): {"tool_call_id": "failed-id"}
-	}
-	await p.pre_tool_call(ctx, "failed", {})
-	await p.on_tool_call_failed(ctx, "failed", {}, {}, 9)
-
-	failed = next(span for span in spans if span["name"] == "failed")
-	assert len(tool_call_id) == 12
-	assert not any(span["name"] == "manual" for span in spans)
-	assert failed["tool_call_id"] == "failed-id"
-	assert failed["error"]["code"] == "tool.execution_failed"
-
-
-@pytest.mark.asyncio
 async def test_tracing_save_span_failure_exporter_sync_failure_and_background_failure():
 	class FailingSpanStore:
 		async def save_span(self, span):
@@ -545,11 +517,15 @@ async def test_tracing_save_span_failure_exporter_sync_failure_and_background_fa
 		raise RuntimeError("task down")
 
 	from axc_agent_engine.plugins.builtin.tracing.plugin import TracingPlugin
+
 	p = TracingPlugin()
-	p.initialize({"enabled": True, "output": "callback"}, PluginContext(
-		span_store=FailingSpanStore(),
-		resources={"tracing.exporter": bad_exporter},
-	))
+	p.initialize(
+		{"enabled": True, "output": "callback"},
+		PluginContext(
+			span_store=FailingSpanStore(),
+			resources={"tracing.exporter": bad_exporter},
+		),
+	)
 	ctx = ExecutionContext()
 
 	await p.on_execution_start(ctx)
@@ -587,24 +563,52 @@ async def test_tracing_redaction_metadata_bounds_and_resource_helpers():
 	assert stats["redacted"] == 1
 	assert isinstance(value["plain"], object)
 	assert _span_metadata({"a": object(), "b": (1, {"x": object()})})["b"][1]["x"].startswith("<object")
-	assert _bounded_int("bad", 2, 5) == 2
-	assert _bounded_int(99, 2, 5) == 5
-	assert _bounded_float("bad", 0.0, 1.0) == 1.0
-	assert _bounded_float(-1, 0.0, 1.0) == 0.0
-	assert _strict_int("3", 1, 5, "x") == 3
-	assert _strict_float("0.5", 0.0, 1.0, "x") == 0.5
+	with pytest.raises(ValueError, match="integer"):
+		bounded_int("bad", 2, 5)
+	assert bounded_int(99, 2, 5) == 5
+	assert strict_bounded_int(3, 1, 5, "x") == 3
+	assert _strict_float(0.5, 0.0, 1.0, "x") == 0.5
 	for fn, args, pattern in [
-		(_strict_int, (True, 1, 5, "x"), "integer"),
-		(_strict_int, ("bad", 1, 5, "x"), "integer"),
-		(_strict_int, (9, 1, 5, "x"), "between"),
+		(strict_bounded_int, ("3", 1, 5, "x"), "integer"),
+		(_strict_float, ("0.5", 0.0, 1.0, "x"), "number"),
+		(strict_bounded_int, (True, 1, 5, "x"), "integer"),
+		(strict_bounded_int, ("bad", 1, 5, "x"), "integer"),
+		(strict_bounded_int, (9, 1, 5, "x"), "between"),
 		(_strict_float, (True, 0.0, 1.0, "x"), "number"),
 		(_strict_float, ("bad", 0.0, 1.0, "x"), "number"),
 		(_strict_float, (2.0, 0.0, 1.0, "x"), "between"),
 	]:
 		with pytest.raises(ValueError, match=pattern):
 			fn(*args)
-	assert _resource_name(None, "default") == "default"
-	assert _resource_name(True, "default") == "default"
-	assert _resource_name(False, "default") == ""
-	assert _resource_name(123, "default") == "123"
-	assert _current_tool_runtime(ExecutionContext()) == {}
+
+
+async def test_audit_uses_runtime_tool_id_and_redacts_arguments():
+	from axc_agent_engine.plugins.builtin.tracing.plugin import TracingPlugin
+	from axc_agent_engine.storage.in_memory import InMemoryKVStore
+
+	kv = InMemoryKVStore()
+	plugin = TracingPlugin()
+	plugin.initialize({"audit_mode": True, "output": "callback"}, PluginContext(kv_store=kv))
+	plugin.set_callback(lambda span: None)
+	ctx = ExecutionContext()
+	ctx.state.metadata["annotations"] = ["audit", "test"]
+	await plugin.on_execution_start(ctx)
+	registry = ToolRegistry()
+
+	async def read(args, context):
+		return ToolOutput.text("result")
+
+	registry.register(ToolDefinition(name="read", execute=read, is_read_only=True))
+	(result,) = await execute_tool_calls(
+		[{"name": "read", "arguments": {"password": "secret"}}], registry, [plugin], ctx
+	)
+	await plugin.on_execution_end(ctx, "ok", "")
+	await plugin.close()
+	(key,) = await kv.list_keys("audit:")
+	audit = await kv.get(key)
+	assert result.success and result.tool_call_id == audit["tool_call_id"]
+	assert audit["arguments"]["password"] != "secret"
+	found = await plugin._tool_get_trace({"trace_id": audit["trace_id"]}, {})
+	assert "parent_span_id" in found.context_view()
+	missing = await plugin._tool_get_trace({"trace_id": "absent"}, {})
+	assert missing.content["count"] == 0 and "无 span" in missing.context_view()

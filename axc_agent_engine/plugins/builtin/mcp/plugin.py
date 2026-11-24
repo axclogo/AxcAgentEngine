@@ -1,16 +1,22 @@
-"""MCP plugin - connects Model Context Protocol servers as optional tools.
-中文：此文档说明相关引擎组件的行为。"""
+"""MCP plugin - connects Model Context Protocol servers as optional tools. 通过 MCP 接入可选的远程工具。"""
+
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
+from axc_agent_engine.core.schema import ToolDefinition
 from axc_agent_engine.plugins.base import BasePlugin
-from axc_agent_engine.plugins.builtin.common import bounded_int, externalize_text, artifact_store_from_context, strict_bounded_int
+from axc_agent_engine.plugins.builtin.common import (
+	artifact_store_from_context,
+	externalize_text,
+	strict_bounded_int,
+)
 from axc_agent_engine.plugins.builtin.config_schemas import MCP_CONFIG_SCHEMA
 from axc_agent_engine.plugins.builtin.mcp.support import MCPConnection, MCPTool
-from axc_agent_engine.core.schema import ToolDefinition
+from axc_agent_engine.plugins.builtin.mcp.support.models import MCPApplicationError, MCPTransportError
 
 if TYPE_CHECKING:
 	from axc_agent_engine.core.context import ExecutionContext
@@ -20,15 +26,19 @@ logger = logging.getLogger(__name__)
 
 
 class MCPToolFactory:
-	def __init__(self, plugin: "MCPPlugin") -> None:
+	def __init__(self, plugin: MCPPlugin) -> None:
 		self.plugin = plugin
 
 	def to_tool_definition(self, server_name: str, tool: MCPTool) -> ToolDefinition:
 		plugin = self.plugin
 		tool_name = f"mcp.{server_name}.{tool.name}"
 		override = plugin._tool_override(tool_name, server_name, tool.name)
-		read_only = bool(override.get("read_only", _read_only_from_annotations(tool.annotations, plugin._default_read_only)))
-		risk_level = str(override.get("risk_level", _risk_from_annotations(tool.annotations, plugin._default_risk_level)))
+		read_only = bool(
+			override.get("read_only", _read_only_from_annotations(tool.annotations, plugin._default_read_only))
+		)
+		risk_level = str(
+			override.get("risk_level", _risk_from_annotations(tool.annotations, plugin._default_risk_level))
+		)
 		capability = str(override.get("capability", plugin._default_capability))
 		timeout = strict_bounded_int(override.get("timeout", 120), 1, 3600, f"mcp.tool_overrides.{tool_name}.timeout")
 		return ToolDefinition(
@@ -44,7 +54,7 @@ class MCPToolFactory:
 
 
 class MCPDiscoveryService:
-	def __init__(self, plugin: "MCPPlugin") -> None:
+	def __init__(self, plugin: MCPPlugin) -> None:
 		self.plugin = plugin
 
 	async def initialize(self) -> None:
@@ -57,6 +67,8 @@ class MCPDiscoveryService:
 			server_tools: list[ToolDefinition] = []
 			conn: MCPConnection | None = None
 			try:
+				if name in plugin._connections:
+					raise RuntimeError(f"Duplicate MCP server name: {name}")
 				conn = MCPConnection(server_config)
 				await conn.connect()
 				for tool in await conn.list_tools():
@@ -78,7 +90,7 @@ class MCPDiscoveryService:
 					"error": "",
 				}
 				logger.info("[mcp] connected to %s", name)
-			except Exception as e:
+			except (Exception, asyncio.CancelledError) as e:
 				if conn:
 					try:
 						await conn.close()
@@ -95,7 +107,7 @@ class MCPDiscoveryService:
 
 
 class MCPOutputPresenter:
-	def __init__(self, plugin: "MCPPlugin") -> None:
+	def __init__(self, plugin: MCPPlugin) -> None:
 		self.plugin = plugin
 
 	async def externalize_large_output(self, output, context: dict):
@@ -123,7 +135,7 @@ class MCPPlugin(BasePlugin):
 	version = "2.0.0"
 	config_schema = MCP_CONFIG_SCHEMA
 
-	def initialize(self, config: dict, plugin_ctx: "PluginContext") -> None:
+	def initialize(self, config: dict, plugin_ctx: PluginContext) -> None:
 		super().initialize(config, plugin_ctx)
 		self._servers = config.get("servers", [])
 		self._allowed_tools = set(config.get("allowed_tools", []))
@@ -142,6 +154,7 @@ class MCPPlugin(BasePlugin):
 		self._tools: list[ToolDefinition] = []
 		self._health: dict[str, dict[str, Any]] = {}
 		self._initialized = False
+		self._init_lock = asyncio.Lock()
 		self._tool_factory = MCPToolFactory(self)
 		self._discovery = MCPDiscoveryService(self)
 		self._presenter = MCPOutputPresenter(self)
@@ -149,23 +162,32 @@ class MCPPlugin(BasePlugin):
 	def get_tools(self) -> list[ToolDefinition]:
 		return self._tools
 
-	async def on_execution_start(self, exec_ctx: "ExecutionContext") -> None:
-		if self._initialized or not self._servers:
-			return
-		await self._async_initialize()
-		registry = self._plugin_ctx.tool_registry if self._plugin_ctx else None
-		if registry and self._tools:
-			registry.register_late_many(self._tools, plugin_name=self.name, reason="mcp_tool_discovery")
-			logger.info("[mcp] registered %s tools", len(self._tools))
+	async def on_execution_start(self, exec_ctx: ExecutionContext) -> None:
+		async with self._init_lock:
+			if self._initialized or not self._servers:
+				return
+			try:
+				await self._async_initialize()
+				registry = self._plugin_ctx.tool_registry if self._plugin_ctx else None
+				if registry and self._tools:
+					registry.register_late_many(self._tools, plugin_name=self.name, reason="mcp_tool_discovery")
+					logger.info("[mcp] registered %s tools", len(self._tools))
+			except BaseException:
+				await self._close_connections()
+				raise
 
 	async def close(self) -> None:
+		async with self._init_lock:
+			await self._close_connections()
+		self._health.clear()
+
+	async def _close_connections(self) -> None:
 		for name, conn in list(self._connections.items()):
 			try:
 				await conn.close()
-			except Exception as e:
+			except (OSError, RuntimeError, ExceptionGroup) as e:
 				logger.warning("[mcp] failed to close %s: %s", name, e)
 		self._connections.clear()
-		self._health.clear()
 		self._initialized = False
 
 	async def _async_initialize(self) -> None:
@@ -194,7 +216,7 @@ class MCPPlugin(BasePlugin):
 					output = ToolOutput.json_output(result, summary=f"mcp:{server_name}.{tool_name} 返回 JSON")
 				output.metadata.update({"server": server_name, "tool": tool_name, "duration_ms": duration_ms})
 				return await self._externalize_large_output(output, context)
-			except Exception as e:
+			except (MCPTransportError, MCPApplicationError, OSError, RuntimeError) as e:
 				return ToolOutput.error(str(e))
 
 		return _execute

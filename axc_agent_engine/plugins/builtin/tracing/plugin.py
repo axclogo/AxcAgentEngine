@@ -1,4 +1,5 @@
 """Tracing 插件 — 引擎内标准链路追踪层。"""
+
 from __future__ import annotations
 
 import asyncio
@@ -7,11 +8,13 @@ import logging
 import time
 import uuid
 from collections import deque
-from typing import TYPE_CHECKING, Any, Callable
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any
 
-from axc_agent_engine.core.errors import ErrorCategory, ErrorEnvelope
+from axc_agent_engine.core.errors import ConfigValueError, ErrorCategory, ErrorEnvelope
 from axc_agent_engine.core.schema import ToolDefinition
 from axc_agent_engine.plugins.base import BasePlugin
+from axc_agent_engine.plugins.builtin.common import bounded_int, strict_bounded_int
 from axc_agent_engine.plugins.builtin.config_schemas import TRACING_CONFIG_SCHEMA
 
 if TYPE_CHECKING:
@@ -61,7 +64,7 @@ class TraceSampler:
 class SpanFactory:
 	def new_span(
 		self,
-		exec_ctx: "ExecutionContext",
+		exec_ctx: ExecutionContext,
 		state: dict[str, Any],
 		span_type: str,
 		name: str,
@@ -99,7 +102,7 @@ class SpanFactory:
 
 
 class SpanEmitter:
-	def __init__(self, plugin: "TracingPlugin") -> None:
+	def __init__(self, plugin: TracingPlugin) -> None:
 		self.plugin = plugin
 
 	def emit(self, span: dict[str, Any], force_sample: bool = False) -> None:
@@ -123,55 +126,58 @@ class SpanEmitter:
 
 
 class TraceToolHandlers:
-	def __init__(self, plugin: "TracingPlugin") -> None:
+	def __init__(self, plugin: TracingPlugin) -> None:
 		self.plugin = plugin
 
 	async def status(self, args: dict, context: dict):
 		from axc_agent_engine.tools.tool_output import ToolOutput
+
 		plugin = self.plugin
-		return ToolOutput.json_output({
-			"enabled": plugin._enabled,
-			"output": plugin._output,
-			"has_span_store": bool(plugin._span_store),
-			"has_callback": bool(plugin._callback),
-			"has_exporter": bool(plugin._exporter),
-			"sample_rate": plugin._sample_rate,
-			"sample_errors": plugin._sample_errors,
-			"slow_span_ms": plugin._slow_span_ms,
-			"recent_limit": plugin._recent_limit,
-			"queue_limit": plugin._queue_limit,
-			"pending": len(plugin._pending_tasks),
-			"stats": dict(plugin._stats),
-		}, summary=f"tracing emitted={plugin._stats['emitted']} stored={plugin._stats['stored']}")
+		return ToolOutput.json_output(
+			{
+				"enabled": True,
+				"output": plugin._output,
+				"has_span_store": bool(plugin._span_store),
+				"has_callback": bool(plugin._callback),
+				"has_exporter": bool(plugin._exporter),
+				"sample_rate": plugin._sample_rate,
+				"sample_errors": plugin._sample_errors,
+				"slow_span_ms": plugin._slow_span_ms,
+				"recent_limit": plugin._recent_limit,
+				"queue_limit": plugin._queue_limit,
+				"pending": len(plugin._pending_tasks),
+				"stats": dict(plugin._stats),
+			},
+			summary=f"tracing emitted={plugin._stats['emitted']} stored={plugin._stats['stored']}",
+		)
 
 
 class TracingPlugin(BasePlugin):
-	"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-标准化 trace/span 采集，支持 SpanStore、callback、log 和查询工具。"""
+	"""Collect traces and spans through host integrations.
+	标准化 trace/span 采集，支持 SpanStore、callback、log 和查询工具。"""
+
 	name = "tracing"
 	display_name = "链路追踪"
 	priority = 1
 	version = "3.0.0"
 	config_schema = TRACING_CONFIG_SCHEMA
 
-	def initialize(self, config: dict, plugin_ctx: "PluginContext") -> None:
+	def initialize(self, config: dict, plugin_ctx: PluginContext) -> None:
 		super().initialize(config, plugin_ctx)
-		self._enabled = bool(config.get("enabled", True))
-		self._output = str(config.get("output", "log"))
-		self._include_args = bool(config.get("include_arguments", False))
-		self._include_result = bool(config.get("include_result", False))
+		self._output = config.get("output", "log")
+		self._include_args = config.get("include_arguments", False)
+		self._include_result = config.get("include_result", False)
 		self._sample_rate = _strict_float(config.get("sample_rate", 1.0), 0.0, 1.0, "tracing.sample_rate")
-		self._sample_errors = bool(config.get("sample_errors", True))
-		self._slow_span_ms = _strict_int(config.get("slow_span_ms", 0), 0, 3_600_000, "tracing.slow_span_ms")
-		self._recent_limit = _strict_int(config.get("recent_limit", 200), 1, 10_000, "tracing.recent_limit")
-		self._queue_limit = _strict_int(config.get("queue_limit", 1000), 1, 100_000, "tracing.queue_limit")
-		self._redact_keys = {str(k).lower() for k in config.get("redact_keys", [])} | _DEFAULT_REDACT_KEYS
-		self._audit_mode = bool(config.get("audit_mode", False))
+		self._sample_errors = config.get("sample_errors", True)
+		self._slow_span_ms = strict_bounded_int(config.get("slow_span_ms", 0), 0, 3_600_000, "tracing.slow_span_ms")
+		self._recent_limit = strict_bounded_int(config.get("recent_limit", 200), 1, 10_000, "tracing.recent_limit")
+		self._queue_limit = strict_bounded_int(config.get("queue_limit", 1000), 1, 100_000, "tracing.queue_limit")
+		self._redact_keys = {k.lower() for k in config.get("redact_keys", [])} | _DEFAULT_REDACT_KEYS
+		self._audit_mode = config.get("audit_mode", False)
 		self._exporter: Callable[[dict], Any] | None = plugin_ctx.resources.get("tracing.exporter")
 		self._callback: Callable[[dict], None] | None = None
-		self._span_store = getattr(plugin_ctx, "span_store", None)
-		self._kv_store = getattr(plugin_ctx, "kv_store", None)
+		self._span_store = plugin_ctx.span_store
+		self._kv_store = plugin_ctx.kv_store
 		self._recent_spans: deque[dict[str, Any]] = deque(maxlen=self._recent_limit)
 		self._pending_tasks: set[asyncio.Task] = set()
 		self._task_errors: list[BaseException] = []
@@ -186,8 +192,6 @@ class TracingPlugin(BasePlugin):
 		self._callback = callback
 
 	def get_tools(self) -> list[ToolDefinition]:
-		if not self._enabled:
-			return []
 		return [
 			ToolDefinition(
 				name="trace_status",
@@ -230,36 +234,37 @@ class TracingPlugin(BasePlugin):
 			),
 		]
 
-	def _state(self, exec_ctx: "ExecutionContext") -> dict[str, Any]:
-		return exec_ctx.get_plugin_state(self.name, lambda: {
-			"trace_id": "",
-			"traceparent": "",
-			"sampled": True,
-			"active_spans": {},
-			"root_span": None,
-			"current_llm_span": None,
-		})
+	def _state(self, exec_ctx: ExecutionContext) -> dict[str, Any]:
+		return exec_ctx.get_plugin_state(
+			self.name,
+			lambda: {
+				"trace_id": "",
+				"traceparent": "",
+				"sampled": True,
+				"active_spans": {},
+				"root_span": None,
+				"current_llm_span": None,
+			},
+		)
 
-	async def on_execution_start(self, exec_ctx: "ExecutionContext") -> None:
-		if not self._enabled:
-			return
+	async def on_execution_start(self, exec_ctx: ExecutionContext) -> None:
 		state = self._state(exec_ctx)
 		trace_id = _trace_id(exec_ctx)
 		sampled = self._sampler.sampled(trace_id)
-		state.update({
-			"trace_id": trace_id,
-			"traceparent": _traceparent(trace_id),
-			"sampled": sampled,
-			"active_spans": {},
-			"current_llm_span": None,
-		})
+		state.update(
+			{
+				"trace_id": trace_id,
+				"traceparent": _traceparent(trace_id),
+				"sampled": sampled,
+				"active_spans": {},
+				"current_llm_span": None,
+			}
+		)
 		root_span = self._new_span(exec_ctx, state, "execution", "execution", parent_span_id=None)
 		state["root_span"] = root_span
 		self._sync_metadata(exec_ctx, state)
 
-	async def on_execution_end(self, exec_ctx: "ExecutionContext", result: str, error: str) -> None:
-		if not self._enabled:
-			return
+	async def on_execution_end(self, exec_ctx: ExecutionContext, result: str, error: str) -> None:
 		state = self._state(exec_ctx)
 		root_span = state.get("root_span")
 		if not root_span:
@@ -267,7 +272,8 @@ class TracingPlugin(BasePlugin):
 		cancelled = bool(exec_ctx.state.cancelled)
 		error_payload = (
 			_error_payload(exec_ctx.state.cancel_reason or error or "cancelled", code="execution.cancelled")
-			if cancelled else (_error_payload(error) if error else {})
+			if cancelled
+			else (_error_payload(error) if error else {})
 		)
 		self._finish_span(
 			exec_ctx,
@@ -285,10 +291,9 @@ class TracingPlugin(BasePlugin):
 		)
 		self._sync_metadata(exec_ctx, state)
 
-	def pre_llm_call(self, exec_ctx: "ExecutionContext", messages: list[dict],
-					 tools: list[dict] | None) -> tuple[list[dict], list[dict] | None]:
-		if not self._enabled:
-			return messages, tools
+	def pre_llm_call(
+		self, exec_ctx: ExecutionContext, messages: list[dict], tools: list[dict] | None
+	) -> tuple[list[dict], list[dict] | None]:
 		state = self._state(exec_ctx)
 		span = self._new_span(
 			exec_ctx,
@@ -304,10 +309,9 @@ class TracingPlugin(BasePlugin):
 		state["current_llm_span"] = span
 		return messages, tools
 
-	async def post_llm_call(self, exec_ctx: "ExecutionContext", messages: list[dict],
-							response: dict, duration_ms: int) -> None:
-		if not self._enabled:
-			return
+	async def post_llm_call(
+		self, exec_ctx: ExecutionContext, messages: list[dict], response: dict, duration_ms: int
+	) -> None:
 		state = self._state(exec_ctx)
 		span = state.get("current_llm_span")
 		if not span:
@@ -328,9 +332,7 @@ class TracingPlugin(BasePlugin):
 		)
 		state["current_llm_span"] = None
 
-	async def on_error(self, exec_ctx: "ExecutionContext", error: Exception) -> None:
-		if not self._enabled:
-			return
+	async def on_error(self, exec_ctx: ExecutionContext, error: Exception) -> None:
 		state = self._state(exec_ctx)
 		span = self._new_span(exec_ctx, state, "error", error.__class__.__name__)
 		self._finish_span(
@@ -342,13 +344,10 @@ class TracingPlugin(BasePlugin):
 			force_sample=True,
 		)
 
-	async def pre_tool_call(self, exec_ctx: "ExecutionContext", tool_name: str,
-							arguments: dict) -> tuple[bool, dict]:
-		if not self._enabled:
-			return True, arguments
+	async def pre_tool_call(self, exec_ctx: ExecutionContext, tool_name: str, arguments: dict) -> tuple[bool, dict]:
 		state = self._state(exec_ctx)
 		tool_runtime = _current_tool_runtime(exec_ctx)
-		tool_call_id = str(tool_runtime.get("tool_call_id") or uuid.uuid4().hex[:12])
+		tool_call_id = tool_runtime["tool_call_id"]
 		extra = {
 			"round": exec_ctx.state.current_round,
 			"tool_call_id": tool_call_id,
@@ -365,24 +364,20 @@ class TracingPlugin(BasePlugin):
 		state.setdefault("active_spans", {})[tool_call_id] = span
 		return True, arguments
 
-	async def post_tool_call(self, exec_ctx: "ExecutionContext", tool_name: str,
-							 arguments: dict, result: "ToolOutput", duration_ms: int) -> "ToolOutput":
-		if not self._enabled:
-			return result
+	async def post_tool_call(
+		self, exec_ctx: ExecutionContext, tool_name: str, arguments: dict, result: ToolOutput, duration_ms: int
+	) -> ToolOutput:
 		state = self._state(exec_ctx)
 		tool_runtime = _current_tool_runtime(exec_ctx)
-		tool_call_id = str(tool_runtime.get("tool_call_id") or "")
-		span = state.setdefault("active_spans", {}).pop(tool_call_id, None) if tool_call_id else None
-		result_str = result.context_view() if result else ""
-		success = not result.is_error if result else True
-		error = (
-			_error_payload(result_str, code="tool.output_error")
-			if result and result.is_error else {}
-		)
+		tool_call_id = tool_runtime["tool_call_id"]
+		span = state.setdefault("active_spans", {}).pop(tool_call_id, None)
+		result_str = result.context_view()
+		success = not result.is_error
+		error = _error_payload(result_str, code="tool.output_error") if result.is_error else {}
 		extra = {
 			"tool_call_id": tool_call_id,
-			"content_type": getattr(result, "content_type", ""),
-			"artifact_count": len(getattr(result, "artifacts", []) or []),
+			"content_type": result.content_type,
+			"artifact_count": len(result.artifacts),
 		}
 		if self._include_result:
 			extra["result"] = result_str
@@ -411,14 +406,13 @@ class TracingPlugin(BasePlugin):
 			self._schedule(self._kv_store.set(f"audit:{uuid.uuid4().hex}", audit_entry))
 		return result
 
-	async def on_tool_call_failed(self, exec_ctx: "ExecutionContext", tool_name: str,
-								  arguments: dict, error: dict, duration_ms: int) -> None:
-		if not self._enabled:
-			return
+	async def on_tool_call_failed(
+		self, exec_ctx: ExecutionContext, tool_name: str, arguments: dict, error: dict, duration_ms: int
+	) -> None:
 		state = self._state(exec_ctx)
 		tool_runtime = _current_tool_runtime(exec_ctx)
-		tool_call_id = str(tool_runtime.get("tool_call_id") or "")
-		span = state.setdefault("active_spans", {}).pop(tool_call_id, None) if tool_call_id else None
+		tool_call_id = tool_runtime["tool_call_id"]
+		span = state.setdefault("active_spans", {}).pop(tool_call_id, None)
 		if span:
 			self._finish_span(
 				exec_ctx,
@@ -427,14 +421,13 @@ class TracingPlugin(BasePlugin):
 				duration_ms=duration_ms,
 				success=False,
 				extra={"tool_call_id": tool_call_id},
-				error=error or _error_payload("tool call failed", code="tool.execution_failed"),
+				error=error,
 				force_sample=True,
 			)
 
-	async def on_round_end(self, exec_ctx: "ExecutionContext", user_message: str,
-						   assistant_message: str, tool_calls: list[dict]) -> None:
-		if not self._enabled:
-			return
+	async def on_round_end(
+		self, exec_ctx: ExecutionContext, user_message: str, assistant_message: str, tool_calls: list[dict]
+	) -> None:
 		state = self._state(exec_ctx)
 		span = self._new_span(
 			exec_ctx,
@@ -458,6 +451,7 @@ class TracingPlugin(BasePlugin):
 
 	async def _tool_get_trace(self, args: dict, context: dict):
 		from axc_agent_engine.tools.tool_output import ToolOutput
+
 		trace_id = str(args.get("trace_id", ""))
 		if not trace_id:
 			return ToolOutput.error("trace_id 不能为空")
@@ -467,48 +461,72 @@ class TracingPlugin(BasePlugin):
 		if not spans:
 			spans = [span for span in self._recent_spans if span.get("trace_id") == trace_id]
 		spans = sorted(spans, key=lambda item: (item.get("start_time", 0), item.get("span_id", "")))
-		return ToolOutput.json_output({
-			"trace_id": trace_id,
-			"spans": spans,
-			"count": len(spans),
-			"summary": _trace_summary(spans),
-		}, summary=f"trace {trace_id}: {len(spans)} spans", llm_view=_trace_llm_view(trace_id, spans))
+		return ToolOutput.json_output(
+			{
+				"trace_id": trace_id,
+				"spans": spans,
+				"count": len(spans),
+				"summary": _trace_summary(spans),
+			},
+			summary=f"trace {trace_id}: {len(spans)} spans",
+			llm_view=_trace_llm_view(trace_id, spans),
+		)
 
 	async def _tool_list_traces(self, args: dict, context: dict):
 		from axc_agent_engine.tools.tool_output import ToolOutput
-		limit = _bounded_int(args.get("limit", 20), 1, 200)
+
+		limit = bounded_int(args.get("limit", 20), 1, 200)
 		session_id = str(args.get("session_id", ""))
 		by_trace: dict[str, dict[str, Any]] = {}
 		for span in list(self._recent_spans):
 			if session_id and span.get("session_id") != session_id:
 				continue
 			trace_id = span.get("trace_id", "")
-			if not trace_id:
-				continue
-			item = by_trace.setdefault(trace_id, {
-				"trace_id": trace_id,
-				"session_id": span.get("session_id", ""),
-				"agent_name": span.get("agent_name", ""),
-				"span_count": 0,
-				"errors": 0,
-				"start_time": span.get("start_time", 0),
-				"last_time": span.get("end_time", span.get("start_time", 0)),
-			})
+			item = by_trace.setdefault(
+				trace_id,
+				{
+					"trace_id": trace_id,
+					"session_id": span.get("session_id", ""),
+					"agent_name": span.get("agent_name", ""),
+					"span_count": 0,
+					"errors": 0,
+					"start_time": span.get("start_time", 0),
+					"last_time": span.get("end_time", span.get("start_time", 0)),
+				},
+			)
 			item["span_count"] += 1
 			item["errors"] += 1 if span.get("error") else 0
 			item["start_time"] = min(item["start_time"], span.get("start_time", item["start_time"]))
 			item["last_time"] = max(item["last_time"], span.get("end_time", span.get("start_time", item["last_time"])))
 		traces = sorted(by_trace.values(), key=lambda item: item["last_time"], reverse=True)[:limit]
-		return ToolOutput.json_output({"traces": traces, "count": len(traces)}, summary=f"找到 {len(traces)} 条 trace", llm_view=_trace_list_llm_view(traces))
+		return ToolOutput.json_output(
+			{"traces": traces, "count": len(traces)},
+			summary=f"找到 {len(traces)} 条 trace",
+			llm_view=_trace_list_llm_view(traces),
+		)
 
-	def _new_span(self, exec_ctx: "ExecutionContext", state: dict[str, Any], span_type: str, name: str,
-				  parent_span_id: str | None = "", extra: dict[str, Any] | None = None) -> dict[str, Any]:
+	def _new_span(
+		self,
+		exec_ctx: ExecutionContext,
+		state: dict[str, Any],
+		span_type: str,
+		name: str,
+		parent_span_id: str | None = "",
+		extra: dict[str, Any] | None = None,
+	) -> dict[str, Any]:
 		return self._span_factory.new_span(exec_ctx, state, span_type, name, parent_span_id, extra)
 
-	def _finish_span(self, exec_ctx: "ExecutionContext", state: dict[str, Any], span: dict[str, Any],
-					 duration_ms: int | None = None, success: bool = True,
-					 extra: dict[str, Any] | None = None, error: dict[str, Any] | None = None,
-					 force_sample: bool = False) -> None:
+	def _finish_span(
+		self,
+		exec_ctx: ExecutionContext,
+		state: dict[str, Any],
+		span: dict[str, Any],
+		duration_ms: int | None = None,
+		success: bool = True,
+		extra: dict[str, Any] | None = None,
+		error: dict[str, Any] | None = None,
+		force_sample: bool = False,
+	) -> None:
 		end_time = time.time()
 		span["end_time"] = end_time
 		span["duration_ms"] = int(duration_ms if duration_ms is not None else (end_time - span["start_time"]) * 1000)
@@ -557,9 +575,6 @@ class TracingPlugin(BasePlugin):
 			self._task_errors.append(exc)
 
 	async def _flush_pending(self) -> None:
-		if not self._pending_tasks:
-			self._raise_task_errors()
-			return
 		tasks = list(self._pending_tasks)
 		self._pending_tasks.clear()
 		await asyncio.gather(*tasks)
@@ -572,7 +587,7 @@ class TracingPlugin(BasePlugin):
 		self._task_errors.clear()
 		raise RuntimeError("tracing background task failed") from error
 
-	def _sync_metadata(self, exec_ctx: "ExecutionContext", state: dict[str, Any]) -> None:
+	def _sync_metadata(self, exec_ctx: ExecutionContext, state: dict[str, Any]) -> None:
 		exec_ctx.state.metadata["tracing"] = {
 			"trace_id": state.get("trace_id", ""),
 			"traceparent": state.get("traceparent", ""),
@@ -581,18 +596,14 @@ class TracingPlugin(BasePlugin):
 			"dropped": self._stats["dropped"],
 		}
 
-def _current_tool_runtime(exec_ctx: "ExecutionContext") -> dict[str, Any]:
-	task = asyncio.current_task()
-	key = id(task) if task else 0
-	contexts = exec_ctx.runtime.plugin_states.get("_tool_runtime_contexts", {})
-	if isinstance(contexts, dict):
-		return dict(contexts.get(key, {}))
-	return {}
+
+def _current_tool_runtime(exec_ctx: ExecutionContext) -> dict[str, Any]:
+	return exec_ctx.runtime.plugin_states["_tool_runtime_contexts"][id(asyncio.current_task())]
 
 
 def _span_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
 	"""Copy execution metadata into a JSON-safe span payload.
-中文：将执行 metadata 复制为 span 可保存载荷。"""
+	中文：将执行 metadata 复制为 span 可保存载荷。"""
 	return {key: _span_metadata_value(value) for key, value in metadata.items()}
 
 
@@ -608,7 +619,7 @@ def _span_metadata_value(value: Any) -> Any:
 	return str(value)
 
 
-def _trace_id(exec_ctx: "ExecutionContext") -> str:
+def _trace_id(exec_ctx: ExecutionContext) -> str:
 	metadata = exec_ctx.state.metadata
 	existing = str(metadata.get("trace_id") or metadata.get("run_id") or "")
 	if existing:
@@ -708,52 +719,12 @@ def _trace_list_llm_view(traces: list[dict[str, Any]]) -> str:
 	return "\n".join(lines)
 
 
-def _bounded_int(value: Any, minimum: int, maximum: int) -> int:
-	try:
-		parsed = int(value)
-	except (TypeError, ValueError):
-		return minimum
-	return max(minimum, min(maximum, parsed))
-
-
-def _bounded_float(value: Any, minimum: float, maximum: float) -> float:
-	try:
-		parsed = float(value)
-	except (TypeError, ValueError):
-		return maximum
-	return max(minimum, min(maximum, parsed))
-
-
-def _strict_int(value: Any, minimum: int, maximum: int, field_name: str) -> int:
-	if isinstance(value, bool):
-		raise ValueError(f"{field_name} must be an integer")
-	try:
-		parsed = int(value)
-	except (TypeError, ValueError) as exc:
-		raise ValueError(f"{field_name} must be an integer") from exc
-	if parsed < minimum or parsed > maximum:
-		raise ValueError(f"{field_name} must be between {minimum} and {maximum}")
-	return parsed
-
-
 def _strict_float(value: Any, minimum: float, maximum: float, field_name: str) -> float:
-	if isinstance(value, bool):
-		raise ValueError(f"{field_name} must be a number")
-	try:
-		parsed = float(value)
-	except (TypeError, ValueError) as exc:
-		raise ValueError(f"{field_name} must be a number") from exc
-	if parsed < minimum or parsed > maximum:
+	if isinstance(value, bool) or not isinstance(value, (int, float)):
+		raise ConfigValueError(f"{field_name} must be a number")
+	if not minimum <= value <= maximum:
 		raise ValueError(f"{field_name} must be between {minimum} and {maximum}")
-	return parsed
-
-
-def _resource_name(value: Any, default: str) -> str:
-	if value is None or value is True:
-		return default
-	if value is False:
-		return ""
-	return str(value)
+	return value
 
 
 def _log_span(span: dict[str, Any]) -> None:
@@ -762,18 +733,34 @@ def _log_span(span: dict[str, Any]) -> None:
 	trace_id = span.get("trace_id", "")
 	if span_type == "tool_call":
 		success = "ok" if span.get("success") else "error"
-		logger.info("[trace] %s tool=%s duration=%sms round=%s trace=%s",
-					success, span.get("name", ""), duration, span.get("round", 0), trace_id)
+		logger.info(
+			"[trace] %s tool=%s duration=%sms round=%s trace=%s",
+			success,
+			span.get("name", ""),
+			duration,
+			span.get("round", 0),
+			trace_id,
+		)
 	elif span_type == "round_end":
-		logger.info("[trace] round=%s tokens=%s+%s tools=%s trace=%s",
-					span.get("round", 0), span.get("input_tokens", 0), span.get("output_tokens", 0),
-					span.get("tool_count", 0), trace_id)
+		logger.info(
+			"[trace] round=%s tokens=%s+%s tools=%s trace=%s",
+			span.get("round", 0),
+			span.get("input_tokens", 0),
+			span.get("output_tokens", 0),
+			span.get("tool_count", 0),
+			trace_id,
+		)
 	elif span_type == "llm_call":
-		logger.info("[trace] llm_call duration=%sms round=%s trace=%s",
-					duration, span.get("round", 0), trace_id)
+		logger.info("[trace] llm_call duration=%sms round=%s trace=%s", duration, span.get("round", 0), trace_id)
 	elif span_type == "execution":
 		success = "ok" if span.get("success") else "error"
-		logger.info("[trace] %s execution duration=%sms tokens=%s+%s trace=%s",
-					success, duration, span.get("input_tokens", 0), span.get("output_tokens", 0), trace_id)
+		logger.info(
+			"[trace] %s execution duration=%sms tokens=%s+%s trace=%s",
+			success,
+			duration,
+			span.get("input_tokens", 0),
+			span.get("output_tokens", 0),
+			trace_id,
+		)
 	elif span_type == "error":
 		logger.info("[trace] error name=%s trace=%s", span.get("name", ""), trace_id)

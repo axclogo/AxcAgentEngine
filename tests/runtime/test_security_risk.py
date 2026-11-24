@@ -1,6 +1,6 @@
-from axc_agent_engine.core.schema import RiskLevel
 import pytest
 
+from axc_agent_engine.core.schema import RiskLevel
 from axc_agent_engine.runtime.risk import RiskRuleEngine, check_shell_command, classify_tool_risk
 
 
@@ -32,13 +32,15 @@ def test_risk_rule_engine_custom_rules_and_invalid_rule_rejection():
 	result = classify_tool_risk(
 		"file_write",
 		{"path": "/tmp/x"},
-		custom_rules=[{
-			"name": "tmp write",
-			"tool_pattern": "file_.*",
-			"arg_name": "path",
-			"arg_pattern": r"^/tmp",
-			"escalate_to": "dangerous",
-		}],
+		custom_rules=[
+			{
+				"name": "tmp write",
+				"tool_pattern": "file_.*",
+				"arg_name": "path",
+				"arg_pattern": r"^/tmp",
+				"escalate_to": "dangerous",
+			}
+		],
 	)
 	assert result.level == RiskLevel.DANGEROUS
 	assert result.reason == "tmp write"

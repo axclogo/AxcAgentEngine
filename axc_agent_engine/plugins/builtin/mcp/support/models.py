@@ -1,10 +1,7 @@
-"""MCP client data models and errors.
-中文：此文档说明相关引擎组件的行为。"""
+"""MCP client data models and errors. MCP 客户端的数据结构和错误类型。"""
+
 from dataclasses import dataclass, field
-from typing import Any, Protocol
-
-
-DEFAULT_PROTOCOL_VERSION = "2024-11-05"
+from typing import Any
 
 
 @dataclass(frozen=True)
@@ -16,16 +13,8 @@ class MCPTool:
 
 
 class MCPTransportError(RuntimeError):
-	"""Transport-level failure that may be retried safely for read-only calls.
-中文：此文档说明相关引擎组件的行为。"""
+	"""Transport-level failure that may be retried safely for read-only calls. 只读调用可安全重试的传输层故障。"""
 
 
 class MCPApplicationError(RuntimeError):
-	"""Server-side JSON-RPC application error; do not retry implicitly.
-中文：此文档说明相关引擎组件的行为。"""
-
-
-class MCPTransport(Protocol):
-	async def connect(self) -> None: ...
-	async def request(self, method: str, params: dict[str, Any] | None = None) -> dict[str, Any]: ...
-	async def close(self) -> None: ...
+	"""Server-side JSON-RPC application error; do not retry implicitly. 服务端 JSON-RPC 应用错误应直接上报。"""

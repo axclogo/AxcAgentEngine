@@ -5,10 +5,12 @@ English: Owns shared services and plugin registry; Agent instances receive
 their own model objects during template instantiation.
 中文：Engine 持有共享服务和插件注册表，Agent 实例在模板实例化时接收自己的模型对象。
 """
+
 from __future__ import annotations
 
-import copy
+import asyncio
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -16,21 +18,22 @@ from typing import Any
 import yaml
 
 from axc_agent_engine.agent import Agent
-from axc_agent_engine.runtime.concurrency import ConcurrencyConfig, ExecutionLimiter
 from axc_agent_engine.core.context import ExecutionServices
-from axc_agent_engine.core.session_manager import SessionManager
-from axc_agent_engine.core.errors import ConfigError, SchemaError
+from axc_agent_engine.core.errors import ConfigError, PluginInitError, SchemaError
 from axc_agent_engine.core.run_context import dict_or_empty
-from axc_agent_engine.runtime.input import InputProvider, PassthroughInputProvider
+from axc_agent_engine.core.schema import AgentConfig
+from axc_agent_engine.core.session_manager import SessionManager
 from axc_agent_engine.llm.provider import LLMProvider
 from axc_agent_engine.plugins.context import PluginContext, agent_info_from_runtime, model_info_from_models
-from axc_agent_engine.plugins.loader import load_plugins
+from axc_agent_engine.plugins.loader import initialized_plugins
 from axc_agent_engine.plugins.registry import PluginRegistry
+from axc_agent_engine.runtime.concurrency import ConcurrencyConfig, ExecutionLimiter
+from axc_agent_engine.runtime.input import InputProvider, PassthroughInputProvider
 from axc_agent_engine.runtime.policy import PolicyEvaluator
 from axc_agent_engine.runtime.resources import ResourceRegistry, ensure_resource_registry
 from axc_agent_engine.runtime.run_control import RunControlRegistry
 from axc_agent_engine.runtime.sandbox_models import CommandExecutor
-from axc_agent_engine.core.schema import AgentConfig
+from axc_agent_engine.storage.artifact_store import ArtifactStore
 from axc_agent_engine.storage.protocols import (
 	AuditSink,
 	CheckpointStore,
@@ -39,9 +42,9 @@ from axc_agent_engine.storage.protocols import (
 	MessagePersistence,
 	SpanStore,
 )
-from axc_agent_engine.storage.artifact_store import ArtifactStore
 from axc_agent_engine.tools.name_mapping import ToolNameMappingConfig
 from axc_agent_engine.tools.registry import ToolRegistry
+from axc_agent_engine.workflow import WorkflowRuntime
 
 logger = logging.getLogger(__name__)
 
@@ -60,7 +63,8 @@ _RESOURCE_OVERRIDE_PATHS = {
 @dataclass(frozen=True)
 class AgentModels:
 	"""Model objects bound to one Agent instance.
-中文：绑定到单个 Agent 实例的模型对象。"""
+	中文：绑定到单个 Agent 实例的模型对象。"""
+
 	default: LLMProvider
 	utility: LLMProvider | None = None
 	fallback: LLMProvider | None = None
@@ -87,14 +91,7 @@ class AgentConfigLoader:
 			config = AgentConfig(**raw)
 		except Exception as e:
 			raise SchemaError(f"Agent YAML 校验失败: {e}") from e
-		system_prompt = config.system_prompt
-		if not system_prompt and config.system_prompt_file:
-			prompt_path = path.parent / config.system_prompt_file
-			if prompt_path.exists():
-				system_prompt = prompt_path.read_text(encoding="utf-8")
-			else:
-				raise ConfigError(f"system_prompt_file 不存在: {prompt_path}")
-		return path, config, system_prompt
+		return path, config, _system_prompt(config, path)
 
 
 class Engine:
@@ -109,17 +106,19 @@ class Engine:
 		message_persistence: MessagePersistence | None = None,
 		span_store: SpanStore | None = None,
 		message_bus: MessageBus | None = None,
-		artifact_store: "ArtifactStore | None" = None,
+		artifact_store: ArtifactStore | None = None,
 		audit_sink: AuditSink | None = None,
 		checkpoint_store: CheckpointStore | None = None,
 		command_executor: CommandExecutor | None = None,
 		policy_evaluator: PolicyEvaluator | None = None,
+		workflow_runtime_factory: Callable[[], WorkflowRuntime] | None = None,
 		input_provider: InputProvider | None = None,
 		resources: dict[str, object] | ResourceRegistry | None = None,
 		concurrency: ConcurrencyConfig | None = None,
 		plugin_registry: PluginRegistry | None = None,
 	) -> None:
 		from axc_agent_engine.core.dispatcher import AgentMessageDispatcher
+
 		self._config_loader = AgentConfigLoader()
 		self._kv_store = kv_store
 		self._message_persistence = message_persistence
@@ -129,6 +128,7 @@ class Engine:
 		self._audit_sink = audit_sink
 		self._checkpoint_store = checkpoint_store
 		self._command_executor = command_executor
+		self._workflow_runtime_factory = workflow_runtime_factory
 		self._policy_evaluator = policy_evaluator
 		self._input_provider = input_provider or PassthroughInputProvider()
 		self._resources = ensure_resource_registry(resources)
@@ -154,35 +154,27 @@ class Engine:
 			run_control=self._run_control,
 		)
 		self._agents: dict[str, Agent] = {}
+		self._pending_plugin_closes: set[asyncio.Task] = set()
 
 	@property
 	def resources(self) -> ResourceRegistry:
-		"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-访问共享资源注册表。
-
-		English: Access the shared resource registry injected into plugins.
-		"""
+		"""Resources shared with plugins. 注入插件的共享资源。"""
 		return self._resources
 
 	@property
 	def plugin_registry(self) -> PluginRegistry:
-		"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-访问 Engine 级插件注册表。
-		Access the engine-scoped plugin registry.
-		"""
+		"""Plugins allowed by this host. 宿主允许加载的插件。"""
 		return self._plugin_registry
 
-	def load_agent_template(self, yaml_path: str) -> "AgentTemplate":
+	def load_agent_template(self, yaml_path: str) -> AgentTemplate:
 		"""Load Agent YAML as a reusable template without binding models or plugins.
-中文：加载 Agent YAML 为可复用模板，不绑定模型或插件。"""
+		中文：加载 Agent YAML 为可复用模板，不绑定模型或插件。"""
 		path, config, system_prompt = self._config_loader.load(yaml_path)
 		return AgentTemplate(self, path, config, system_prompt)
 
 	def _instantiate_agent(
 		self,
-		template: "AgentTemplate",
+		template: AgentTemplate,
 		models: AgentModels,
 		mounts: dict[str, object] | ResourceRegistry | None = None,
 		metadata: dict[str, Any] | None = None,
@@ -212,34 +204,38 @@ class Engine:
 				name=config.name,
 				description=config.description,
 				workspace=config.runtime.workspace,
-				routing_mode=config.runtime.routing.mode if config.runtime.routing else "auto",
+				routing_mode=config.runtime.routing.mode,
 			),
 		)
-		#English: Bilingual note. 中文：提前创建 registry，确保插件 initialize() 阶段可访问。
-		#English: English: Create the registry before plugin initialization so plugins can register tools. 中文：源码说明。
+		# Plugins can register tools during initialization. 插件可在初始化阶段注册工具。
 		registry = ToolRegistry(name_mapping=self._provider_tool_name_mapping(agent_default))
 		plugin_ctx.tool_registry = registry
 		plugins_raw = {k: v.model_dump() for k, v in config.plugins.items()}
-		active_plugins = load_plugins(plugins_raw, plugin_ctx, self._plugin_registry)
-		agent = Agent(
-			name=config.name,
-			description=config.description,
-			system_prompt=system_prompt,
-			runtime=config.runtime,
-			plugins=active_plugins,
-			default_model=agent_default,
-			fallback_model=agent_fallback,
-			utility_model=agent_utility,
-			session_manager=SessionManager(config.name, persistence=self._message_persistence),
-			registry=registry,
-			services=self._execution_services,
-			input_provider=self._input_provider,
-			engine_limiter=self._engine_limiter,
-			metadata=dict_or_empty(metadata, "metadata"),
-		)
-		self._agents[config.name] = agent
-		if self._dispatcher:
-			self._dispatcher.run_agent_consumer(agent)
+		with initialized_plugins(
+			plugins_raw, plugin_ctx, self._plugin_registry, self._pending_plugin_closes
+		) as active_plugins:
+			agent = Agent(
+				name=config.name,
+				description=config.description,
+				system_prompt=system_prompt,
+				runtime=config.runtime,
+				plugins=active_plugins,
+				default_model=agent_default,
+				fallback_model=agent_fallback,
+				utility_model=agent_utility,
+				session_manager=SessionManager(config.name, persistence=self._message_persistence),
+				registry=registry,
+				services=self._execution_services,
+				input_provider=self._input_provider,
+				workflow_runtime=self._workflow_runtime_factory() if self._workflow_runtime_factory else None,
+				engine_limiter=self._engine_limiter,
+				metadata=dict_or_empty(metadata, "metadata"),
+			)
+			if agent._strategy.name in plugins_raw and not plugins_raw[agent._strategy.name]["enabled"]:
+				raise PluginInitError(f"Execution strategy {agent._strategy.name} is disabled")
+			if self._dispatcher:
+				self._dispatcher.run_agent_consumer(agent)
+			self._agents[config.name] = agent
 		return agent
 
 	def get_agent(self, name: str) -> Agent | None:
@@ -250,7 +246,7 @@ class Engine:
 
 	def cancel_run(self, run_id: str, reason: str = "cancelled") -> bool:
 		"""Cancel a running execution by run_id.
-中文：按 run_id 取消正在运行的执行。"""
+		中文：按 run_id 取消正在运行的执行。"""
 		return self._run_control.cancel(run_id, reason)
 
 	async def unload_agent(self, name: str) -> None:
@@ -261,13 +257,17 @@ class Engine:
 			await agent.close()
 
 	async def close(self, timeout: float = 30.0) -> None:
-		"""English: This documentation describes the related engine component behavior.
-中文：优雅关闭。"""
+		"""Stop consumers, close agents and await pending rollback. 停止消费者、关闭 Agent 并等待回滚。"""
 		if self._dispatcher:
 			await self._dispatcher.stop_all()
 		for agent in self._agents.values():
 			await agent.close()
 		self._agents.clear()
+		await self._finish_plugin_closes()
+
+	async def _finish_plugin_closes(self) -> None:
+		if self._pending_plugin_closes:
+			await asyncio.shield(asyncio.gather(*self._pending_plugin_closes))
 
 	@staticmethod
 	def _provider_tool_name_mapping(provider: LLMProvider) -> ToolNameMappingConfig | None:
@@ -285,10 +285,10 @@ class Engine:
 
 class AgentTemplate:
 	"""Reusable Agent YAML template.
-中文：可复用的 Agent YAML 模板。
+	中文：可复用的 Agent YAML 模板。
 
-	Plugins and model objects are bound only when instantiate() is called.
-中文：插件和模型对象只在 instantiate() 调用时绑定。
+		Plugins and model objects are bound only when instantiate() is called.
+	中文：插件和模型对象只在 instantiate() 调用时绑定。
 	"""
 
 	def __init__(self, engine: Engine, path: Path, config: AgentConfig, system_prompt: str) -> None:
@@ -313,22 +313,40 @@ class AgentTemplate:
 			overrides=overrides,
 		)
 
+	async def instantiate_async(
+		self,
+		*,
+		models: AgentModels,
+		mounts: dict[str, object] | ResourceRegistry | None = None,
+		metadata: dict[str, Any] | None = None,
+		overrides: dict[str, Any] | None = None,
+	) -> Agent:
+		"""Finish pending rollback before a failed bind returns. 绑定失败时等待异步回滚完成。"""
+		try:
+			return self.instantiate(models=models, mounts=mounts, metadata=metadata, overrides=overrides)
+		except BaseException:
+			await self._engine._finish_plugin_closes()
+			raise
+
 	def _materialize(self, overrides: dict[str, Any] | None = None) -> tuple[AgentConfig, str]:
-		raw = copy.deepcopy(self.config.model_dump())
+		raw = self.config.model_dump()
 		if overrides:
 			_apply_overrides(raw, overrides)
 		try:
 			config = AgentConfig(**raw)
 		except Exception as e:
 			raise SchemaError(f"Agent overrides 校验失败: {e}") from e
-		system_prompt = config.system_prompt
-		if not system_prompt and config.system_prompt_file:
-			prompt_path = self.path.parent / config.system_prompt_file
-			if prompt_path.exists():
-				system_prompt = prompt_path.read_text(encoding="utf-8")
-			else:
-				raise ConfigError(f"system_prompt_file 不存在: {prompt_path}")
-		return config, system_prompt
+		return config, _system_prompt(config, self.path)
+
+
+def _system_prompt(config: AgentConfig, path: Path) -> str:
+	if config.system_prompt or not config.system_prompt_file:
+		return config.system_prompt
+	prompt_path = path.parent / config.system_prompt_file
+	try:
+		return prompt_path.read_text(encoding="utf-8")
+	except FileNotFoundError as exc:
+		raise ConfigError(f"system_prompt_file 不存在: {prompt_path}") from exc
 
 
 def _apply_overrides(raw: dict[str, Any], overrides: dict[str, Any]) -> None:
@@ -347,7 +365,7 @@ def _apply_overrides(raw: dict[str, Any], overrides: dict[str, Any]) -> None:
 		for index, part in enumerate(parts[:-1]):
 			next_target = target.get(part)
 			if next_target is None:
-				raise SchemaError(f"Override path does not exist: {'.'.join(parts[:index + 1])}")
+				raise SchemaError(f"Override path does not exist: {'.'.join(parts[: index + 1])}")
 			if not isinstance(next_target, dict):
 				raise SchemaError(f"Override path is not an object: {path}")
 			target = next_target

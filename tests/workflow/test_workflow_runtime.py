@@ -3,6 +3,8 @@ from __future__ import annotations
 import sys
 import types
 
+import pytest
+
 from axc_agent_engine.core.events import Event
 from axc_agent_engine.runtime.checkpoint import Checkpoint, InMemoryCheckpointStore
 from axc_agent_engine.workflow import (
@@ -47,7 +49,12 @@ async def test_memory_workflow_runtime_run_pause_missing_and_failed_resume():
 	assert await runtime.status("missing") == WorkflowStatus.MISSING
 
 	store = InMemoryCheckpointStore()
-	events = [event async for event in runtime.resume(WorkflowResumeRequest(run_id="none", message="", handler=lambda plan: handler(), checkpoint_store=store))]
+	events = [
+		event
+		async for event in runtime.resume(
+			WorkflowResumeRequest(run_id="none", message="", handler=lambda plan: handler(), checkpoint_store=store)
+		)
+	]
 	assert events[-1].type.value == "error"
 
 
@@ -69,17 +76,19 @@ async def test_agent_resume_stream_delegates_to_workflow_runtime():
 				yield event
 
 	store = InMemoryCheckpointStore()
-	await store.save(Checkpoint(
-		run_id="delegated",
-		sequence=1,
-		kind="round",
-		status=CheckpointStatus.INTERRUPTED,
-		state={
-			"current_round": 1,
-			"messages": [{"role": "user", "content": "before"}],
-			"metadata": {"session_id": "s", "agent_name": "agent"},
-		},
-	))
+	await store.save(
+		Checkpoint(
+			run_id="delegated",
+			sequence=1,
+			kind="round",
+			status=CheckpointStatus.INTERRUPTED,
+			state={
+				"current_round": 1,
+				"messages": [{"role": "user", "content": "before"}],
+				"metadata": {"session_id": "s", "agent_name": "agent"},
+			},
+		)
+	)
 	captured_messages: list[list[dict]] = []
 	workflow = RecordingWorkflowRuntime()
 	agent = Agent(
@@ -125,15 +134,15 @@ def test_workflow_state_helpers_read_checkpoint_envelope_only():
 	assert snapshot["current_round"] == 0
 	assert snapshot["input_tokens"] == 0
 	cp = Checkpoint(run_id="r", kind="por", state={"payload": {"plan": {}}, "metadata": {"session_id": "p"}})
-	assert "por_checkpoint" in resume_snapshot_from_checkpoint(cp)
+	assert resume_snapshot_from_checkpoint(cp)["strategy_state"] == cp.state
 
 
 def test_workflow_factory_prefers_burr_when_available():
 	import pytest
 
 	pytest.importorskip("burr")
-	runtime = create_workflow_runtime()
-
+	assert isinstance(create_workflow_runtime(), MemoryWorkflowRuntime)
+	runtime = create_workflow_runtime(prefer_burr=True)
 	assert runtime.__class__.__name__ == "BurrWorkflowRuntime"
 
 
@@ -172,6 +181,7 @@ async def test_burr_workflow_runtime_with_fake_burr(monkeypatch):
 	def action(reads=None, writes=None):
 		def decorator(func):
 			return func
+
 		return decorator
 
 	class Application:
@@ -221,7 +231,9 @@ async def test_burr_workflow_runtime_with_fake_burr(monkeypatch):
 	async def run_handler():
 		yield Event.done("ran")
 
-	run_events = [event async for event in runtime.run(WorkflowRunRequest(run_id="run", handler=run_handler, metadata={"m": 1}))]
+	run_events = [
+		event async for event in runtime.run(WorkflowRunRequest(run_id="run", handler=run_handler, metadata={"m": 1}))
+	]
 	assert run_events[-1].content == "ran"
 	assert await runtime.status("run") == WorkflowStatus.COMPLETED
 
@@ -233,12 +245,14 @@ async def test_burr_workflow_runtime_with_fake_burr(monkeypatch):
 
 	resume_events = [
 		event
-		async for event in runtime.resume(WorkflowResumeRequest(
-			run_id="resume",
-			message="continue",
-			handler=resume_handler,
-			metadata={"user": "u"},
-		))
+		async for event in runtime.resume(
+			WorkflowResumeRequest(
+				run_id="resume",
+				message="continue",
+				handler=resume_handler,
+				metadata={"user": "u"},
+			)
+		)
 	]
 	assert resume_events[-1].content == "resume failed"
 	assert await runtime.status("resume") == WorkflowStatus.FAILED
@@ -256,3 +270,33 @@ def test_burr_workflow_runtime_missing_dependency(monkeypatch):
 		BurrWorkflowRuntime()
 	except RuntimeError as exc:
 		assert "workflow" in str(exc)
+
+
+@pytest.mark.parametrize("outcome", ["cancel", "disconnect", "failure", "exhausted"])
+async def test_driver_releases_handlers_and_records_non_successful_exits(outcome):
+	closed = []
+
+	async def handler():
+		try:
+			yield Event.delta("started")
+			if outcome == "cancel":
+				yield Event.cancelled("stopped")
+			elif outcome == "failure":
+				raise ValueError("hook failed")
+		finally:
+			closed.append(True)
+
+	runtime = MemoryWorkflowRuntime()
+	run = runtime.run(WorkflowRunRequest(run_id="r", handler=handler))
+	assert (await anext(run)).content == "started"
+	if outcome == "disconnect":
+		await run.aclose()
+	elif outcome == "cancel":
+		assert (await anext(run)).content == "stopped"
+	else:
+		with pytest.raises(RuntimeError if outcome == "exhausted" else ValueError):
+			await anext(run)
+	assert await runtime.status("r") == (
+		WorkflowStatus.PAUSED if outcome in {"cancel", "disconnect"} else WorkflowStatus.FAILED
+	)
+	assert closed == [True]

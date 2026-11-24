@@ -1,11 +1,16 @@
 """Tests for storage module — InMemory implementations with TTL and capacity."""
+
 import asyncio
 import time
+
 import pytest
 
 from axc_agent_engine.storage.in_memory import (
-	InMemoryKVStore, InMemoryMessagePersistence, InMemorySpanStore,
-	InMemoryVectorStore, InMemoryMessageBus,
+	InMemoryKVStore,
+	InMemoryMessageBus,
+	InMemoryMessagePersistence,
+	InMemorySpanStore,
+	InMemoryVectorStore,
 )
 from axc_agent_engine.utils.math_utils import cosine_similarity as _cosine_similarity
 
@@ -295,4 +300,25 @@ class TestInMemoryMessageBus:
 		with pytest.raises(asyncio.CancelledError):
 			await task
 
-		assert bus._channels["close-me"] == []
+		assert "close-me" not in bus._channels
+
+	async def test_close_wakes_all_subscribers_and_pending_requests(self):
+		bus = InMemoryMessageBus()
+
+		async def consume():
+			return [msg async for msg in bus.subscribe("shared")]
+
+		readers = [asyncio.create_task(consume()) for _ in range(2)]
+		request = asyncio.create_task(bus.request("rpc", {"value": 1}, timeout=60))
+		await asyncio.sleep(0)
+		assert len(bus._channels["shared"]) == 2
+		await bus.close()
+		await bus.close()
+		async with asyncio.timeout(1):
+			assert await asyncio.gather(*readers) == [[], []]
+			with pytest.raises(RuntimeError, match="closed"):
+				await request
+			with pytest.raises(RuntimeError, match="closed"):
+				await bus.request("rpc", {})
+			assert await consume() == []
+		assert bus._channels == {}

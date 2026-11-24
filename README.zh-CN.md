@@ -1,7 +1,7 @@
 <h1 align="center">AxcAgentEngine</h1>
 
 <p align="center">
-  <b>带 POR 规划的 Agent 执行引擎 · 工具调用 · 插件体系</b>
+  <b>无 UI 的 Agent 执行引擎 · 可插拔 ReAct 与 POR 循环</b>
 </p>
 
 <p align="center">
@@ -25,22 +25,16 @@
 
 ---
 
-多数 Agent 框架靠 ReAct 循环跑：思考 → 调工具 → 观察 → 继续。任务复杂时容易发散。
-
-AxcAgentEngine 在 ReAct 之外加了 **POR（Plan-Observe-Replan）**：先生成结构化计划，按依赖调度，观察结果，必要时重新规划。
+AxcAgentEngine 是无 UI 的 Agent 执行引擎。执行循环由策略插件提供。官方随包提供 **ReAct**（逐轮调用模型与工具）和 **POR**（制定计划、按依赖执行、观察结果并重规划）。宿主也可以注册自己的循环。引擎统一处理插话、取消和检查点。
 
 ## 🚀 快速开始
 
 ```bash
-pip install axc-agent-engine
+# 在本仓库根目录安装当前版本并运行下方示例
+pip install .
 
-# 固定安装当前 3.0 版本
-pip install axc-agent-engine==3.0.0
-
-# 可选能力
-pip install "axc-agent-engine[api]"
-pip install "axc-agent-engine[workflow]"
-pip install "axc-agent-engine[api,knowledge,workflow]"
+# 按需安装 HTTP API、MCP 或 Burr 工作流依赖
+pip install ".[api,mcp,workflow]"
 ```
 
 需要 Python 3.11 或更高版本。
@@ -48,10 +42,10 @@ pip install "axc-agent-engine[api,knowledge,workflow]"
 ```python
 from axc_agent_engine import AgentModels, Engine, LLMConfig, PluginRegistry
 from axc_agent_engine.llm.client import OpenAIClient
-from axc_agent_engine.plugins.builtin import BuiltinToolsPlugin
+from axc_agent_engine.plugins.builtin import BuiltinToolsPlugin, PORPlugin
 
 registry = PluginRegistry()
-registry.register(BuiltinToolsPlugin)
+registry.register_many([PORPlugin, BuiltinToolsPlugin])
 
 engine = Engine(plugin_registry=registry)
 models = AgentModels(default=OpenAIClient(LLMConfig(
@@ -59,7 +53,7 @@ models = AgentModels(default=OpenAIClient(LLMConfig(
     api_key="sk-xxx",
     model="gpt-4o",
 )))
-agent = engine.load_agent_template("./agents/my_agent.yaml").instantiate(models=models)
+agent = engine.load_agent_template("./examples/01_basic_chat/agent.yaml").instantiate(models=models)
 
 # 非流式
 result = await agent.chat("Analyze last month's sales data")
@@ -72,14 +66,18 @@ async for event in agent.stream("Build a REST API for user management"):
         print(f"\n[Tool: {event.tool_name}]")
     elif event.type == "plan_created":
         print(f"\n[Plan: {event.content}, {len(event.steps)} steps]")
+
+await engine.close()
 ```
 
 
+示例 01–07 的宿主注册 `PORPlugin`，模板启用 `plugins.por`，显式设置 `runtime.strategy: por` 和 `plugins.por.mode: auto`。纯 ReAct 的对应组合是 `ReActPlugin`、`plugins.react.enabled: true` 和 `runtime.strategy: react`。只启用一个策略时可省略 `runtime.strategy`，多个策略同时启用时必须点名。自定义循环遵循同一契约。 [自定义循环示例](examples/08_custom_loop) · [策略契约](docs/PLUGIN_DEVELOPMENT.md#execution-strategies)
+
 ## ✨ 核心能力
 
-- **POR 规划** —— 结构化计划 + 依赖调度 + 重新规划，支持 `auto` / `react_only` / `por_first` 路由
-- **ReAct 执行器** —— 思考、工具调用、观察的标准循环
-- **插件体系** —— 内置 spec 注册表，YAML 按需加载；可选能力都在插件里
+- **POR 策略插件** —— `por_first`（插件默认值）先规划，`auto` 从 ReAct 开始，识别到结构化计划后进入 POR
+- **ReAct 策略插件** —— 思考、工具调用、观察的标准循环
+- **插件体系** —— 宿主显式注册插件类，YAML 按需启用
 - **工具协议** —— 所有工具返回 `ToolOutput`；只读并发，写串行；模型函数名安全映射
 - **中断恢复** —— `WorkflowRuntime` + `CheckpointStore` + Agent resume API；Burr 通过 `axc-agent-engine[workflow]` 可选启用
 - **OpenAI API 子集** —— Provider 协议 + OpenAI-compatible HTTP 客户端 / API 子集
@@ -94,10 +92,10 @@ async for event in agent.stream("Build a REST API for user management"):
 
 | 能力 | 实现 |
 | --- | --- |
-| ReAct 循环 | `Executor` |
-| POR 规划 | `auto` / `react_only` / `por_first` |
+| ReAct 循环 | `ReActPlugin` |
+| POR 规划 | `PORPlugin` 支持 `auto` / `por_first` |
 | 中断恢复 | 默认 `MemoryWorkflowRuntime`；安装 `axc-agent-engine[workflow]` 后可使用 `BurrWorkflowRuntime` |
-| 插件系统 | spec 注册表 + YAML 按需加载 |
+| 插件系统 | 宿主注册类，YAML 按需启用 |
 | LLM Provider | Provider 协议 + OpenAI-compatible HTTP |
 | 并行工具 | 只读并发，写串行 |
 | 工具输出 | 强制 `ToolOutput` |
@@ -130,6 +128,7 @@ name: "data-analyst"
 description: "Data analysis assistant"
 
 runtime:
+  strategy: por
   max_rounds: 50
   thinking: "auto"
   workspace: "/tmp/agent-workspace"
@@ -142,6 +141,7 @@ system_prompt: |
   You are a data analysis assistant...
 
 plugins:
+  por: {enabled: true, mode: auto}
   builtin_tools:
     enabled: true
     load: ["get_time", "file_read", "file_write", "http_request", "artifact_read"]
@@ -184,8 +184,9 @@ plugins:
 `AgentModels` 接收模型 provider 对象。`OpenAIClient(LLMConfig(...))` 是内置的 OpenAI 兼容 provider；自定义 provider 需要实现 `LLMProvider` 协议（`model`、`tool_name_mapping`、`chat`、`stream`、`ask`、`close`）。
 
 ```python
-from axc_agent_engine import AgentModels, ConcurrencyConfig, Engine, LLMConfig
+from axc_agent_engine import AgentModels, ConcurrencyConfig, Engine, LLMConfig, PluginRegistry
 from axc_agent_engine.llm.client import OpenAIClient
+from axc_agent_engine.plugins.builtin import BuiltinToolsPlugin, PORPlugin
 from axc_agent_engine.tools.name_mapping import ToolNameMappingConfig
 
 main_model_config = LLMConfig(
@@ -199,13 +200,16 @@ main_model_config = LLMConfig(
     tool_name_mapping=ToolNameMappingConfig(),
 )
 
+registry = PluginRegistry()
+registry.register_many([PORPlugin, BuiltinToolsPlugin])
 engine = Engine(
+    plugin_registry=registry,
     concurrency=ConcurrencyConfig(
         max_engine_concurrent_runs=128,
         queue_timeout=30,
     ),
 )
-agent = engine.load_agent_template("./agents/my_agent.yaml").instantiate(
+agent = engine.load_agent_template("./examples/01_basic_chat/agent.yaml").instantiate(
     models=AgentModels(default=OpenAIClient(main_model_config)),
 )
 ```
@@ -364,21 +368,24 @@ HTTP API 是 OpenAI Chat Completions 明确子集。
 
 ```python
 from axc_agent_engine import AgentModels, Engine, PluginRegistry
-from axc_agent_engine.plugins.builtin import BuiltinToolsPlugin, MemoryPlugin
+from axc_agent_engine.plugins.builtin import BuiltinToolsPlugin, MemoryPlugin, PORPlugin
 from my_project.plugins import MyCustomPlugin
 
 registry = PluginRegistry()
-registry.register_many([BuiltinToolsPlugin, MemoryPlugin, MyCustomPlugin])
+registry.register_many([PORPlugin, BuiltinToolsPlugin, MemoryPlugin, MyCustomPlugin])
 engine = Engine(plugin_registry=registry)
 agent = engine.load_agent_template("./agents/my_agent.yaml").instantiate(models=AgentModels(default=llm))
 ```
 
 | 插件 | 用途 |
 | --- | --- |
+| `react` | 逐轮调用模型和工具 |
+| `por` | 计划、执行、观察与重规划，支持自动切换 |
 | `builtin_tools` | 基础工具和 artifact 分页 |
 | `knowledge` | ingestion、语义分块、混合检索、citation、rerank |
 | `memory` | 记忆、治理工具、敏感信息策略、衰减、TTL |
 | `output_format` | 最终输出契约、校验、修复、审计 |
+| `post_process` | 按需在最终输出校验前追加轮次和 token 统计 |
 | `graph` | 实体/关系图谱搜索和 CRUD |
 | `skill` | 加载 skill，脚本通过 sandbox 执行 |
 | `mcp` | MCP server 工具加载和治理 |
@@ -390,9 +397,17 @@ agent = engine.load_agent_template("./agents/my_agent.yaml").instantiate(models=
 | `tracing` | trace/span 采集、审计模式、查询工具 |
 | `reflexion` | 轮次结束和运行结束的自我反思 |
 | `repetition_guard` | 重复工具调用/回复/结果检测 |
-| `cost_statistics` | token 和工具调用次数统计 |
+| `cost_statistics` | 输入、输出 token 统计 |
 | `collaboration` | Agent 间调用和宿主编排薄入口 |
 | `swarm` | 轻量并行 fan-out |
+
+### 工程任务工具
+
+在 `plugins.builtin_tools.load` 中按需加入 `file_grep`，授予 `file_read` 权限并配置 workspace。命令执行环境需要安装 ripgrep（`rg`）。结果包含路径、行号和匹配行。
+
+`file_edit` 精确匹配原文，包括引号和换行。内联 `file_read` 返回整个文件的 `sha256`；将它作为 `expected_sha256` 传给 `file_edit`、`file_write` 或 `file_append`，发现内容已变时重新读取。跨进程工作区隔离由宿主负责。
+
+本地命令的 stdout 和 stderr 分别最多内联 1 MiB。超出时完整输出保存在命令工作目录的 `.axc/logs/` 下。为工具挂载 `ArtifactStore` 后，可按返回的 ID 用 `artifact_read` 或 `artifact_page` 读取。宿主在制品引用到期后清理日志。
 
 ## Sidecar 旁路能力
 
@@ -433,7 +448,8 @@ flowchart TD
     I --> J["Plugin.initialize(config, ctx)"]
     J --> K["Plugin.get_tools()"]
     K --> L["注册 ToolDefinition"]
-    L --> M["创建 Agent 和 dispatcher consumer"]
+    L --> M["Agent 绑定已选策略"]
+    M --> N["启动已配置的 dispatcher consumer"]
 ```
 
 ### 单次运行
@@ -443,10 +459,11 @@ flowchart TD
     A["Agent.chat / stream / *_with_messages / resume"] --> B["RunRequest.create"]
     B --> C["合并 run_options.run_id 和请求 metadata"]
     C --> D["创建 ExecutionContext"]
-    D --> E["ExecutionRunLifecycle.on_execution_start"]
-    E --> F["MessageStore 初始化 system/user/plugin context"]
-    F --> G{"路由模式"}
-    G -->|react_only 或 auto ReAct| H["ReActKernel 轮次"]
+    D --> E["MessageStore 初始化本轮消息"]
+    E --> F["执行启动钩子并注入插件上下文"]
+    F --> G{"选定的执行策略"}
+    G -->|自定义插件| Custom["ExecutionLoop.run"]
+    G -->|react 或 por auto| H["ReActLoop 轮次"]
     G -->|por_first 或 POR handoff| I["PORRunner / PORGraphRuntime"]
     H --> J["Plugin.transform_messages"]
     J --> K["compress: recent window + durable results + 原子工具组"]
@@ -524,7 +541,7 @@ class MyPlugin(BasePlugin):
 
 插件必须继承 `BasePlugin`，必须声明 `config_schema`，工具必须返回 `ToolDefinition` 实例，`ToolRegistry` 不接受 dict。
 
-宿主可以通过 `registry.list_plugin_config_schemas()` 或 `registry.get_plugin_config_schema("my_plugin")` 读取已注册插件 schema。schema 用于前端展示、模板生成、默认值展示和可选校验；YAML 中的额外 key 仍会传给 `initialize(config, ctx)`。
+宿主可以通过 `registry.list_plugin_config_schemas()` 或 `registry.get_plugin_config_schema("my_plugin")` 读取已注册插件 schema。加载器在调用 `initialize(config, ctx)` 前按 schema 校验 YAML，并拒绝未知字段。
 
 ```yaml
 plugins:
@@ -547,15 +564,23 @@ axc --log-level DEBUG --json-logs chat --agent ./agents/my_agent.yaml
 
 CLI 日志参数是全局参数，需要放在子命令前。
 
+以下命令按 CLI 的内置插件注册表装配 Agent，初始化配置的插件后输出 JSON，无需调用模型。
+
+```bash
+axc inspect --agent examples/01_basic_chat/agent.yaml
+```
+
+`strategy.reason` 中，`explicit` 表示模板点名选择，`single_enabled` 表示只启用了一个策略，`runtime_routing` 表示按旧模板的路由配置选择。输出包含插件初始化顺序、已注册工具及能力许可。运行时发现的工具在发现后才可见；自定义权限策略的静态许可显示为 `null`。宿主自行注册插件、挂载资源或注入权限策略时，可以直接调用已装配实例的 `agent.inspect()`。
+
 ## 设计决策
 
-- **Engine core = Executor + ReActKernel + LLMCaller。** 读取 Agent YAML，调用 LLM Provider，运行 ReAct 循环，输出事件和结果。
+- **执行循环由策略插件提供。** Executor 管理单次运行，官方 ReAct 和 POR 插件实现循环，宿主可注册自己的策略。见[执行策略接口](docs/PLUGIN_DEVELOPMENT.md#execution-strategies)。
 - **POR 状态转移交给 pydantic-graph。** `PORGraphRuntime` 负责 plan/step/observe/replan 循环；service 负责执行和 checkpoint。
 - **Workflow resume 是运行时边界。** 默认使用 `MemoryWorkflowRuntime`；安装 workflow 可选依赖后可选择 `BurrWorkflowRuntime`。
 - **插件是运行时扩展边界。** 知识库、记忆、图谱、MCP、输出修复、Skill 都属于插件。
 - **推演是旁路。** 多 Agent session、simulation kernel、mode adapter 是宿主驱动 SDK 能力。
 - **评测是旁路。** EvalRunner、EvalStore、AnnotationStore、AnnotationMatcher 和 report 是宿主驱动测试框架。
-- **注册 ≠ 加载。** 内置 spec 注册表是完整插件表；Agent 只加载 YAML 中 enabled 的插件。
+- **显式装载。** 宿主从官方目录选择要注册的类，模板用 `enabled: true` 启用插件。
 - **插件 schema 必须声明。** 没有 `config_schema` 的插件不能注册。
 - **工具来自插件。** Engine 核心不内置业务工具。
 - **工具必须返回 `ToolOutput`。** 非 `ToolOutput` 返回会被拒绝。
@@ -577,3 +602,22 @@ make test-core-cov
 ```
 
 发布门禁要求总覆盖率不低于 95%，引擎本体覆盖率目标是 98%。
+
+### 向运行中的会话补充消息
+
+启动时由宿主指定唯一的 `run_id`。宿主可以在模型或工具仍在工作时，通过同一 Agent 和会话发消息。重试时沿用同一个消息 ID 和正文。
+
+```python
+async for event in agent.stream("检查两份报告", session_id="review", metadata={"run_id": "review-42"}):
+    if event.type == EventType.STEP_START and event.step_id == 1:
+        receipt = await agent.send_message("review-42", "重点检查第二份",
+                                           session_id="review", message_id="change-1")
+    if event.type in {EventType.DONE, EventType.CANCELLED, EventType.ERROR}:
+        print(event.metadata.get("processed_message_ids", []), event.metadata.get("unprocessed_message_ids", []))
+```
+
+`accepted` 表示消息已按顺序排队，`processed` 表示已进入本次运行的消息历史。已启动的工具可以先完成。POR 在运行中发出计划和步骤事件，下次规划时根据补充要求调整剩余步骤。宿主可调用 `engine.cancel_run(run_id)` 取消运行。离线示例可以分别演练正常完成和取消。[可运行示例](examples/09_live_input/run.py)
+
+多个 worker 共用检查点存储时，宿主须在启动或读取快照前为每个运行指定唯一执行者，插话和取消也路由给它；接管前须确保旧执行者已失去写入和调用工具的能力。启用租户记忆隔离后，旧快照缺少作用域时，宿主需从可信记录补回原归属才能恢复。宿主提供持久化 `CheckpointStore` 后，进程重启可以恢复已接收的输入。遇到写工具结果未知，恢复会暂停，错误中给出供宿主核对的调用 ID。[插件与恢复规范](docs/PLUGIN_DEVELOPMENT.md)
+
+从宿主保留的 `cp.forkable` 检查点调用 `await agent.fork_run(run_id, checkpoint_id)`，用 `resume_stream` 独立继续子分支。[执行分叉说明](docs/ARCHITECTURE.md#execution-forks)

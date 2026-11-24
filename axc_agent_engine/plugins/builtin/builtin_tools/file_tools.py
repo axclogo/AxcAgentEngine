@@ -1,20 +1,38 @@
 """Filesystem builtin tools.
 中文：文件系统内置工具。"""
+
+import asyncio
 import glob
+import hashlib
 import os
+import tempfile
+from pathlib import Path
+from threading import Lock
 from typing import Any
 
 from axc_agent_engine.tools.tool_output import ArtifactRef, ToolOutput
 
-from .path_policy import BuiltinPathPolicy, PathValidationError
 from .artifact_store import ArtifactStoreReader
+from .path_policy import BuiltinPathPolicy, PathValidationError
 
+_MUTATION_LOCK = Lock()
 FILE_READ_MAX_SIZE = 10 * 1024 * 1024
 FILE_RESULT_EXTERNALIZE_BYTES = FILE_READ_MAX_SIZE
 LIST_RESULT_EXTERNALIZE_COUNT = 1000
 DEFAULT_TREE_IGNORES = (
-	"node_modules", ".git", "dist", "build", ".turbo", ".next", ".cache",
-	"__pycache__", ".pytest_cache", ".venv", "venv", "target", ".mypy_cache",
+	"node_modules",
+	".git",
+	"dist",
+	"build",
+	".turbo",
+	".next",
+	".cache",
+	"__pycache__",
+	".pytest_cache",
+	".venv",
+	"venv",
+	"target",
+	".mypy_cache",
 )
 
 
@@ -37,14 +55,15 @@ class BuiltinFileTools:
 			return ToolOutput.error(str(e))
 		try:
 			size = os.path.getsize(resolved)
-		except Exception as e:
+		except (OSError, ValueError) as e:
 			return ToolOutput.error(str(e))
 		if size > FILE_READ_MAX_SIZE:
 			return await self._externalized_file_read(path, resolved, size, context)
 		try:
-			with open(resolved, "r", encoding="utf-8") as f:
-				full_content = f.read()
-		except Exception as e:
+			raw = await asyncio.to_thread(Path(resolved).read_bytes)
+			full_content = raw.decode("utf-8")
+			digest = hashlib.sha256(raw).hexdigest()
+		except (OSError, ValueError) as e:
 			return ToolOutput.error(str(e))
 		lines = full_content.split("\n")
 		total_lines = len(lines)
@@ -58,6 +77,7 @@ class BuiltinFileTools:
 		content_data = {
 			"path": path,
 			"total_lines": total_lines,
+			"sha256": digest,
 			"start_line": start_line,
 			"end_line": end_line,
 			"ranges": [[start, end] for start, end in ranges],
@@ -69,7 +89,7 @@ class BuiltinFileTools:
 			content=content_data,
 			content_type="json",
 			summary=f"file_read：{path}（共 {total_lines} 行，显示 {_range_label(ranges)}）",
-			llm_view=_file_read_llm_view(path, total_lines, ranges, text),
+			llm_view=_file_read_llm_view(path, total_lines, ranges, text, digest),
 		)
 
 	async def list(self, args: dict[str, Any], context: dict[str, Any]) -> ToolOutput:
@@ -83,9 +103,15 @@ class BuiltinFileTools:
 			return ToolOutput.error(f"Not a directory: {path}")
 		try:
 			entries = self._collect_entries(resolved, recursive, context)
-		except Exception as e:
+		except (OSError, ValueError) as e:
 			return ToolOutput.error(str(e))
-		content = {"path": path, "entries": entries, "count": len(entries), "recursive": recursive, "externalized": False}
+		content = {
+			"path": path,
+			"entries": entries,
+			"count": len(entries),
+			"recursive": recursive,
+			"externalized": False,
+		}
 		return await self._list_output(
 			"file_list",
 			content,
@@ -116,7 +142,7 @@ class BuiltinFileTools:
 				if os.path.isdir(full_real) and not include_dirs:
 					continue
 				matches.append(self._path_policy.file_entry(full_real, context))
-		except Exception as e:
+		except (OSError, ValueError) as e:
 			return ToolOutput.error(str(e))
 		content = {"pattern": pattern, "matches": matches, "count": len(matches), "externalized": False}
 		return await self._list_output(
@@ -143,7 +169,7 @@ class BuiltinFileTools:
 			return ToolOutput.error(f"Not a directory: {path}")
 		try:
 			lines, entries = _build_tree(resolved, path, max_depth, ignore, self._path_policy, context)
-		except Exception as e:
+		except (OSError, ValueError) as e:
 			return ToolOutput.error(str(e))
 		tree_text = "\n".join(lines)
 		content = {
@@ -155,7 +181,9 @@ class BuiltinFileTools:
 			"count": len(entries),
 			"externalized": False,
 		}
-		return await self._list_output("file_tree", content, tree_text, context, summary=f"file_tree：{path}，返回 {len(entries)} 个节点")
+		return await self._list_output(
+			"file_tree", content, tree_text, context, summary=f"file_tree：{path}，返回 {len(entries)} 个节点"
+		)
 
 	async def info(self, args: dict[str, Any], context: dict[str, Any]) -> ToolOutput:
 		path = args.get("path", "")
@@ -169,7 +197,7 @@ class BuiltinFileTools:
 			return ToolOutput.error(f"Path not found: {path}")
 		try:
 			return ToolOutput.json_output(self._path_policy.file_entry(resolved, context), summary=f"file_info：{path}")
-		except Exception as e:
+		except (OSError, ValueError) as e:
 			return ToolOutput.error(str(e))
 
 	async def write(self, args: dict[str, Any], context: dict[str, Any]) -> ToolOutput:
@@ -182,12 +210,10 @@ class BuiltinFileTools:
 		except PathValidationError as e:
 			return ToolOutput.error(str(e))
 		try:
-			os.makedirs(os.path.dirname(resolved) or ".", exist_ok=True)
-			with open(resolved, "w", encoding="utf-8") as f:
-				f.write(content)
+			await asyncio.to_thread(_write_text, resolved, content, "w", args.get("expected_sha256"))
 			data = {"success": True, "path": path, "bytes": len(content.encode())}
 			return ToolOutput.json_output(data, summary=f"已向 {path} 写入 {len(content.encode())} 字节")
-		except Exception as e:
+		except (OSError, ValueError) as e:
 			return ToolOutput.error(str(e))
 
 	async def append(self, args: dict[str, Any], context: dict[str, Any]) -> ToolOutput:
@@ -203,12 +229,10 @@ class BuiltinFileTools:
 		if not create and not os.path.exists(resolved):
 			return ToolOutput.error(f"File not found: {path}")
 		try:
-			os.makedirs(os.path.dirname(resolved) or ".", exist_ok=True)
-			with open(resolved, "a", encoding="utf-8") as f:
-				f.write(content)
+			await asyncio.to_thread(_write_text, resolved, content, "a", args.get("expected_sha256"))
 			data = {"success": True, "path": path, "bytes_appended": len(content.encode())}
 			return ToolOutput.json_output(data, summary=f"已向 {path} 追加 {len(content.encode())} 字节")
-		except Exception as e:
+		except (OSError, ValueError) as e:
 			return ToolOutput.error(str(e))
 
 	async def edit(self, args: dict[str, Any], context: dict[str, Any]) -> ToolOutput:
@@ -225,33 +249,12 @@ class BuiltinFileTools:
 		except PathValidationError as e:
 			return ToolOutput.error(str(e))
 		try:
-			with open(resolved, "r", encoding="utf-8") as f:
-				content = f.read()
+			count = await asyncio.to_thread(
+				_edit_text, resolved, old_string, new_string, replace_all, args.get("expected_sha256")
+			)
 		except FileNotFoundError:
 			return ToolOutput.error(f"File not found: {path}")
-		except Exception as e:
-			return ToolOutput.error(str(e))
-		normalized_old = old_string.replace("\u2018", "'").replace("\u2019", "'").replace("\u201c", '"').replace("\u201d", '"')
-		normalized_content = content.replace("\u2018", "'").replace("\u2019", "'").replace("\u201c", '"').replace("\u201d", '"')
-		count = content.count(old_string)
-		if count == 0:
-			count = normalized_content.count(normalized_old)
-			if count == 0:
-				return ToolOutput.error(f"No matching text found (file_length={len(content)})")
-			content = normalized_content
-			old_string = normalized_old
-			count = content.count(old_string)
-		if count > 1 and not replace_all:
-			return ToolOutput.error(f"找到 {count} 处匹配，请设置 replace_all=true 或提供更精确的文本")
-		new_content = content.replace(old_string, new_string) if replace_all else content.replace(old_string, new_string, 1)
-		tmp_path = resolved + ".tmp"
-		try:
-			with open(tmp_path, "w", encoding="utf-8") as f:
-				f.write(new_content)
-			os.replace(tmp_path, resolved)
-		except Exception as e:
-			if os.path.exists(tmp_path):
-				os.remove(tmp_path)
+		except (OSError, ValueError) as e:
 			return ToolOutput.error(str(e))
 		data = {"success": True, "replacements": count if replace_all else 1, "path": path}
 		return ToolOutput.json_output(data, summary=f"已编辑 {path}：{count if replace_all else 1} 处替换")
@@ -278,7 +281,9 @@ class BuiltinFileTools:
 	) -> ToolOutput:
 		artifact_store = self._artifact_reader.store(context)
 		if not artifact_store:
-			return ToolOutput.error(f"File is {size} bytes; artifact_store is required to externalize files larger than {FILE_READ_MAX_SIZE} bytes")
+			return ToolOutput.error(
+				f"File is {size} bytes; artifact_store is required to externalize files larger than {FILE_READ_MAX_SIZE} bytes"
+			)
 		ref = await artifact_store.put_file_ref(resolved, {"path": path}, kind="file")
 		content_data = {
 			"path": path,
@@ -309,7 +314,9 @@ class BuiltinFileTools:
 		artifact_store = self._artifact_reader.store(context)
 		if not artifact_store:
 			return ToolOutput(content=content, content_type="json", summary=summary, llm_view=llm_view)
-		ref = await artifact_store.put_text(llm_view, {"tool": tool_name, "path": content.get("path", content.get("pattern", ""))}, kind="text")
+		ref = await artifact_store.put_text(
+			llm_view, {"tool": tool_name, "path": content.get("path", content.get("pattern", ""))}, kind="text"
+		)
 		externalized = dict(content)
 		externalized["externalized"] = True
 		externalized["artifact_id"] = ref.id
@@ -317,14 +324,17 @@ class BuiltinFileTools:
 			content=externalized,
 			content_type="json",
 			summary=summary,
-			llm_view=_externalized_llm_view(tool_name, str(content.get("path", content.get("pattern", ""))), len(llm_view), ref),
+			llm_view=_externalized_llm_view(
+				tool_name, str(content.get("path", content.get("pattern", ""))), len(llm_view), ref
+			),
 			artifacts=[ref],
 		)
 
 
-def _file_read_llm_view(path: str, total_lines: int, ranges: list[tuple[int, int]], text: str) -> str:
+def _file_read_llm_view(path: str, total_lines: int, ranges: list[tuple[int, int]], text: str, digest: str) -> str:
 	lines = [
 		f"File: {path}",
+		f"SHA-256: {digest}",
 		f"Lines shown: {_range_label(ranges)} of {total_lines}",
 		"内容:",
 	]
@@ -449,3 +459,45 @@ def _build_tree(
 
 	walk(root, "", 1)
 	return lines, entries
+
+
+def _check_digest(expected: str, actual: str) -> None:
+	if expected != actual:
+		raise ValueError("File changed since read. Read it again before writing.")
+
+
+def _write_text(path: str, content: str, mode: str, expected: str | None) -> None:
+	with _MUTATION_LOCK:
+		if expected is not None:
+			with open(path, "rb") as source:
+				_check_digest(expected, hashlib.file_digest(source, "sha256").hexdigest())
+		os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+		with open(path, mode, encoding="utf-8", newline="") as stream:
+			stream.write(content)
+
+
+def _edit_text(path: str, old: str, new: str, replace_all: bool, expected: str | None) -> int:
+	with _MUTATION_LOCK:
+		raw = Path(path).read_bytes()
+		if expected is not None:
+			_check_digest(expected, hashlib.sha256(raw).hexdigest())
+		content = raw.decode("utf-8")
+		count = content.count(old)
+		if not count:
+			raise ValueError(f"No matching text found (file_length={len(content)})")
+		if count > 1 and not replace_all:
+			raise ValueError(f"找到 {count} 处匹配，请设置 replace_all=true 或提供更精确的文本")
+		_replace_text(path, content.replace(old, new))
+		return count
+
+
+def _replace_text(path: str, content: str) -> None:
+	"""Replace a file atomically. 在同一目录中原子替换文件。"""
+	with tempfile.NamedTemporaryFile(dir=Path(path).parent, delete=False) as pending:
+		staged = Path(pending.name)
+	try:
+		staged.write_bytes(content.encode("utf-8"))
+		staged.chmod(Path(path).stat().st_mode)
+		os.replace(staged, path)
+	finally:
+		staged.unlink(missing_ok=True)

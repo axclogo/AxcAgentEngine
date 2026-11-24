@@ -56,7 +56,7 @@ def test_normalize_run_context_uses_supplied_default_run_id():
 def test_run_request_create_copies_mutable_context():
 	messages = [{"role": "user", "content": [{"type": "text", "text": "original"}]}]
 	llm_options = {"extra": {"value": "original"}}
-	run_options = {"control": {"value": "original"}}
+	run_options = {"stream": False}
 	metadata = {"trace": {"id": "original"}}
 
 	request = RunRequest.create(
@@ -68,9 +68,16 @@ def test_run_request_create_copies_mutable_context():
 	)
 	messages[0]["content"][0]["text"] = "mutated"
 	llm_options["extra"]["value"] = "mutated"
-	run_options["control"]["value"] = "mutated"
+	run_options["stream"] = True
+	assert request.stream is False
 	metadata["trace"]["id"] = "mutated"
 
 	assert request.messages == [{"role": "user", "content": [{"type": "text", "text": "original"}]}]
 	assert request.llm_options == {"extra": {"value": "original"}}
 	assert request.metadata["trace"] == {"id": "original"}
+
+
+@pytest.mark.parametrize("value", [True, 1.5, ["run"], {"id": "run"}])
+def test_run_identity_rejects_untyped_values(value):
+	with pytest.raises(TypeError, match="run_id"):
+		RunRequest.create("go", metadata={"run_id": value})

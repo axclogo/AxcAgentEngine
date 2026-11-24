@@ -1,26 +1,26 @@
-"""English: This documentation describes the related engine component behavior.
-中文：插件系统。"""
+"""Plugin system. 插件系统。"""
+
 from __future__ import annotations
 
-from dataclasses import dataclass, field, asdict
-from typing import Callable, TYPE_CHECKING
+from collections.abc import Callable
+from dataclasses import asdict, dataclass, field
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
 	from axc_agent_engine.agent import Agent
 	from axc_agent_engine.core.dispatcher import AgentMessageDispatcher
 	from axc_agent_engine.llm.provider import LLMProvider
 	from axc_agent_engine.storage.artifact_store import ArtifactStore
-	from axc_agent_engine.storage.protocols import KVStore, MessagePersistence, SpanStore, MessageBus
+	from axc_agent_engine.storage.protocols import KVStore, MessageBus, MessagePersistence, SpanStore
 	from axc_agent_engine.tools.registry import ToolRegistry
 
 from axc_agent_engine.runtime.resources import ResourceRegistry
-from axc_agent_engine.plugins.config_schema import PluginConfigField, PluginConfigSchema
 
 
 @dataclass(frozen=True)
 class ModelInfo:
-	"""Model names visible to plugins at initialize/runtime.
-中文：此文档说明相关引擎组件的行为。"""
+	"""Model names visible to plugins at initialize/runtime. 插件在初始化和运行时可见的模型名称。"""
+
 	default: str = ""
 	fallback: str = ""
 	utility: str = ""
@@ -32,8 +32,8 @@ class ModelInfo:
 
 @dataclass(frozen=True)
 class AgentInfo:
-	"""Agent metadata visible to plugins at initialize/runtime.
-中文：此文档说明相关引擎组件的行为。"""
+	"""Agent metadata visible to plugins at initialize/runtime. 插件在初始化和运行时可见的 Agent 元数据。"""
+
 	name: str = ""
 	description: str = ""
 	workspace: str = ""
@@ -46,59 +46,58 @@ class AgentInfo:
 
 @dataclass
 class PluginContext:
-	"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-插件初始化阶段可访问的 Engine 上下文。"""
-	default_model: "LLMProvider | None" = None
-	fallback_model: "LLMProvider | None" = None
-	utility_model: "LLMProvider | None" = None
-	tool_registry: "ToolRegistry | None" = None
-	kv_store: "KVStore | None" = None
-	message_persistence: "MessagePersistence | None" = None
-	span_store: "SpanStore | None" = None
-	message_bus: "MessageBus | None" = None
-	artifact_store: "ArtifactStore | None" = None
+	"""Engine resources available during plugin initialization.
+	插件初始化阶段可访问的 Engine 上下文。"""
+
+	default_model: LLMProvider | None = None
+	fallback_model: LLMProvider | None = None
+	utility_model: LLMProvider | None = None
+	tool_registry: ToolRegistry | None = None
+	kv_store: KVStore | None = None
+	message_persistence: MessagePersistence | None = None
+	span_store: SpanStore | None = None
+	message_bus: MessageBus | None = None
+	artifact_store: ArtifactStore | None = None
 	resources: ResourceRegistry = field(default_factory=ResourceRegistry)
-	dispatcher: "AgentMessageDispatcher | None" = None
+	dispatcher: AgentMessageDispatcher | None = None
 	workspace: str = ""
-	agent_getter: Callable[[str], "Agent | None"] | None = None
-	agent_lister: Callable[[], "list[Agent]"] | None = None
+	agent_getter: Callable[[str], Agent | None] | None = None
+	agent_lister: Callable[[], list[Agent]] | None = None
 	model_info: ModelInfo = field(default_factory=ModelInfo)
 	agent_info: AgentInfo = field(default_factory=AgentInfo)
 
 	@property
 	def model_name(self) -> str:
-		"""Primary model name for plugin initialization-time decisions.
-中文：此文档说明相关引擎组件的行为。"""
+		"""Primary model name for plugin initialization-time decisions. 供插件初始化使用的主模型名称。"""
 		return self.model_info.default
 
 	@property
 	def agent_name(self) -> str:
-		"""Current agent name for plugin initialization-time decisions.
-中文：此文档说明相关引擎组件的行为。"""
+		"""Current agent name for plugin initialization-time decisions. 供插件初始化使用的当前 Agent 名称。"""
 		return self.agent_info.name
 
-	def get_agent(self, name: str) -> "Agent | None":
-		"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-按名称获取 Agent。"""
+	def get_agent(self, name: str) -> Agent | None:
+		"""Look up a loaded agent by name.
+		按名称获取 Agent。"""
 		if self.agent_getter:
 			return self.agent_getter(name)
 		return None
 
-	def list_agents(self) -> "list[Agent]":
-		"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-列出 engine 中所有已加载 Agent。"""
+	def list_agents(self) -> list[Agent]:
+		"""List agents loaded in the engine.
+		列出 engine 中所有已加载 Agent。"""
 		if self.agent_lister:
 			return self.agent_lister()
 		return []
 
 
-def model_info_from_models(default_model: object | None, fallback_model: object | None = None,
-							  utility_model: object | None = None, active_model: object | None = None) -> ModelInfo:
-	"""Build plugin-facing model metadata from provider-like objects.
-中文：此文档说明相关引擎组件的行为。"""
+def model_info_from_models(
+	default_model: object | None,
+	fallback_model: object | None = None,
+	utility_model: object | None = None,
+	active_model: object | None = None,
+) -> ModelInfo:
+	"""Build plugin-facing model metadata from provider-like objects. 从模型供应方对象提取插件可见的模型信息。"""
 	default = _provider_model_name(default_model)
 	fallback = _provider_model_name(fallback_model)
 	utility = _provider_model_name(utility_model)
@@ -118,10 +117,10 @@ def _provider_model_name(provider: object | None) -> str:
 	return str(model or "")
 
 
-def agent_info_from_runtime(name: str = "", description: str = "", workspace: str = "",
-							session_id: str = "", routing_mode: str = "") -> AgentInfo:
-	"""Build plugin-facing agent metadata.
-中文：此文档说明相关引擎组件的行为。"""
+def agent_info_from_runtime(
+	name: str = "", description: str = "", workspace: str = "", session_id: str = "", routing_mode: str = ""
+) -> AgentInfo:
+	"""Build plugin-facing agent metadata. 构建插件可见的 Agent 元数据。"""
 	return AgentInfo(
 		name=str(name or ""),
 		description=str(description or ""),
@@ -129,4 +128,3 @@ def agent_info_from_runtime(name: str = "", description: str = "", workspace: st
 		session_id=str(session_id or ""),
 		routing_mode=str(routing_mode or ""),
 	)
-

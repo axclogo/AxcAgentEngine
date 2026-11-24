@@ -1,58 +1,43 @@
-"""API 依赖：Engine 状态管理"""
-import logging
-import os
-from dataclasses import dataclass, field
-from typing import Any
+"""Resolve HTTP agent names against the host engine. 通过宿主引擎解析 HTTP Agent 名称。"""
 
-logger = logging.getLogger(__name__)
+from collections.abc import Iterator
+from dataclasses import dataclass
+from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+	from axc_agent_engine.agent import Agent
+	from axc_agent_engine.engine import AgentModels, Engine
 
 
 @dataclass
 class EngineState:
-	"""API 层持有的引擎状态"""
-	engine: Any  # Engine 实例
-	models: Any
+	engine: "Engine"
+	models: "AgentModels"
 	agents_dir: str = ""
-	_agents: dict[str, Any] = field(default_factory=dict)  # name -> Agent 缓存
 
-	def get_agent(self, agent_name: str) -> Any:
-		"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-获取或加载 Agent（按名称缓存）"""
-		if agent_name in self._agents:
-			return self._agents[agent_name]
-		yaml_path = self._resolve_yaml(agent_name)
-		if not yaml_path:
-			return None
-		template = self.engine.load_agent_template(yaml_path)
-		agent = template.instantiate(models=self.models)
-		self._agents[agent_name] = agent
-		return agent
+	def get_agent(self, agent_name: str) -> "Agent | None":
+		"""Resolve a loaded name or an allowed template stem. 按已加载的名称或允许的模板文件名查找 Agent。"""
+		agent = self.engine.get_agent(agent_name)
+		if agent is not None:
+			return agent
+		for path in self._templates():
+			if path.stem == agent_name:
+				template = self.engine.load_agent_template(str(path))
+				return self.engine.get_agent(template.config.name) or template.instantiate(models=self.models)
+		return None
 
 	def list_agents(self) -> list[dict[str, str]]:
-		"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-列出可用 Agent"""
-		result = []
-		for name, agent in self._agents.items():
-			result.append({"name": name, "description": getattr(agent, "description", "")})
-		if self.agents_dir and os.path.isdir(self.agents_dir):
-			for f in os.listdir(self.agents_dir):
-				if f.endswith((".yaml", ".yml")):
-					name = f.rsplit(".", 1)[0]
-					if name not in self._agents:
-						result.append({"name": name, "description": ""})
-		return result
+		agents = {agent.registered_name: agent.description for agent in self.engine.list_agents()}
+		for path in self._templates():
+			agents.setdefault(path.stem, "")
+		return [{"name": name, "description": description} for name, description in agents.items()]
 
-	def _resolve_yaml(self, agent_name: str) -> str | None:
-		"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-解析 Agent 名称为 YAML 路径"""
-		if os.path.exists(agent_name):
-			return agent_name
-		if self.agents_dir:
-			for ext in (".yaml", ".yml"):
-				path = os.path.join(self.agents_dir, agent_name + ext)
-				if os.path.exists(path):
-					return path
-		return None
+	def _templates(self) -> Iterator[Path]:
+		if not self.agents_dir:
+			return
+		root = Path(self.agents_dir).resolve()
+		if root.is_dir():
+			for path in sorted(root.iterdir()):
+				if path.suffix in {".yaml", ".yml"} and path.is_file() and path.resolve().is_relative_to(root):
+					yield path

@@ -40,11 +40,13 @@ class _Provider:
 
 @pytest.mark.asyncio
 async def test_sync_response_cache_hit_and_llm_options_are_forwarded(monkeypatch):
-	provider = _Provider(chat_result=LLMResponse(
-		message=LLMMessage(role="assistant", content="ok"),
-		usage=LLMUsage(input_tokens=3, output_tokens=2, cached_tokens=1),
-		raw={"cache_type": "prompt"},
-	))
+	provider = _Provider(
+		chat_result=LLMResponse(
+			message=LLMMessage(role="assistant", content="ok"),
+			usage=LLMUsage(input_tokens=3, output_tokens=2, cached_tokens=1),
+			raw={"cache_type": "prompt"},
+		)
+	)
 	ctx = ExecutionContext(config=ExecutionConfig(stream=False))
 	ctx.runtime.llm_options = {"temperature": 0.2, "unknown": "ignored"}
 	caller = LLMCaller(provider, None, PluginManager([]))
@@ -65,7 +67,9 @@ async def test_sync_provider_contract_error_is_not_hidden_by_fallback(monkeypatc
 	caller = LLMCaller(primary, fallback, PluginManager([]))
 
 	with pytest.raises(ProviderContractError):
-		await caller.call(ExecutionContext(config=ExecutionConfig(stream=False)), [{"role": "user", "content": "hi"}], None)
+		await caller.call(
+			ExecutionContext(config=ExecutionConfig(stream=False)), [{"role": "user", "content": "hi"}], None
+		)
 	assert fallback.chat_calls == []
 
 
@@ -82,7 +86,9 @@ async def test_retry_sleep_and_final_no_fallback_error(monkeypatch):
 	caller = LLMCaller(primary, None, PluginManager([]))
 
 	with pytest.raises(RetryableProviderError):
-		await caller.call(ExecutionContext(config=ExecutionConfig(stream=False)), [{"role": "user", "content": "hi"}], None)
+		await caller.call(
+			ExecutionContext(config=ExecutionConfig(stream=False)), [{"role": "user", "content": "hi"}], None
+		)
 	assert sleep_calls == [1.0]
 	assert len(primary.chat_calls) == 2
 
@@ -103,14 +109,16 @@ async def test_stream_partial_output_blocks_fallback_and_wraps_error():
 async def test_stream_sink_receives_live_events_and_usage_metadata():
 	queue = asyncio.Queue()
 	sink = QueueStreamSink(queue)
-	provider = _Provider(chunks=[
-		LLMStreamChunk(thinking_delta="think"),
-		LLMStreamChunk(content_delta="answer"),
-		LLMStreamChunk(
-			usage=LLMUsage(input_tokens=4, output_tokens=5, cached_tokens=2),
-			metadata={"tier": "cached"},
-		),
-	])
+	provider = _Provider(
+		chunks=[
+			LLMStreamChunk(thinking_delta="think"),
+			LLMStreamChunk(content_delta="answer"),
+			LLMStreamChunk(
+				usage=LLMUsage(input_tokens=4, output_tokens=5, cached_tokens=2),
+				metadata={"tier": "cached"},
+			),
+		]
+	)
 	ctx = ExecutionContext(config=ExecutionConfig(stream=True, thinking="always"))
 	caller = LLMCaller(provider, None, PluginManager([]))
 
@@ -136,12 +144,16 @@ async def test_stream_sink_receives_live_events_and_usage_metadata():
 async def test_stream_event_emitter_without_sink_stores_tool_preview_and_finishes_noop():
 	ctx = ExecutionContext()
 	emitter = StreamEventEmitter(ctx, None)
-	await emitter.on_delta("tool_args_delta", "x", {
-		"tool_name": "tool",
-		"tool_call_id": "tc",
-		"arguments_preview": "{\"a\"",
-		"index": "2",
-	})
+	await emitter.on_delta(
+		"tool_args_delta",
+		"x",
+		{
+			"tool_name": "tool",
+			"tool_call_id": "tc",
+			"arguments_preview": '{"a"',
+			"index": "2",
+		},
+	)
 	await emitter.finish_thinking("ignored")
 	assert emitter.preview_events[0].type == EventType.TOOL_ARGS_PREVIEW
 	assert emitter.preview_events[0].metadata["index"] == 2
@@ -149,10 +161,14 @@ async def test_stream_event_emitter_without_sink_stores_tool_preview_and_finishe
 
 def test_stream_usage_reporter_no_usage_is_noop():
 	ctx = ExecutionContext()
-	result = type("Result", (), {
-		"usage_input": 0,
-		"usage_output": 0,
-		"cached_tokens": 0,
-		"usage_metadata": {},
-	})()
+	result = type(
+		"Result",
+		(),
+		{
+			"usage_input": 0,
+			"usage_output": 0,
+			"cached_tokens": 0,
+			"usage_metadata": {},
+		},
+	)()
 	assert StreamUsageReporter().apply_usage(ctx, result) == []

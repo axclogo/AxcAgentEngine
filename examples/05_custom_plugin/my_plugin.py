@@ -1,45 +1,51 @@
-"""自定义插件示例 — 展示如何开发外部插件
-
-这个插件在每轮结束后打印统计信息，并提供一个自定义工具。
-用户可以参考此文件开发自己的插件。
-"""
-import json
-from typing import Any
+"""External statistics plugin. 外部统计插件示例。"""
 
 from axc_agent_engine import BasePlugin, ToolDefinition, ToolOutput
+from axc_agent_engine.core.context import ExecutionContext
+from axc_agent_engine.plugins.config_schema import config_field, config_schema
+from axc_agent_engine.plugins.context import PluginContext
 
 
 class StatsPlugin(BasePlugin):
-	"""统计插件 — 记录每轮的工具调用次数和 token 消耗"""
+	"""Report per-run usage. 记录每次运行的工具调用次数与用量。"""
+
 	name = "stats"
 	display_name = "统计插件"
 	priority = 50
 	version = "1.0.0"
 
-	def initialize(self, config: dict, ctx: Any) -> None:
-		self._total_tool_calls = 0
+	config_schema = config_schema(
+		name,
+		display_name,
+		"报告每次运行的统计信息。",
+		[config_field("greeting", "前缀", "string", "输出前缀。", default="📊")],
+	)
+
+	def initialize(self, config: dict, ctx: PluginContext) -> None:
+		super().initialize(config, ctx)
 		self._greeting = config.get("greeting", "📊")
 
 	def get_tools(self) -> list[ToolDefinition]:
-		return [ToolDefinition(
-			name="get_stats",
-			description="获取当前执行的统计信息",
-			parameters={"type": "object", "properties": {}},
-			is_read_only=True,
-			execute=self._tool_get_stats,
-		)]
+		return [
+			ToolDefinition(
+				name="get_stats",
+				description="获取当前执行的统计信息",
+				parameters={"type": "object", "properties": {}},
+				is_read_only=True,
+				execute=self._tool_get_stats,
+			)
+		]
 
-	async def on_round_end(self, ctx: Any, user_message: str,
-						   assistant_message: str, tool_calls: list) -> None:
-		self._total_tool_calls += len(tool_calls)
-		round_num = getattr(ctx.state, "current_round", 0)
-		usage = getattr(ctx.state, "usage", None)
-		total_tokens = getattr(usage, "total_tokens", 0) if usage else 0
-		print(f"{self._greeting} 第 {round_num} 轮: "
-			  f"工具调用 {len(tool_calls)} 次, "
-			  f"累计 tokens {total_tokens}")
+	async def on_round_end(
+		self, ctx: ExecutionContext, user_message: str, assistant_message: str, tool_calls: list
+	) -> None:
+		state = ctx.get_plugin_state(self.name)
+		state["total_tool_calls"] = state.get("total_tool_calls", 0) + len(tool_calls)
+		total_tokens = ctx.state.total_input_tokens + ctx.state.total_output_tokens
+		print(
+			f"{self._greeting} 第 {ctx.state.current_round} 轮: 工具调用 {len(tool_calls)} 次, 累计 tokens {total_tokens}"
+		)
 
 	async def _tool_get_stats(self, args: dict, context: dict) -> ToolOutput:
-		return ToolOutput.text(json.dumps({
-			"total_tool_calls": self._total_tool_calls,
-		}))
+		state = context["exec_ctx"].get_plugin_state(self.name)
+		return ToolOutput.json_output({"total_tool_calls": state.get("total_tool_calls", 0)})

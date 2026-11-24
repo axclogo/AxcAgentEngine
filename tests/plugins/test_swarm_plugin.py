@@ -1,16 +1,19 @@
 """Tests for swarm plugin fan-out governance."""
+
 from __future__ import annotations
 
 import asyncio
 from types import SimpleNamespace
 
-from axc_agent_engine.observability.audit import InMemoryAuditSink
+import pytest
+
 from axc_agent_engine.core.context import ExecutionContext, ExecutionServices
 from axc_agent_engine.core.dispatcher import AgentEnvelope
+from axc_agent_engine.observability.audit import InMemoryAuditSink
 from axc_agent_engine.plugins import PluginContext
+from axc_agent_engine.plugins.builtin.common import bounded_timeout
 from axc_agent_engine.plugins.builtin.swarm.plugin import (
 	SwarmPlugin,
-	_bounded_timeout,
 	_caller_name,
 	_gather_swarm,
 	_swarm_metadata,
@@ -58,10 +61,13 @@ async def test_swarm_dispatch_success_records_metadata_and_audit():
 	ctx.state.metadata.update({"agent_name": "caller", "session_id": "s1", "tenant_id": "t1"})
 
 	result = await plugin._tool_swarm_dispatch(
-		{"goal": "ship", "tasks": [
-			{"agent_name": "a", "description": "do a"},
-			{"agent_name": "b", "description": "do b"},
-		]},
+		{
+			"goal": "ship",
+			"tasks": [
+				{"agent_name": "a", "description": "do a"},
+				{"agent_name": "b", "description": "do b"},
+			],
+		},
 		{"agent_name": "caller", "session_id": "s1", "exec_ctx": ctx},
 	)
 
@@ -143,13 +149,19 @@ async def test_swarm_rejects_over_depth():
 
 async def test_swarm_fail_fast_cancels_remaining_tasks():
 	dispatcher = RecordingDispatcher({"bad": "ERROR: failed"})
-	plugin = _plugin([SimpleNamespace(name="bad", description=""), SimpleNamespace(name="ok", description="")], dispatcher)
+	plugin = _plugin(
+		[SimpleNamespace(name="bad", description=""), SimpleNamespace(name="ok", description="")], dispatcher
+	)
 
 	result = await plugin._tool_swarm_dispatch(
-		{"goal": "ship", "failure_policy": "fail_fast", "tasks": [
-			{"agent_name": "bad", "description": "bad", "priority": 0},
-			{"agent_name": "ok", "description": "ok", "priority": 1},
-		]},
+		{
+			"goal": "ship",
+			"failure_policy": "fail_fast",
+			"tasks": [
+				{"agent_name": "bad", "description": "bad", "priority": 0},
+				{"agent_name": "ok", "description": "ok", "priority": 1},
+			],
+		},
 		{"agent_name": "caller"},
 	)
 
@@ -183,17 +195,19 @@ def test_swarm_tool_has_capability_and_risk():
 	assert tool.risk_level == "moderate"
 
 
-def test_swarm_disabled_exposes_no_tools_and_validates_task_edges():
-	plugin = _plugin([SimpleNamespace(name="worker", description="")], RecordingDispatcher(), {"enabled": False})
-	assert plugin.get_tools() == []
+def test_swarm_validates_task_edges():
 	plugin = _plugin([SimpleNamespace(name="worker", description="")], RecordingDispatcher())
 	normalized, error = plugin._normalize_tasks(["bad"], {"worker": object()}, "caller")
 	assert normalized == []
 	assert error == "task must be object"
-	normalized, error = plugin._normalize_tasks([{"agent_name": "", "description": "d"}], {"worker": object()}, "caller")
+	normalized, error = plugin._normalize_tasks(
+		[{"agent_name": "", "description": "d"}], {"worker": object()}, "caller"
+	)
 	assert normalized == []
 	assert "不能为空" in error
-	normalized, error = plugin._normalize_tasks([{"agent_name": "missing", "description": "d"}], {"worker": object()}, "caller")
+	normalized, error = plugin._normalize_tasks(
+		[{"agent_name": "missing", "description": "d"}], {"worker": object()}, "caller"
+	)
 	assert normalized == []
 	assert "不存在" in error
 
@@ -208,13 +222,20 @@ def test_swarm_helpers_cover_metadata_caller_artifact_and_bounds():
 	metadata = _swarm_metadata({"tool_call_id": "tc"}, ctx, 2, "sw1", "goal")
 	assert metadata["trace_id"] == "r1"
 	assert metadata["parent_tool_call_id"] == "tc"
-	payload = _task_result({"task_id": "t", "index": 0, "agent_name": "a"}, "success", artifact=SimpleNamespace(
-		id="art", to_dict=lambda: {"id": "art"},
-	))
+	payload = _task_result(
+		{"task_id": "t", "index": 0, "agent_name": "a"},
+		"success",
+		artifact=SimpleNamespace(
+			id="art",
+			to_dict=lambda: {"id": "art"},
+		),
+	)
 	assert payload["artifact_id"] == "art"
-	assert _bounded_timeout("bad", 9) == 9
-	assert _bounded_timeout(0, 9) == 1.0
-	assert _bounded_timeout(99999, 9) == 3600.0
+	for value in ("bad", True, float("nan"), float("inf")):
+		with pytest.raises(ValueError, match="finite number"):
+			bounded_timeout(value)
+	assert bounded_timeout(0) == 1.0
+	assert bounded_timeout(99999) == 3600.0
 
 
 async def test_swarm_dispatch_errors_and_total_timeout(monkeypatch):
@@ -232,6 +253,7 @@ async def test_swarm_dispatch_errors_and_total_timeout(monkeypatch):
 		return []
 
 	import axc_agent_engine.plugins.builtin.swarm.plugin as swarm_module
+
 	monkeypatch.setattr(swarm_module, "_gather_swarm", slow_gather)
 	result = await plugin._tool_swarm_dispatch(
 		{"goal": "g", "timeout": 0.01, "tasks": [{"agent_name": "worker", "description": "d"}]},
@@ -261,3 +283,22 @@ async def test_swarm_dispatch_uses_task_timeout_without_outer_conflict():
 	)
 	assert not result.is_error
 	assert dispatcher.timeouts == [250]
+
+
+async def test_swarm_dispatcher_failure_records_audit():
+	class BrokenDispatcher:
+		async def request(self, *args, **kwargs):
+			raise OSError("transport closed")
+
+	agents = [SimpleNamespace(name="worker", description="")]
+	args = {"tasks": [{"agent_name": "worker", "description": "inspect"}]}
+	audit = InMemoryAuditSink()
+	ctx = {"exec_ctx": ExecutionContext(services=ExecutionServices(audit_sink=audit))}
+	reply = await _plugin(agents, BrokenDispatcher())._tool_swarm_dispatch(args, ctx)
+	assert reply.content["error"] == 1 and "transport closed" in reply.context_view()
+	(event,) = await audit.list_events()
+	assert event.error["code"] == "swarm.partial_failure"
+	assert (await _plugin(agents, None)._tool_swarm_dispatch(args, ctx)).is_error
+	assert (
+		await _plugin(agents, BrokenDispatcher(), {"denied_agents": ["worker"]})._tool_swarm_dispatch(args, ctx)
+	).is_error

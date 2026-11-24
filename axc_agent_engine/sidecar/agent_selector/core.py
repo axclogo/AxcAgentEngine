@@ -1,7 +1,6 @@
-"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-宿主侧 Agent 选择工具。
-Host-side Agent selection utilities."""
+"""Host-side Agent selection utilities.
+宿主侧 Agent 选择工具。"""
+
 from __future__ import annotations
 
 import re
@@ -9,17 +8,14 @@ from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any
 
-
 _WORD_RE = re.compile(r"[A-Za-z0-9_\-\u4e00-\u9fff]+")
 
 
 @dataclass(frozen=True)
 class AgentProfile:
-	"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-用于把任务路由到 Agent 的宿主侧静态画像。
-	Static host-side profile used for routing tasks to Agents.
-	"""
+	"""Static host-side profile used for routing tasks to Agents.
+	用于把任务路由到 Agent 的宿主侧静态画像。"""
+
 	name: str
 	description: str = ""
 	capabilities: set[str] = field(default_factory=set)
@@ -31,7 +27,7 @@ class AgentProfile:
 	metadata: dict[str, Any] = field(default_factory=dict)
 
 	@classmethod
-	def from_agent(cls, agent: Any, **overrides: Any) -> "AgentProfile":
+	def from_agent(cls, agent: Any, **overrides: Any) -> AgentProfile:
 		return cls(
 			name=str(getattr(agent, "name", "")),
 			description=str(getattr(agent, "description", "")),
@@ -47,11 +43,9 @@ class AgentProfile:
 
 @dataclass(frozen=True)
 class SelectionRequest:
-	"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-一次宿主侧路由决策请求。
-	One host-side routing decision request.
-	"""
+	"""One host-side routing decision request.
+	一次宿主侧路由决策请求。"""
+
 	task: str
 	required_capabilities: set[str] = field(default_factory=set)
 	preferred_tags: set[str] = field(default_factory=set)
@@ -64,11 +58,9 @@ class SelectionRequest:
 
 @dataclass(frozen=True)
 class AgentSelection:
-	"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-带评分的 Agent 候选项。
-	Scored Agent candidate.
-	"""
+	"""Scored Agent candidate.
+	带评分的 Agent 候选项。"""
+
 	agent: AgentProfile
 	score: float
 	reasons: list[str] = field(default_factory=list)
@@ -76,11 +68,8 @@ class AgentSelection:
 
 
 class AgentSelector:
-	"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-确定性的宿主侧 Agent 选择器。
-	Deterministic host-side Agent selector.
-	"""
+	"""Deterministic host-side Agent selector.
+	确定性的宿主侧 Agent 选择器。"""
 
 	def __init__(self, profiles: list[AgentProfile] | None = None) -> None:
 		self._profiles: dict[str, AgentProfile] = {profile.name: profile for profile in profiles or []}
@@ -108,7 +97,9 @@ class AgentSelector:
 
 	def _score(self, profile: AgentProfile, request: SelectionRequest) -> AgentSelection:
 		task_tokens = _tokens(request.task)
-		text_tokens = _tokens(" ".join([profile.name, profile.description, " ".join(profile.tags), " ".join(profile.capabilities)]))
+		text_tokens = _tokens(
+			" ".join([profile.name, profile.description, " ".join(profile.tags), " ".join(profile.capabilities)])
+		)
 		overlap = task_tokens & text_tokens
 		reasons: list[str] = []
 		score = 0.0

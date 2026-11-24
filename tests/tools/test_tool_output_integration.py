@@ -1,16 +1,19 @@
 """Integration tests for ToolOutput across the execution pipeline."""
+
 import asyncio
+
 import pytest
-from axc_agent_engine.tools.tool_output import ToolOutput, ArtifactRef
+
+from axc_agent_engine.core.context import ExecutionConfig, ExecutionContext, ExecutionState
+from axc_agent_engine.core.message_store import MessageStore
+from axc_agent_engine.core.plugin_manager import PluginManager
+from axc_agent_engine.core.schema import ToolDefinition
+from axc_agent_engine.storage.artifact_store import InMemoryArtifactStore
+from axc_agent_engine.tools.decorator import tool
 from axc_agent_engine.tools.executor import ToolResult, execute_tool
 from axc_agent_engine.tools.orchestrator import execute_tool_calls
 from axc_agent_engine.tools.registry import ToolRegistry
-from axc_agent_engine.tools.decorator import tool
-from axc_agent_engine.core.schema import ToolDefinition
-from axc_agent_engine.core.context import ExecutionContext, ExecutionConfig, ExecutionState
-from axc_agent_engine.core.message_store import MessageStore
-from axc_agent_engine.core.plugin_manager import PluginManager
-from axc_agent_engine.storage.artifact_store import InMemoryArtifactStore
+from axc_agent_engine.tools.tool_output import ArtifactRef, ToolOutput
 
 
 class TestToolOutputWithArtifactStore:
@@ -19,7 +22,8 @@ class TestToolOutputWithArtifactStore:
 	@pytest.mark.asyncio
 	async def test_file_read_then_artifact_read(self, tmp_path):
 		"""file_read stores large file as artifact, artifact_read retrieves it."""
-		from axc_agent_engine.plugins.builtin.builtin_tools.tool_definitions import _file_read, _artifact_read
+		from axc_agent_engine.plugins.builtin.builtin_tools.tool_definitions import _artifact_read, _file_read
+
 		f = tmp_path / "big.txt"
 		content = "line 0: data\n" + ("x" * (10 * 1024 * 1024 + 1))
 		f.write_text(content)
@@ -38,7 +42,8 @@ class TestToolOutputWithArtifactStore:
 	@pytest.mark.asyncio
 	async def test_shell_large_stdout_artifact(self):
 		"""shell stores large stdout as artifact."""
-		from axc_agent_engine.plugins.builtin.builtin_tools.tool_definitions import _shell, _artifact_read
+		from axc_agent_engine.plugins.builtin.builtin_tools.tool_definitions import _artifact_read, _shell
+
 		store = InMemoryArtifactStore()
 		ctx = {"artifact_store": store, "allow_unsafe_workspace": True}
 		result = await _shell({"command": "python3 -c \"print('x' * 5000)\""}, ctx)
@@ -52,7 +57,8 @@ class TestToolOutputWithArtifactStore:
 	@pytest.mark.asyncio
 	async def test_artifact_search_in_file(self, tmp_path):
 		"""Search within a stored file artifact."""
-		from axc_agent_engine.plugins.builtin.builtin_tools.tool_definitions import _file_read, _artifact_search
+		from axc_agent_engine.plugins.builtin.builtin_tools.tool_definitions import _artifact_search, _file_read
+
 		f = tmp_path / "searchable.txt"
 		f.write_text("important first line\n" + ("x" * (10 * 1024 * 1024 + 1)))
 		store = InMemoryArtifactStore()
@@ -71,16 +77,15 @@ class TestToolOutputNoLLMInDefaultPath:
 	@pytest.mark.asyncio
 	async def test_no_llm_call_for_large_result(self):
 		"""Large tool result is written directly; no LLM summarization is invoked."""
+
 		async def big_tool(args, ctx):
 			return ToolOutput.text("x" * 10000, summary="10000 chars of x")
 
 		reg = ToolRegistry()
-		reg.register(ToolDefinition(name="big", execute=big_tool,
-			parameters={"type": "object", "properties": {}}))
+		reg.register(ToolDefinition(name="big", execute=big_tool, parameters={"type": "object", "properties": {}}))
 		ctx = ExecutionContext(config=ExecutionConfig(), state=ExecutionState())
 		pm = PluginManager([])
-		results = await execute_tool_calls(
-			[{"name": "big", "arguments": {}, "id": "1"}], reg, pm.plugins, ctx)
+		results = await execute_tool_calls([{"name": "big", "arguments": {}, "id": "1"}], reg, pm.plugins, ctx)
 		assert results[0].success
 		assert results[0].context_view() == "x" * 10000
 
@@ -102,16 +107,17 @@ class TestToolOutputConcurrentExecution:
 			return ToolOutput.text("result_b")
 
 		reg = ToolRegistry()
-		reg.register(ToolDefinition(name="a", execute=tool_a, is_read_only=True,
-			parameters={"type": "object", "properties": {}}))
-		reg.register(ToolDefinition(name="b", execute=tool_b, is_read_only=True,
-			parameters={"type": "object", "properties": {}}))
+		reg.register(
+			ToolDefinition(name="a", execute=tool_a, is_read_only=True, parameters={"type": "object", "properties": {}})
+		)
+		reg.register(
+			ToolDefinition(name="b", execute=tool_b, is_read_only=True, parameters={"type": "object", "properties": {}})
+		)
 		ctx = ExecutionContext(config=ExecutionConfig(), state=ExecutionState())
 		pm = PluginManager([])
 		results = await execute_tool_calls(
-			[{"name": "a", "arguments": {}, "id": "1"},
-			 {"name": "b", "arguments": {}, "id": "2"}],
-			reg, pm.plugins, ctx)
+			[{"name": "a", "arguments": {}, "id": "1"}, {"name": "b", "arguments": {}, "id": "2"}], reg, pm.plugins, ctx
+		)
 		assert len(results) == 2
 		assert all(r.success for r in results)
 		assert results[0].output.content == "result_a"
@@ -126,16 +132,22 @@ class TestToolOutputConcurrentExecution:
 			return ToolOutput.error("failed")
 
 		reg = ToolRegistry()
-		reg.register(ToolDefinition(name="good", execute=good, is_read_only=True,
-			parameters={"type": "object", "properties": {}}))
-		reg.register(ToolDefinition(name="bad", execute=bad, is_read_only=True,
-			parameters={"type": "object", "properties": {}}))
+		reg.register(
+			ToolDefinition(
+				name="good", execute=good, is_read_only=True, parameters={"type": "object", "properties": {}}
+			)
+		)
+		reg.register(
+			ToolDefinition(name="bad", execute=bad, is_read_only=True, parameters={"type": "object", "properties": {}})
+		)
 		ctx = ExecutionContext(config=ExecutionConfig(), state=ExecutionState())
 		pm = PluginManager([])
 		results = await execute_tool_calls(
-			[{"name": "good", "arguments": {}, "id": "1"},
-			 {"name": "bad", "arguments": {}, "id": "2"}],
-			reg, pm.plugins, ctx)
+			[{"name": "good", "arguments": {}, "id": "1"}, {"name": "bad", "arguments": {}, "id": "2"}],
+			reg,
+			pm.plugins,
+			ctx,
+		)
 		assert results[0].success
 		assert not results[1].success
 
@@ -169,6 +181,7 @@ class TestToolOutputEdgeCases:
 	async def test_tool_returns_tooloutput_with_empty_content(self):
 		async def empty(args, ctx):
 			return ToolOutput.text("")
+
 		td = ToolDefinition(name="empty", execute=empty)
 		result = await execute_tool(td, {}, "id1")
 		assert result.success
@@ -178,6 +191,7 @@ class TestToolOutputEdgeCases:
 	async def test_tool_returns_tooloutput_with_none_metadata(self):
 		async def meta(args, ctx):
 			return ToolOutput(content="ok", content_type="text", metadata={"key": None})
+
 		td = ToolDefinition(name="meta", execute=meta)
 		result = await execute_tool(td, {}, "id1")
 		assert result.success
@@ -185,8 +199,9 @@ class TestToolOutputEdgeCases:
 	@pytest.mark.asyncio
 	async def test_tool_returns_tooloutput_with_many_artifacts(self):
 		async def multi(args, ctx):
-			refs = [ArtifactRef(id=f"a{i}", kind="text", size=i*100) for i in range(10)]
+			refs = [ArtifactRef(id=f"a{i}", kind="text", size=i * 100) for i in range(10)]
 			return ToolOutput(content="multi", content_type="text", artifacts=refs)
+
 		td = ToolDefinition(name="multi", execute=multi)
 		result = await execute_tool(td, {}, "id1")
 		assert result.success
@@ -197,6 +212,7 @@ class TestToolOutputEdgeCases:
 		async def nested(args, ctx):
 			data = {"level1": {"level2": {"level3": [1, 2, 3]}}}
 			return ToolOutput.json_output(data)
+
 		td = ToolDefinition(name="nested", execute=nested)
 		result = await execute_tool(td, {}, "id1")
 		assert result.success
@@ -206,6 +222,7 @@ class TestToolOutputEdgeCases:
 	async def test_tool_returns_tooloutput_with_unicode(self):
 		async def unicode_tool(args, ctx):
 			return ToolOutput.text("你好世界 🌍")
+
 		td = ToolDefinition(name="unicode", execute=unicode_tool)
 		result = await execute_tool(td, {}, "id1")
 		assert result.success
@@ -216,6 +233,7 @@ class TestToolOutputEdgeCases:
 		async def slow(args, ctx):
 			await asyncio.sleep(10)
 			return ToolOutput.text("never")
+
 		td = ToolDefinition(name="slow", execute=slow, timeout=0.05)
 		result = await execute_tool(td, {}, "id1")
 		assert not result.success
@@ -226,6 +244,7 @@ class TestToolOutputEdgeCases:
 	async def test_tool_exception_returns_proper_error(self):
 		async def crash(args, ctx):
 			raise RuntimeError("unexpected crash")
+
 		td = ToolDefinition(name="crash", execute=crash)
 		result = await execute_tool(td, {}, "id1")
 		assert not result.success
@@ -260,7 +279,7 @@ class TestDecoratorWithToolOutput:
 		ctx = ExecutionContext(config=ExecutionConfig(), state=ExecutionState())
 		pm = PluginManager([])
 		results = await execute_tool_calls(
-			[{"name": "orch_test", "arguments": {"msg": "hi"}, "id": "1"}],
-			reg, pm.plugins, ctx)
+			[{"name": "orch_test", "arguments": {"msg": "hi"}, "id": "1"}], reg, pm.plugins, ctx
+		)
 		assert results[0].success
 		assert "echo: hi" in results[0].context_view()

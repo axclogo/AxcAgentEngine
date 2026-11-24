@@ -1,4 +1,5 @@
 """Tests for sidecar orchestration service."""
+
 from __future__ import annotations
 
 import asyncio
@@ -154,13 +155,13 @@ async def test_orchestration_create_validates_required_boundaries():
 	with pytest.raises(ValueError, match="topic"):
 		await service.create_task(["alpha"], "group_chat", "")
 	with pytest.raises(ValueError, match="dispatcher"):
-		await OrchestrationTaskService(lambda name: None, lambda: [], None).create_task(["alpha"], "group_chat", "topic")
+		await OrchestrationTaskService(lambda name: None, list, None).create_task(["alpha"], "group_chat", "topic")
 
 
 async def test_orchestration_task_records_missing_agent_failure():
 	service = OrchestrationTaskService(
 		agent_getter=lambda name: None,
-		agent_lister=lambda: [],
+		agent_lister=list,
 		dispatcher=RecordingDispatcher(),
 	)
 

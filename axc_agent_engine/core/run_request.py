@@ -1,5 +1,5 @@
-"""Normalized per-run request objects.
-中文：此文档说明相关引擎组件的行为。"""
+"""Normalized per-run request objects. 规范化后的单次运行请求。"""
+
 from __future__ import annotations
 
 from copy import deepcopy
@@ -18,19 +18,19 @@ class RunOptions:
 	run_id: str = ""
 
 	@classmethod
-	def from_dict(cls, raw: dict | None) -> "RunOptions":
+	def from_dict(cls, raw: dict | None) -> RunOptions:
 		raw = dict_or_empty(raw, "run_options")
 		return cls.from_normalized(raw)
 
 	@classmethod
-	def from_normalized(cls, raw: dict[str, Any]) -> "RunOptions":
-		return cls(
-			stream_idle_timeout=_positive_int(raw.get("stream_idle_timeout")),
-			approval_queue=raw.get("approval_queue"),
-			response_queue=raw.get("response_queue"),
-			stream=raw.get("stream") if isinstance(raw.get("stream"), bool) else None,
-			run_id=context_run_id(raw),
-		)
+	def from_normalized(cls, raw: dict[str, Any]) -> RunOptions:
+		options = cls(**{**raw, "run_id": context_run_id(raw)})
+		if "stream" in raw and type(options.stream) is not bool:
+			raise TypeError("run_options.stream must be a boolean")
+		timeout = options.stream_idle_timeout
+		if "stream_idle_timeout" in raw and (type(timeout) is not int or timeout <= 0):
+			raise ValueError("run_options.stream_idle_timeout must be a positive integer")
+		return options
 
 
 @dataclass(frozen=True)
@@ -53,7 +53,7 @@ class RunRequest:
 		llm_options: dict | None = None,
 		run_options: dict | None = None,
 		metadata: dict | None = None,
-	) -> "RunRequest":
+	) -> RunRequest:
 		request_run_options, request_metadata = normalize_run_context(run_options, metadata)
 		request_llm_options = dict_or_empty(llm_options, "llm_options")
 		options = RunOptions.from_normalized(request_run_options)
@@ -66,11 +66,3 @@ class RunRequest:
 			options=options,
 			metadata=deepcopy(request_metadata),
 		)
-
-
-def _positive_int(value: Any) -> int | None:
-	try:
-		parsed = int(value)
-	except (TypeError, ValueError):
-		return None
-	return parsed if parsed > 0 else None

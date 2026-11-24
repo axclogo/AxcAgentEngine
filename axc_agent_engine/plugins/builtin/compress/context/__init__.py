@@ -1,3 +1,1 @@
-"""Context management layers used by the compress plugin.
-中文：此文档说明相关引擎组件的行为。"""
-
+"""Context management layers used by the compress plugin. 压缩插件的上下文管理层。"""

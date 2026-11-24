@@ -3,14 +3,11 @@ import pytest
 from axc_agent_engine.plugins import PluginContext
 from axc_agent_engine.plugins.builtin.knowledge.plugin import (
 	KnowledgePlugin,
-	_filter_from_config,
-	_highlights,
 	_merge_filters,
 	_normalize_document,
 	_normalize_response,
 	_normalize_result,
 	_normalize_trace,
-	_tokenize,
 )
 from axc_agent_engine.plugins.builtin.knowledge.support import (
 	KnowledgeDocument,
@@ -20,6 +17,7 @@ from axc_agent_engine.plugins.builtin.knowledge.support import (
 	RetrievalResult,
 	RetrievalTrace,
 )
+from axc_agent_engine.plugins.builtin.knowledge.support.retrieval import normalize_filter
 
 
 @pytest.mark.asyncio
@@ -28,19 +26,25 @@ async def test_knowledge_plugin_search_tool_supports_filters_trace_and_citations
 	tenant_a.write_text("# Help\n\nVector retrieval setup for employees.", encoding="utf-8")
 
 	plugin = KnowledgePlugin()
-	plugin.initialize({
-		"sources": ["tenant_a.md"],
-		"namespace": "tenant-a",
-		"metadata": {"acl_tags": ["employee"]},
-	}, PluginContext(workspace=str(tmp_path)))
+	plugin.initialize(
+		{
+			"sources": ["tenant_a.md"],
+			"namespace": "tenant-a",
+			"metadata": {"acl_tags": ["employee"]},
+		},
+		PluginContext(workspace=str(tmp_path)),
+	)
 
-	output = await plugin._tool_knowledge_search({
-		"query": "vector retrieval employees",
-		"top_k": 2,
-		"namespace": "tenant-a",
-		"allowed_acl_tags": ["employee"],
-		"include_trace": True,
-	}, {})
+	output = await plugin._tool_knowledge_search(
+		{
+			"query": "vector retrieval employees",
+			"top_k": 2,
+			"namespace": "tenant-a",
+			"allowed_acl_tags": ["employee"],
+			"include_trace": True,
+		},
+		{},
+	)
 
 	assert output.is_error is False
 	results = output.content["results"]
@@ -85,18 +89,23 @@ class TraceIndex:
 
 @pytest.mark.asyncio
 async def test_knowledge_mounted_index_normalizes_dict_trace_and_merges_filters():
-	index = MountedIndex({
-		"data": [
-			{"id": "low", "text": "drop", "score": 0.1, "source": "s"},
-			{"id": "high", "content": "keep", "relevance": 0.9, "metadata": {"source": "m"}},
-		],
-		"trace": {"query": "rewritten", "candidate_count": 2, "returned_count": 1, "reranked": True},
-	})
+	index = MountedIndex(
+		{
+			"data": [
+				{"id": "low", "text": "drop", "score": 0.1, "source": "s"},
+				{"id": "high", "content": "keep", "relevance": 0.9, "metadata": {"source": "m"}},
+			],
+			"trace": {"query": "rewritten", "candidate_count": 2, "returned_count": 1, "reranked": True},
+		}
+	)
 	plugin = KnowledgePlugin()
-	plugin.initialize({
-		"namespace": "base",
-		"filters": {"metadata": {"tenant": "t1"}},
-	}, PluginContext(resources={"knowledge.index": index}))
+	plugin.initialize(
+		{
+			"namespace": "base",
+			"filters": {"metadata": {"tenant": "t1"}},
+		},
+		PluginContext(resources={"knowledge.index": index}),
+	)
 
 	payload = await plugin._hybrid_search_payload(
 		"query",
@@ -144,10 +153,15 @@ async def test_knowledge_fail_fast_resource_contract_edges(tmp_path):
 		await plugin._hybrid_search_payload("x")
 
 	vector = KnowledgePlugin()
-	vector.initialize({}, PluginContext(resources={
-		"knowledge.embedding": Embedding(),
-		"knowledge.vector_store": EmptyVectorStore(),
-	}))
+	vector.initialize(
+		{},
+		PluginContext(
+			resources={
+				"knowledge.embedding": Embedding(),
+				"knowledge.vector_store": EmptyVectorStore(),
+			}
+		),
+	)
 	with pytest.raises(RuntimeError, match="returned None"):
 		await vector._hybrid_search_payload("x")
 
@@ -221,16 +235,26 @@ async def test_knowledge_vector_store_requires_embedding_and_searches_when_mount
 
 	store = VectorStore()
 	plugin = KnowledgePlugin()
-	plugin.initialize({}, PluginContext(resources={
-		"knowledge.vector_store": store,
-		"knowledge.embedding": Embedding([[0.1, 0.2]]),
-	}))
+	plugin.initialize(
+		{},
+		PluginContext(
+			resources={
+				"knowledge.vector_store": store,
+				"knowledge.embedding": Embedding([[0.1, 0.2]]),
+			}
+		),
+	)
 	payload = await plugin._hybrid_search_payload("q", candidate_k=3, include_trace=True)
 	empty = KnowledgePlugin()
-	empty.initialize({}, PluginContext(resources={
-		"knowledge.vector_store": store,
-		"knowledge.embedding": Embedding([]),
-	}))
+	empty.initialize(
+		{},
+		PluginContext(
+			resources={
+				"knowledge.vector_store": store,
+				"knowledge.embedding": Embedding([]),
+			}
+		),
+	)
 
 	assert payload["results"][0]["text"] == "vector hit"
 	assert store.calls == [([0.1, 0.2], 3)]
@@ -238,7 +262,7 @@ async def test_knowledge_vector_store_requires_embedding_and_searches_when_mount
 		await empty._hybrid_search_payload("q")
 
 
-def test_knowledge_normalizers_filters_tokenize_and_highlights():
+def test_knowledge_normalizers_and_filters():
 	request = KnowledgeSearchRequest(query="alpha", top_k=2, include_trace=True)
 
 	response = _normalize_response([KnowledgeDocument(id="d", text="doc", source="s")], request, "idx")
@@ -261,14 +285,44 @@ def test_knowledge_normalizers_filters_tokenize_and_highlights():
 	assert _normalize_trace(None, request, 3).returned_count == 2
 	assert _normalize_trace({}, KnowledgeSearchRequest(query="q", include_trace=False), 1) is None
 
-	base = _filter_from_config({"namespace": "n", "acl_tags": ["a"], "k": "v"})
+	base = normalize_filter({"namespace": "n", "acl_tags": ["a"], "k": "v"})
 	merged = _merge_filters(base, KnowledgeFilter(source="s", metadata={"k": "override"}))
 	assert merged.namespace == "n"
 	assert merged.source == "s"
 	assert merged.allowed_acl_tags == ["a"]
 	assert merged.metadata == {"k": "override"}
-	assert _filter_from_config(KnowledgeFilter(), namespace="tenant").namespace == "tenant"
-	assert _filter_from_config("bad", namespace="tenant").namespace == "tenant"
+	assert normalize_filter(KnowledgeFilter(), namespace="tenant").namespace == "tenant"
+	with pytest.raises(TypeError, match="filters must be an object"):
+		normalize_filter("bad", namespace="tenant")
 
-	assert "向量" in _tokenize("向量检索 abc_1")
-	assert _highlights("alpha beta", "xx alpha yy beta zz", max_items=1) == ["xx alpha yy beta zz"]
+
+@pytest.mark.parametrize(
+	("raw", "field"),
+	[
+		({"results": [{"text": "ok", "highlights": "one,two"}]}, "highlights"),
+		({"results": [], "trace": {"rewritten_queries": "first,second"}}, "rewritten_queries"),
+	],
+)
+async def test_mounted_index_preserves_array_contract(raw, field):
+	plugin = KnowledgePlugin()
+	plugin.initialize({}, PluginContext(resources={"knowledge.index": MountedIndex(raw)}))
+	with pytest.raises(TypeError, match=field):
+		await plugin.get_tools()[0].execute({"query": "alpha", "include_trace": True}, {})
+
+
+async def test_empty_knowledge_results_and_reranker_selection(tmp_path):
+	from unittest.mock import AsyncMock
+
+	from axc_agent_engine.core.context import ExecutionContext
+
+	(tmp_path / "doc.md").write_text("alpha guide")
+	ctx = PluginContext(workspace=str(tmp_path), utility_model=AsyncMock())
+	ctx.utility_model.ask.return_value = "[]"
+	plugin = KnowledgePlugin()
+	plugin.initialize({"sources": ["doc.md"], "query_rewrite": {"enabled": True}, "rerank": {"mode": "llm"}}, ctx)
+	assert plugin.inject_context(ExecutionContext()) == ""
+	assert plugin.inject_context(ExecutionContext(), "absent") == ""
+	reply = await plugin.get_tools()[0].execute({"query": "absent"}, {})
+	assert reply.content["results"] == [] and "Results: none" in reply.context_view()
+	with pytest.raises(RuntimeError, match="rerank"):
+		plugin.initialize({"sources": ["doc.md"], "rerank": {"mode": "llm"}}, PluginContext(workspace=str(tmp_path)))

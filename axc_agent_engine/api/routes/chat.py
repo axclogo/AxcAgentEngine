@@ -1,5 +1,5 @@
-"""OpenAI Chat Completions compatible API subset.
-中文：此文档说明相关引擎组件的行为。"""
+"""OpenAI Chat Completions compatible API subset. 实现 OpenAI 聊天补全接口的子集。"""
+
 from __future__ import annotations
 
 import json
@@ -27,6 +27,7 @@ class ChatMessage(BaseModel):
 
 class ChatRequest(BaseModel):
 	"""OpenAI Chat Completions compatible 请求。"""
+
 	model_config = ConfigDict(extra="allow")
 
 	model: str = ""
@@ -49,34 +50,37 @@ class ChatRequest(BaseModel):
 	stream_options: dict[str, Any] | None = None
 
 
-SUPPORTED_CHAT_PARAMETERS = frozenset({
-	"model",
-	"agent",
-	"messages",
-	"stream",
-	"session_id",
-	"temperature",
-	"max_tokens",
-	"top_p",
-	"stop",
-	"presence_penalty",
-	"frequency_penalty",
-	"seed",
-	"user",
-	"response_format",
-	"stream_options",
-})
-UNSUPPORTED_CHAT_PARAMETERS = frozenset({
-	"n",
-	"tools",
-	"tool_choice",
-})
+SUPPORTED_CHAT_PARAMETERS = frozenset(
+	{
+		"model",
+		"agent",
+		"messages",
+		"stream",
+		"session_id",
+		"temperature",
+		"max_tokens",
+		"top_p",
+		"stop",
+		"presence_penalty",
+		"frequency_penalty",
+		"seed",
+		"user",
+		"response_format",
+		"stream_options",
+	}
+)
+UNSUPPORTED_CHAT_PARAMETERS = frozenset(
+	{
+		"n",
+		"tools",
+		"tool_choice",
+	}
+)
 SUPPORTED_STREAM_OPTIONS = frozenset({"include_usage"})
 
 
 class ChatOptionResolver:
-	"""Extracts provider-facing options from the OpenAI-compatible request.
-中文：此文档说明相关引擎组件的行为。"""
+	"""Extracts provider-facing options from the OpenAI-compatible request. 从兼容请求中提取模型供应方参数。"""
 
 	_OPTION_FIELDS = (
 		"temperature",
@@ -91,11 +95,7 @@ class ChatOptionResolver:
 	)
 
 	def llm_options(self, request: ChatRequest) -> dict[str, Any]:
-		return {
-			field: value
-			for field in self._OPTION_FIELDS
-			if (value := getattr(request, field)) is not None
-		}
+		return {field: value for field in self._OPTION_FIELDS if (value := getattr(request, field)) is not None}
 
 	def agent_name(self, request: ChatRequest) -> str:
 		return request.agent or request.model
@@ -105,8 +105,7 @@ class ChatOptionResolver:
 
 
 class ChatSubsetValidator:
-	"""Owns the explicit compatibility boundary for /v1/chat/completions.
-中文：此文档说明相关引擎组件的行为。"""
+	"""Owns the explicit compatibility boundary for /v1/chat/completions. 界定聊天补全接口支持的请求和响应格式。"""
 
 	def validate(self, request: ChatRequest) -> JSONResponse | None:
 		extra_keys = sorted((request.model_extra or {}).keys())
@@ -128,8 +127,7 @@ class ChatSubsetValidator:
 
 
 class ChatResponsePresenter:
-	"""Formats OpenAI-compatible response envelopes and SSE chunks.
-中文：此文档说明相关引擎组件的行为。"""
+	"""Formats OpenAI-compatible response envelopes and SSE chunks. 封装 OpenAI 兼容响应和 SSE 分块。"""
 
 	def completion(
 		self,
@@ -143,11 +141,13 @@ class ChatResponsePresenter:
 			"object": "chat.completion",
 			"created": int(time.time()),
 			"model": _CHAT_OPTIONS.agent_name(request),
-			"choices": [{
-				"index": 0,
-				"message": {"role": "assistant", "content": content},
-				"finish_reason": finish_reason,
-			}],
+			"choices": [
+				{
+					"index": 0,
+					"message": {"role": "assistant", "content": content},
+					"finish_reason": finish_reason,
+				}
+			],
 			"usage": usage,
 		}
 
@@ -192,9 +192,8 @@ def _error_response(
 	error_type: str = "invalid_request_error",
 	code: str | None = None,
 ) -> JSONResponse:
-	"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-返回 OpenAI-style error object。"""
+	"""Return an OpenAI-style error object.
+	返回 OpenAI-style error object。"""
 	body: dict[str, Any] = {"error": {"message": message, "type": error_type, "param": None}}
 	if code:
 		body["error"]["code"] = code
@@ -203,19 +202,20 @@ def _error_response(
 
 def _unsupported_parameter_response(param: str, detail: str = "") -> JSONResponse:
 	message = detail or f"Unsupported parameter: {param}"
-	body = {"error": {
-		"message": message,
-		"type": "invalid_request_error",
-		"param": param,
-		"code": "unsupported_parameter",
-	}}
+	body = {
+		"error": {
+			"message": message,
+			"type": "invalid_request_error",
+			"param": param,
+			"code": "unsupported_parameter",
+		}
+	}
 	return JSONResponse(status_code=400, content=body)
 
 
 def _capabilities() -> dict[str, Any]:
-	"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-返回当前 API 兼容子集，便于 SDK/调用方做能力探测。"""
+	"""Report supported API capabilities.
+	返回当前 API 兼容子集，便于 SDK/调用方做能力探测。"""
 	return {
 		"object": "axc.api_capabilities",
 		"openai_compatibility": {
@@ -284,25 +284,28 @@ async def _sync_response(
 	request: ChatRequest,
 	llm_options: dict,
 ) -> dict | JSONResponse:
-	"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-非流式响应：消费事件流并收集 usage。"""
+	"""Collect usage and combine stream events into one response.
+	非流式响应：消费事件流并收集 usage。"""
 	content = ""
-	usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+	usage = _usage({})
 	finish_reason = "stop"
 	async for event in agent.stream_with_messages(messages, session_id=request.session_id, llm_options=llm_options):
 		if event.type == EventType.COST_UPDATE:
-			input_tokens = event.metadata.get("input_tokens", 0)
-			output_tokens = event.metadata.get("output_tokens", 0)
-			usage = _usage(input_tokens, output_tokens)
+			usage = _usage(event.metadata)
 		elif event.type == EventType.DONE:
 			content = event.content
+			if "usage" in event.metadata:
+				usage = _usage(event.metadata["usage"])
+		elif event.type == EventType.CANCELLED:
+			return _error_response(499, event.content, "cancelled_error", "run_cancelled")
 		elif event.type == EventType.ERROR:
 			return _error_response(500, event.content, "server_error")
 	return _CHAT_PRESENTER.completion(request, content, usage, finish_reason)
 
 
-def _usage(input_tokens: int, output_tokens: int) -> dict[str, int]:
+def _usage(counters: dict) -> dict[str, int]:
+	input_tokens = counters.get("input_tokens", 0)
+	output_tokens = counters.get("output_tokens", 0)
 	return {
 		"prompt_tokens": input_tokens,
 		"completion_tokens": output_tokens,
@@ -314,51 +317,92 @@ async def _stream_response(agent: Any, messages: list[dict], request: ChatReques
 	"""SSE 流式响应，输出 OpenAI-compatible chunks。"""
 	resp_id = f"chatcmpl-{uuid.uuid4().hex[:12]}"
 	model_name = _CHAT_OPTIONS.agent_name(request)
-	last_usage: dict[str, int] = {}
+	last_usage = _usage({})
+	streamed: list[str] = []
 	include_usage = _CHAT_OPTIONS.stream_include_usage(request)
-	#English: Bilingual note. 中文：首个 chunk 发送 role
-	yield _CHAT_PRESENTER.sse(_CHAT_PRESENTER.chunk(resp_id, model_name, [{"index": 0, "delta": {"role": "assistant"}, "finish_reason": None}]))
+	# Include the role in the first chunk. 中文：首个 chunk 发送 role
+	yield _CHAT_PRESENTER.sse(
+		_CHAT_PRESENTER.chunk(
+			resp_id, model_name, [{"index": 0, "delta": {"role": "assistant"}, "finish_reason": None}]
+		)
+	)
 	async for event in agent.stream_with_messages(messages, session_id=request.session_id, llm_options=llm_options):
 		if event.type == EventType.COST_UPDATE:
-			last_usage = _usage(
-				event.metadata.get("input_tokens", 0),
-				event.metadata.get("output_tokens", 0),
-			)
+			last_usage = _usage(event.metadata)
+		elif event.type in {EventType.STREAM_START, EventType.PLAN_CREATED}:
+			streamed.clear()
 		elif event.type == EventType.STREAM_DELTA:
-			yield _CHAT_PRESENTER.sse(_CHAT_PRESENTER.chunk(
-				resp_id, model_name,
-				[{"index": 0, "delta": {"content": event.content}, "finish_reason": None}],
-			))
+			streamed.append(event.content)
+			yield _CHAT_PRESENTER.sse(
+				_CHAT_PRESENTER.chunk(
+					resp_id,
+					model_name,
+					[{"index": 0, "delta": {"content": event.content}, "finish_reason": None}],
+				)
+			)
 		elif event.type == EventType.TOOL_CALL:
-			yield _CHAT_PRESENTER.sse(_CHAT_PRESENTER.chunk(resp_id, model_name, [{
-				"index": 0,
-				"delta": {"tool_calls": [_CHAT_PRESENTER.tool_call_delta(
-					index=0,
-					call_id=event.tool_call_id,
-					name=event.tool_name,
-					arguments=json.dumps(event.arguments, ensure_ascii=False),
-				)]},
-				"finish_reason": None,
-			}]))
+			yield _CHAT_PRESENTER.sse(
+				_CHAT_PRESENTER.chunk(
+					resp_id,
+					model_name,
+					[
+						{
+							"index": 0,
+							"delta": {
+								"tool_calls": [
+									_CHAT_PRESENTER.tool_call_delta(
+										index=0,
+										call_id=event.tool_call_id,
+										name=event.tool_name,
+										arguments=json.dumps(event.arguments, ensure_ascii=False),
+									)
+								]
+							},
+							"finish_reason": None,
+						}
+					],
+				)
+			)
 		elif event.type == EventType.TOOL_ARGS_PREVIEW:
-			yield _CHAT_PRESENTER.sse(_CHAT_PRESENTER.chunk(resp_id, model_name, [{
-				"index": 0,
-				"delta": {"tool_calls": [_CHAT_PRESENTER.tool_call_delta(
-					index=event.metadata.get("index", 0),
-					call_id=event.tool_call_id,
-					name=event.tool_name,
-					arguments=event.content,
-				)]},
-				"finish_reason": None,
-			}]))
+			yield _CHAT_PRESENTER.sse(
+				_CHAT_PRESENTER.chunk(
+					resp_id,
+					model_name,
+					[
+						{
+							"index": 0,
+							"delta": {
+								"tool_calls": [
+									_CHAT_PRESENTER.tool_call_delta(
+										index=event.metadata.get("index", 0),
+										call_id=event.tool_call_id,
+										name=event.tool_name,
+										arguments=event.content,
+									)
+								]
+							},
+							"finish_reason": None,
+						}
+					],
+				)
+			)
 		elif event.type == EventType.DONE:
-			# English: Agent executes tools internally; 中文：Agent 在内部执行工具。
-			# English: DONE is a completed answer, not a client tool request; 中文：DONE 表示完整回答，而非客户端工具请求。
-			yield _CHAT_PRESENTER.sse(_CHAT_PRESENTER.chunk(resp_id, model_name, [{"index": 0, "delta": {}, "finish_reason": "stop"}]))
-			if include_usage:
-				yield _CHAT_PRESENTER.sse(_CHAT_PRESENTER.chunk(resp_id, model_name, [], usage=last_usage or None))
-		elif event.type == EventType.ERROR:
+			remaining = event.content.removeprefix("".join(streamed))
+			if remaining:
+				yield _CHAT_PRESENTER.sse(
+					_CHAT_PRESENTER.chunk(
+						resp_id, model_name, [{"index": 0, "delta": {"content": remaining}, "finish_reason": None}]
+					)
+				)
+			yield _CHAT_PRESENTER.sse(
+				_CHAT_PRESENTER.chunk(resp_id, model_name, [{"index": 0, "delta": {}, "finish_reason": "stop"}])
+			)
+		elif event.type in {EventType.ERROR, EventType.CANCELLED}:
 			chunk = _CHAT_PRESENTER.chunk(resp_id, model_name, [{"index": 0, "delta": {}, "finish_reason": "error"}])
-			chunk["axc_event"] = {"type": "error", "data": {"content": event.content}}
+			chunk["axc_event"] = {"type": event.type.value, "data": {"content": event.content}}
 			yield _CHAT_PRESENTER.sse(chunk)
+		if include_usage and event.type in {EventType.DONE, EventType.CANCELLED}:
+			if "usage" in event.metadata:
+				last_usage = _usage(event.metadata["usage"])
+			yield _CHAT_PRESENTER.sse(_CHAT_PRESENTER.chunk(resp_id, model_name, [], usage=last_usage))
 	yield "data: [DONE]\n\n"

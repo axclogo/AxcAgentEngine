@@ -1,15 +1,16 @@
-"""Reusable ReAct turn/loop services.
-中文：此文档说明相关引擎组件的行为。"""
+"""Reusable ReAct turn/loop services. ReAct 单轮执行与循环服务。"""
+
 from __future__ import annotations
 
 import asyncio
+import uuid
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from axc_agent_engine.core.errors import ProviderError
 from axc_agent_engine.core.events import Event, EventType
-from axc_agent_engine.runtime.tasks import cancel_and_wait
+from axc_agent_engine.runtime.tasks import cancel_and_wait, managed_stream
 from axc_agent_engine.tools.orchestrator import execute_tool_calls
 from axc_agent_engine.tools.utils import parse_tool_calls
 
@@ -39,18 +40,18 @@ class ReActTurnResult:
 	parsed_calls: list[dict] = field(default_factory=list)
 	has_tool_calls: bool = False
 	failed: bool = False
+	user_message: str = ""
 
 
 class ToolCallFlow:
-	"""Parse, execute, store, and optionally emit tool call results for one ReAct round.
-中文：此文档说明相关引擎组件的行为。"""
+	"""Parse, execute, store, and optionally emit tool call results for one ReAct round. 解析并执行本轮工具调用，记录结果并按需发送事件。"""
 
 	def __init__(
 		self,
-		registry: "ToolRegistry",
-		plugin_manager: "PluginManager",
-		ctx: "ExecutionContext",
-		messages: "MessageStore",
+		registry: ToolRegistry,
+		plugin_manager: PluginManager,
+		ctx: ExecutionContext,
+		messages: MessageStore,
 	) -> None:
 		self._registry = registry
 		self._pm = plugin_manager
@@ -94,16 +95,15 @@ class ToolCallFlow:
 
 
 class ReActTurnRunner:
-	"""Run a single ReAct turn against a message store and execution context.
-中文：此文档说明相关引擎组件的行为。"""
+	"""Run a single ReAct turn against a message store and execution context. 在指定历史和执行上下文中运行一轮 ReAct。"""
 
 	def __init__(
 		self,
-		llm_caller: "LLMCaller",
-		registry: "ToolRegistry",
-		plugin_manager: "PluginManager",
-		ctx: "ExecutionContext",
-		messages: "MessageStore",
+		llm_caller: LLMCaller,
+		registry: ToolRegistry,
+		plugin_manager: PluginManager,
+		ctx: ExecutionContext,
+		messages: MessageStore,
 	) -> None:
 		self._llm = llm_caller
 		self._registry = registry
@@ -120,16 +120,19 @@ class ReActTurnRunner:
 		event_filter: EventFilter | None = None,
 		event_sink: EventSink | None = None,
 	) -> AsyncIterator[Event | ReActTurnResult]:
+		if stream_llm_call and self._ctx.runtime.inbox and (pending := await self._ctx.runtime.inbox.take()):
+			user_message = "\n".join(pending)
 		messages = self._pm.transform_messages(self._messages.get_all(), self._ctx, user_message)
 		tools_schema = self._registry.get_openai_schemas() if self._registry.count > 0 else None
 		if self._ctx.config.stream and stream_llm_call:
 			message, events = None, None
-			async for ev in stream_llm_call(messages, tools_schema):
-				if isinstance(ev, tuple):
-					message, events = ev
-				elif event_filter is None or event_filter(ev):
-					_emit_event(ev, event_sink)
-					yield ev
+			async with managed_stream(stream_llm_call(messages, tools_schema)) as stream:
+				async for ev in stream:
+					if isinstance(ev, tuple):
+						message, events = ev
+					elif event_filter is None or event_filter(ev):
+						_emit_event(ev, event_sink)
+						yield ev
 			if message is None:
 				raise ProviderError("LLM call returned no result")
 		else:
@@ -145,25 +148,30 @@ class ReActTurnRunner:
 			if event_filter is None or event_filter(ev):
 				_emit_event(ev, event_sink)
 				yield ev
-		self._messages.append(message)
 		tool_calls = message.get("tool_calls", [])
+		for call in tool_calls:
+			if not call.get("id"):
+				call["id"] = uuid.uuid4().hex
+		self._messages.append(message)
 		content = message.get("content", "") or ""
 		if not tool_calls:
-			yield ReActTurnResult(message=message, content=content)
+			yield ReActTurnResult(message=message, content=content, user_message=user_message)
 			return
-		tool_flow_result = None
-		async for item in self._run_tool_flow(tool_calls, emit_tool_events, event_filter, event_sink):
-			if isinstance(item, ToolFlowResult):
-				tool_flow_result = item
-			else:
-				yield item
-		if tool_flow_result is None:
-			raise ProviderError("Tool flow returned no result")
+		tool_flow_result: ToolFlowResult
+		async with managed_stream(
+			self._run_tool_flow(tool_calls, emit_tool_events, event_filter, event_sink)
+		) as stream:
+			async for item in stream:
+				if isinstance(item, ToolFlowResult):
+					tool_flow_result = item
+				else:
+					yield item
 		yield ReActTurnResult(
 			message=message,
 			content=content,
 			parsed_calls=tool_flow_result.parsed_calls,
 			has_tool_calls=True,
+			user_message=user_message,
 		)
 
 	async def _run_tool_flow(
@@ -183,14 +191,10 @@ class ReActTurnRunner:
 		async def run_flow() -> ToolFlowResult:
 			try:
 				return await self._tool_flow.run(tool_calls, emit_events=emit_tool_events, event_sink=live_sink)
-			except BaseException as e:
-				flow_error["error"] = e
-				raise
 			finally:
 				queue.put_nowait(None)
 
 		previous_sink = self._ctx.runtime.event_sink
-		flow_error: dict[str, BaseException] = {}
 		self._ctx.runtime.event_sink = live_sink
 		task = asyncio.create_task(run_flow())
 		try:
@@ -199,8 +203,6 @@ class ReActTurnRunner:
 				if event is None:
 					break
 				yield event
-			if "error" in flow_error:
-				raise flow_error["error"]
 			yield await task
 		finally:
 			self._ctx.runtime.event_sink = previous_sink

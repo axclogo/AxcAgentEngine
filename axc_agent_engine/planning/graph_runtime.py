@@ -1,13 +1,15 @@
-"""pydantic-graph runtime for Plan-Observe-Replan execution.
-中文：此文档说明相关引擎组件的行为。"""
+"""pydantic-graph runtime for Plan-Observe-Replan execution. POR 的 pydantic-graph 运行时。"""
+
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
+import asyncio
+from collections.abc import AsyncGenerator
 from typing import Any
 
 from pydantic_graph import GraphBuilder
 
-from axc_agent_engine.core.events import Event, EventType
+from axc_agent_engine.core.errors import LLMError
+from axc_agent_engine.core.events import TERMINAL_EVENTS, Event
 from axc_agent_engine.planning.graph_nodes import (
 	announce_plan,
 	execute_step,
@@ -18,11 +20,11 @@ from axc_agent_engine.planning.graph_nodes import (
 )
 from axc_agent_engine.planning.graph_state import PORGraphResult, PORGraphState
 from axc_agent_engine.planning.planner import Plan
+from axc_agent_engine.runtime.tasks import cancel_and_wait
 
 
 class PORGraphRuntime:
-	"""Runs POR through pydantic-graph while delegating work to a service object.
-中文：此文档说明相关引擎组件的行为。"""
+	"""Runs POR through pydantic-graph while delegating work to a service object. 通过 pydantic-graph 驱动节点并将具体操作委托给执行服务。"""
 
 	def __init__(self, service: Any) -> None:
 		self._service = service
@@ -33,23 +35,41 @@ class PORGraphRuntime:
 		plan: Plan,
 		user_message: str,
 		initial_events: list[Event] | None = None,
-		resumed: bool = False,
-	) -> AsyncIterator[Event]:
-		state = PORGraphState(
-			plan=plan,
-			user_message=user_message,
-			events=list(initial_events or []),
-			resumed=resumed,
-		)
+		resume_state: dict | None = None,
+	) -> AsyncGenerator[Event, None]:
+		queue: asyncio.Queue[Event | None] = asyncio.Queue()
+		terminal = None
+
+		def emit(event: Event) -> None:
+			nonlocal terminal
+			if event.type in TERMINAL_EVENTS:
+				terminal = event
+			else:
+				queue.put_nowait(event)
+
+		state = PORGraphState(plan=plan, user_message=user_message, emit=emit, resume_state=resume_state)
+		for initial in initial_events or []:
+			queue.put_nowait(initial)
+
+		async def drive() -> None:
+			try:
+				result = await self._graph.run(state=state, deps=self._service)
+				if result.error:
+					queue.put_nowait(Event.error(result.error))
+				elif terminal is not None:
+					queue.put_nowait(terminal)
+			except (ExceptionGroup, RuntimeError, ValueError, LLMError) as exc:
+				queue.put_nowait(Event.error(str(exc)))
+			finally:
+				queue.put_nowait(None)
+
+		task = asyncio.create_task(drive())
 		try:
-			result: PORGraphResult = await self._graph.run(state=state, deps=self._service)
-		except Exception as e:
-			yield Event(type=EventType.ERROR, content=str(e))
-			return
-		for event in result.events:
-			yield event
-		if result.error:
-			yield Event(type=EventType.ERROR, content=result.error)
+			while (event := await queue.get()) is not None:
+				yield event
+			await task
+		finally:
+			await cancel_and_wait(task)
 
 
 def _build_graph():

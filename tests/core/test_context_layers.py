@@ -1,4 +1,5 @@
 """Tests for context management layers."""
+
 import pytest
 
 from axc_agent_engine.plugins.builtin.compress.context.normalizer import normalize_messages, public_message
@@ -67,23 +68,27 @@ class TestToolResultManagement:
 
 class TestRecentWindow:
 	def test_keeps_system_and_recent_rounds(self):
-		messages = normalize_messages([
-			{"role": "system", "content": "sys"},
-			{"role": "user", "content": "old"},
-			{"role": "assistant", "content": "old reply"},
-			{"role": "user", "content": "new"},
-			{"role": "assistant", "content": "new reply"},
-		])
+		messages = normalize_messages(
+			[
+				{"role": "system", "content": "sys"},
+				{"role": "user", "content": "old"},
+				{"role": "assistant", "content": "old reply"},
+				{"role": "user", "content": "new"},
+				{"role": "assistant", "content": "new reply"},
+			]
+		)
 		result = select_recent_window(messages, rounds=1)
 		assert [m["content"] for m in result] == ["sys", "new", "new reply"]
 
 	def test_keeps_tool_call_pair(self):
-		messages = normalize_messages([
-			{"role": "user", "content": "q1"},
-			{"role": "assistant", "content": "", "tool_calls": [{"id": "call-1"}]},
-			{"role": "tool", "tool_call_id": "call-1", "content": "tool result"},
-			{"role": "user", "content": "q2"},
-		])
+		messages = normalize_messages(
+			[
+				{"role": "user", "content": "q1"},
+				{"role": "assistant", "content": "", "tool_calls": [{"id": "call-1"}]},
+				{"role": "tool", "tool_call_id": "call-1", "content": "tool result"},
+				{"role": "user", "content": "q2"},
+			]
+		)
 		result = select_recent_window(messages, rounds=1)
 		assert any(m.get("tool_call_id") == "call-1" for m in result) is False
 		result = select_recent_window(messages, rounds=2)
@@ -97,33 +102,39 @@ class TestPacker:
 		assert result.messages == [{"role": "user", "content": "hi"}]
 
 	def test_always_keeps_last_user(self):
-		messages = normalize_messages([
-			{"role": "user", "content": "old" * 1000},
-			{"role": "user", "content": "current"},
-		])
+		messages = normalize_messages(
+			[
+				{"role": "user", "content": "old" * 1000},
+				{"role": "user", "content": "current"},
+			]
+		)
 		result = pack_context(messages, max_input_tokens=20, reserve_output_tokens=5)
 		assert result.messages == [{"role": "user", "content": "current"}]
 		assert result.estimated_tokens <= 15
 
 	def test_keeps_tool_call_group_atomic(self):
-		messages = normalize_messages([
-			{"role": "user", "content": "old"},
-			{"role": "assistant", "content": "", "tool_calls": [{"id": "tc-1"}]},
-			{"role": "tool", "tool_call_id": "tc-1", "content": "tool result"},
-			{"role": "user", "content": "current"},
-		])
+		messages = normalize_messages(
+			[
+				{"role": "user", "content": "old"},
+				{"role": "assistant", "content": "", "tool_calls": [{"id": "tc-1"}]},
+				{"role": "tool", "tool_call_id": "tc-1", "content": "tool result"},
+				{"role": "user", "content": "current"},
+			]
+		)
 		result = pack_context(messages, max_input_tokens=100, reserve_output_tokens=5)
 		call_ids = {call["id"] for message in result.messages for call in message.get("tool_calls", [])}
 		tool_ids = {message.get("tool_call_id") for message in result.messages if message.get("role") == "tool"}
 		assert call_ids == tool_ids == {"tc-1"}
 
 	def test_drops_oversized_tool_call_group_atomic(self):
-		messages = normalize_messages([
-			{"role": "user", "content": "old"},
-			{"role": "assistant", "content": "", "tool_calls": [{"id": "tc-1"}]},
-			{"role": "tool", "tool_call_id": "tc-1", "content": "x" * 1000},
-			{"role": "user", "content": "current"},
-		])
+		messages = normalize_messages(
+			[
+				{"role": "user", "content": "old"},
+				{"role": "assistant", "content": "", "tool_calls": [{"id": "tc-1"}]},
+				{"role": "tool", "tool_call_id": "tc-1", "content": "x" * 1000},
+				{"role": "user", "content": "current"},
+			]
+		)
 		result = pack_context(messages, max_input_tokens=30, reserve_output_tokens=5)
 		assert not any(message.get("tool_calls") for message in result.messages)
 		assert not any(message.get("role") == "tool" for message in result.messages)
@@ -131,21 +142,25 @@ class TestPacker:
 		assert result.estimated_tokens <= 25
 
 	def test_keeps_system_last_user_and_durable_context(self):
-		messages = normalize_messages([
-			{"role": "system", "content": "system"},
-			{"role": "user", "content": "old" * 100},
-			{"role": "assistant", "content": "durable", "metadata": {"durable": True}},
-			{"role": "user", "content": "current"},
-		])
+		messages = normalize_messages(
+			[
+				{"role": "system", "content": "system"},
+				{"role": "user", "content": "old" * 100},
+				{"role": "assistant", "content": "durable", "metadata": {"durable": True}},
+				{"role": "user", "content": "current"},
+			]
+		)
 		result = pack_context(messages, max_input_tokens=30, reserve_output_tokens=5)
 		assert [message["content"] for message in result.messages] == ["system", "durable", "current"]
 		assert result.estimated_tokens <= 25
 
 	def test_required_context_can_explicitly_exceed_budget(self):
-		messages = normalize_messages([
-			{"role": "system", "content": "s" * 100},
-			{"role": "user", "content": "u" * 100},
-		])
+		messages = normalize_messages(
+			[
+				{"role": "system", "content": "s" * 100},
+				{"role": "user", "content": "u" * 100},
+			]
+		)
 		result = pack_context(messages, max_input_tokens=20, reserve_output_tokens=5)
 		assert [message["role"] for message in result.messages] == ["system", "user"]
 		assert result.estimated_tokens > 15
@@ -156,19 +171,23 @@ class TestRecall:
 		assert keyword_score("python tests", "python code") == 0.5
 
 	def test_fallback_recall_returns_relevant_items(self):
-		messages = normalize_messages([
-			{"role": "user", "content": "python testing details"},
-			{"role": "assistant", "content": "unrelated"},
-		])
+		messages = normalize_messages(
+			[
+				{"role": "user", "content": "python testing details"},
+				{"role": "assistant", "content": "unrelated"},
+			]
+		)
 		result = fallback_recall(messages, "python", top_k=3, token_limit=100)
 		assert result[0].text == "python testing details"
 
 	def test_fallback_recall_skips_system_and_token_overflow(self):
-		messages = normalize_messages([
-			{"role": "system", "content": "python"},
-			{"role": "assistant", "content": "python", "token_estimate": 100},
-			{"role": "user", "content": "python durable", "pinned": True, "token_estimate": 1},
-		])
+		messages = normalize_messages(
+			[
+				{"role": "system", "content": "python"},
+				{"role": "assistant", "content": "python", "token_estimate": 100},
+				{"role": "user", "content": "python durable", "pinned": True, "token_estimate": 1},
+			]
+		)
 		result = fallback_recall(messages, "python", top_k=5, token_limit=2)
 		assert [item.text for item in result] == ["python durable"]
 
@@ -250,10 +269,15 @@ class TestToolSummary:
 			async def ask(self, prompt):
 				raise RuntimeError("down")
 
-		summary = await service.summarize(BrokenLLM(), [
-			ToolObservation(name="old", arguments={}, result="old"),
-			ToolObservation(name="tool", arguments={"x": "y" * 500}, result="r" * 500, duration_ms=7, is_error=True),
-		])
+		summary = await service.summarize(
+			BrokenLLM(),
+			[
+				ToolObservation(name="old", arguments={}, result="old"),
+				ToolObservation(
+					name="tool", arguments={"x": "y" * 500}, result="r" * 500, duration_ms=7, is_error=True
+				),
+			],
+		)
 		assert "tool" in summary
 		assert len(summary) > 10
 

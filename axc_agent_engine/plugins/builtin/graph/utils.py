@@ -1,5 +1,5 @@
-"""Small pure helpers for graph plugin data shaping.
-中文：此文档说明相关引擎组件的行为。"""
+"""Small pure helpers for graph plugin data shaping. 整理图插件数据的纯函数。"""
+
 from typing import Any
 
 from axc_agent_engine.core.schema import ToolDefinition
@@ -7,6 +7,7 @@ from axc_agent_engine.core.schema import ToolDefinition
 
 def metadata(value: Any, namespace: str) -> dict[str, Any]:
 	import time
+
 	data = dict(value) if isinstance(value, dict) else {}
 	data.setdefault("namespace", namespace)
 	data.setdefault("updated_at", time.time())

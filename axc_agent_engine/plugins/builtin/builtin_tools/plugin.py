@@ -1,6 +1,6 @@
-"""BuiltinTools plugin shell.
-中文：此文档说明相关引擎组件的行为。"""
-from typing import Any, TYPE_CHECKING
+"""BuiltinTools plugin shell. 内置工具插件入口。"""
+
+from typing import TYPE_CHECKING, Any
 
 from axc_agent_engine.core.schema import ToolDefinition
 from axc_agent_engine.plugins.base import BasePlugin
@@ -30,8 +30,7 @@ class BuiltinToolsPlugin(BasePlugin):
 		_validate_tool_names(self._defer, self._tools, "builtin_tools.defer")
 
 	def _active_deferred_for(self, exec_ctx: "ExecutionContext") -> set[str]:
-		"""Return the currently active deferred tool names for this execution.
-中文：此文档说明相关引擎组件的行为。"""
+		"""Return the currently active deferred tool names for this execution. 读取本次运行中已启用的延迟加载工具名。"""
 		state = exec_ctx.get_plugin_state(self.name, lambda: {"active_deferred": set()})
 		active = state.setdefault("active_deferred", set())
 		if not isinstance(active, set):
@@ -40,9 +39,8 @@ class BuiltinToolsPlugin(BasePlugin):
 		return active
 
 	async def on_execution_start(self, exec_ctx: "ExecutionContext") -> None:
-		"""Initialize deferred tool state for the execution.
-中文：此文档说明相关引擎组件的行为。"""
-		exec_ctx.get_plugin_state(self.name, lambda: {})["active_deferred"] = set()
+		"""Initialize deferred tool state for the execution. 为本次运行初始化延迟加载工具的状态。"""
+		exec_ctx.get_plugin_state(self.name, dict)["active_deferred"] = set()
 
 	def get_tools(self) -> list[ToolDefinition]:
 		tools: list[ToolDefinition] = []
@@ -50,29 +48,35 @@ class BuiltinToolsPlugin(BasePlugin):
 		for name in names_to_load:
 			tool = self._tools[name]
 			if name in self._defer:
-				tools.append(ToolDefinition(
-					name=tool.name,
-					description=tool.description,
-					parameters=tool.parameters,
-					execute=tool.execute,
-					is_read_only=tool.is_read_only,
-					timeout=tool.timeout,
-					deferred=True,
-					capability=tool.capability,
-					risk_level=tool.risk_level,
-				))
+				tools.append(
+					ToolDefinition(
+						name=tool.name,
+						description=tool.description,
+						parameters=tool.parameters,
+						execute=tool.execute,
+						is_read_only=tool.is_read_only,
+						timeout=tool.timeout,
+						deferred=True,
+						capability=tool.capability,
+						risk_level=tool.risk_level,
+					)
+				)
 			else:
 				tools.append(tool)
 		if self._defer:
-			tools.append(ToolDefinition(
-				name="tool_search",
-				description="搜索可用的 deferred 工具，返回工具名称和描述。",
-				parameters={"type": "object", "properties": {
-					"query": {"type": "string", "description": "搜索关键词"}
-				}, "required": ["query"]},
-				execute=self._tool_search,
-				is_read_only=True,
-			))
+			tools.append(
+				ToolDefinition(
+					name="tool_search",
+					description="搜索可用的 deferred 工具，返回工具名称和描述。",
+					parameters={
+						"type": "object",
+						"properties": {"query": {"type": "string", "description": "搜索关键词"}},
+						"required": ["query"],
+					},
+					execute=self._tool_search,
+					is_read_only=True,
+				)
+			)
 		return tools
 
 	def pre_llm_call(
@@ -81,8 +85,7 @@ class BuiltinToolsPlugin(BasePlugin):
 		messages: list[dict],
 		tools: list[dict] | None,
 	) -> tuple[list[dict], list[dict] | None]:
-		"""Dynamically inject activated deferred tool schemas.
-中文：此文档说明相关引擎组件的行为。"""
+		"""Dynamically inject activated deferred tool schemas. 按需提供已启用工具的参数定义。"""
 		active = self._active_deferred_for(exec_ctx)
 		if not active or not tools:
 			return messages, tools
@@ -101,15 +104,13 @@ class BuiltinToolsPlugin(BasePlugin):
 		result: "ToolOutput",
 		duration_ms: int,
 	) -> "ToolOutput":
-		"""Deactivate a deferred tool after it was used.
-中文：此文档说明相关引擎组件的行为。"""
+		"""Deactivate a deferred tool after it was used. 使用后停用延迟加载的工具。"""
 		active = self._active_deferred_for(exec_ctx)
 		active.discard(tool_name)
 		return result
 
 	async def _tool_search(self, args: dict, context: dict) -> ToolOutput:
-		"""Search and activate deferred tools.
-中文：此文档说明相关引擎组件的行为。"""
+		"""Search and activate deferred tools. 搜索并启用延迟加载的工具。"""
 		query = args.get("query", "").lower()
 		exec_ctx = context.get("exec_ctx")
 		active = self._active_deferred_for(exec_ctx) if exec_ctx else set()

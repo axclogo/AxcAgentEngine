@@ -1,7 +1,6 @@
-"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-存储无关的评测仓储。
-Storage-neutral evaluation stores."""
+"""Storage-neutral evaluation stores.
+存储无关的评测仓储。"""
+
 from __future__ import annotations
 
 import asyncio
@@ -16,11 +15,9 @@ if TYPE_CHECKING:
 
 @dataclass
 class AnnotationReply:
-	"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-评测用例的参考答案或评分规则。
-	Reference answer or rubric for an eval case.
-	"""
+	"""Reference answer or rubric for an eval case.
+	评测用例的参考答案或评分规则。"""
+
 	case_id: str
 	answer: str = ""
 	rubric: str = ""
@@ -32,45 +29,38 @@ class AnnotationReply:
 
 @runtime_checkable
 class EvalStore(Protocol):
-	"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-持久化评测用例和结果，但不规定具体数据库。
-	Persists eval cases and results without dictating a database.
-	"""
-	async def save_case(self, suite_id: str, case: "EvalCase") -> None: ...
-	async def list_cases(self, suite_id: str) -> list["EvalCase"]: ...
-	async def save_result(self, run_id: str, result: "EvalResult") -> None: ...
-	async def list_results(self, run_id: str) -> list["EvalResult"]: ...
+	"""Persists eval cases and results without dictating a database.
+	持久化评测用例和结果，但不规定具体数据库。"""
+
+	async def save_case(self, suite_id: str, case: EvalCase) -> None: ...
+	async def list_cases(self, suite_id: str) -> list[EvalCase]: ...
+	async def save_result(self, run_id: str, result: EvalResult) -> None: ...
+	async def list_results(self, run_id: str) -> list[EvalResult]: ...
 	async def delete_run(self, run_id: str) -> None: ...
 
 
 @runtime_checkable
 class AnnotationStore(Protocol):
-	"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-按 case_id 存储参考标注。
-	Stores reference annotations keyed by case_id.
-	"""
+	"""Stores reference annotations keyed by case_id.
+	按 case_id 存储参考标注。"""
+
 	async def save_reply(self, reply: AnnotationReply) -> None: ...
 	async def get_reply(self, case_id: str) -> AnnotationReply | None: ...
 	async def list_replies(self) -> list[AnnotationReply]: ...
 
 
 class InMemoryEvalStore:
-	"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-有容量边界的内存 EvalStore 实现。
-	Bounded in-memory EvalStore implementation.
-	"""
+	"""Bounded in-memory EvalStore implementation.
+	有容量边界的内存 EvalStore 实现。"""
 
 	def __init__(self, max_suites: int = 100, max_runs: int = 1000) -> None:
-		self._cases: OrderedDict[str, list["EvalCase"]] = OrderedDict()
-		self._results: OrderedDict[str, list["EvalResult"]] = OrderedDict()
+		self._cases: OrderedDict[str, list[EvalCase]] = OrderedDict()
+		self._results: OrderedDict[str, list[EvalResult]] = OrderedDict()
 		self._max_suites = max_suites
 		self._max_runs = max_runs
 		self._lock = asyncio.Lock()
 
-	async def save_case(self, suite_id: str, case: "EvalCase") -> None:
+	async def save_case(self, suite_id: str, case: EvalCase) -> None:
 		if not suite_id:
 			raise ValueError("suite_id is required")
 		async with self._lock:
@@ -81,14 +71,14 @@ class InMemoryEvalStore:
 			while self._max_suites > 0 and len(self._cases) > self._max_suites:
 				self._cases.popitem(last=False)
 
-	async def list_cases(self, suite_id: str) -> list["EvalCase"]:
+	async def list_cases(self, suite_id: str) -> list[EvalCase]:
 		async with self._lock:
 			cases = self._cases.get(suite_id, [])
 			if suite_id in self._cases:
 				self._cases.move_to_end(suite_id)
 			return list(cases)
 
-	async def save_result(self, run_id: str, result: "EvalResult") -> None:
+	async def save_result(self, run_id: str, result: EvalResult) -> None:
 		if not run_id:
 			raise ValueError("run_id is required")
 		async with self._lock:
@@ -99,7 +89,7 @@ class InMemoryEvalStore:
 			while self._max_runs > 0 and len(self._results) > self._max_runs:
 				self._results.popitem(last=False)
 
-	async def list_results(self, run_id: str) -> list["EvalResult"]:
+	async def list_results(self, run_id: str) -> list[EvalResult]:
 		async with self._lock:
 			results = self._results.get(run_id, [])
 			if run_id in self._results:
@@ -112,11 +102,8 @@ class InMemoryEvalStore:
 
 
 class InMemoryAnnotationStore:
-	"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-内存 AnnotationStore 实现。
-	In-memory AnnotationStore implementation.
-	"""
+	"""In-memory AnnotationStore implementation.
+	内存 AnnotationStore 实现。"""
 
 	def __init__(self) -> None:
 		self._replies: OrderedDict[str, AnnotationReply] = OrderedDict()
@@ -139,16 +126,22 @@ class InMemoryAnnotationStore:
 			reply = self._replies.get(case_id)
 			if reply:
 				self._replies.move_to_end(case_id)
-			return AnnotationReply(
-				case_id=reply.case_id,
-				answer=reply.answer,
-				rubric=reply.rubric,
-				metadata=reply.metadata,
-			) if reply else None
+			return (
+				AnnotationReply(
+					case_id=reply.case_id,
+					answer=reply.answer,
+					rubric=reply.rubric,
+					metadata=reply.metadata,
+				)
+				if reply
+				else None
+			)
 
 	async def list_replies(self) -> list[AnnotationReply]:
 		async with self._lock:
 			return [
-				AnnotationReply(case_id=reply.case_id, answer=reply.answer, rubric=reply.rubric, metadata=reply.metadata)
+				AnnotationReply(
+					case_id=reply.case_id, answer=reply.answer, rubric=reply.rubric, metadata=reply.metadata
+				)
 				for reply in self._replies.values()
 			]

@@ -1,6 +1,10 @@
 """Tests for ExecutionContext — config, state, convenience methods."""
+
+from dataclasses import FrozenInstanceError
+
 import pytest
-from axc_agent_engine.core.context import ExecutionConfig, ExecutionState, ExecutionContext
+
+from axc_agent_engine.core.context import ExecutionConfig, ExecutionContext, ExecutionState
 
 
 class TestExecutionConfig:
@@ -21,7 +25,7 @@ class TestExecutionConfig:
 
 	def test_frozen(self):
 		cfg = ExecutionConfig()
-		with pytest.raises(Exception):
+		with pytest.raises(FrozenInstanceError):
 			cfg.max_rounds = 999
 
 
@@ -98,6 +102,7 @@ class TestExecutionContext:
 
 	def test_check_cancelled(self):
 		from axc_agent_engine.core.errors import CancelledError
+
 		ctx = ExecutionContext()
 		ctx.check_cancelled()  # should not raise
 		ctx.cancel()

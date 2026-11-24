@@ -1,6 +1,8 @@
 """Black-box API tests backed by a real Engine and Agent runtime."""
+
 import asyncio
 import json
+from typing import ClassVar
 
 from fastapi.testclient import TestClient
 
@@ -16,23 +18,25 @@ from axc_agent_engine.tools.tool_output import ToolOutput
 class APIEchoPlugin(BasePlugin):
 	name = "api_echo"
 	config_schema = config_schema("api_echo", "API Echo", "API integration test tool.", [])
-	invocations: list[dict] = []
+	invocations: ClassVar[list[dict]] = []
 
 	def get_tools(self):
 		async def echo(arguments, context):
 			type(self).invocations.append(dict(arguments))
 			return ToolOutput.json_output({"echo": arguments["text"]})
 
-		return [ToolDefinition(
-			name="echo",
-			description="Echo text",
-			parameters={
-				"type": "object",
-				"properties": {"text": {"type": "string"}},
-				"required": ["text"],
-			},
-			execute=echo,
-		)]
+		return [
+			ToolDefinition(
+				name="echo",
+				description="Echo text",
+				parameters={
+					"type": "object",
+					"properties": {"text": {"type": "string"}},
+					"required": ["text"],
+				},
+				execute=echo,
+			)
+		]
 
 
 class APISequenceProvider:
@@ -97,11 +101,14 @@ plugins:
 def test_sync_api_runs_real_engine_agent_tool_roundtrip(tmp_path):
 	engine, provider, client = _real_api(tmp_path)
 	try:
-		response = client.post("/v1/chat/completions", json={
-			"model": "api_agent",
-			"messages": [{"role": "user", "content": "echo api"}],
-			"session_id": "api-sync-session",
-		})
+		response = client.post(
+			"/v1/chat/completions",
+			json={
+				"model": "api_agent",
+				"messages": [{"role": "user", "content": "echo api"}],
+				"session_id": "api-sync-session",
+			},
+		)
 		assert response.status_code == 200
 		body = response.json()
 		assert body["choices"][0]["message"]["content"] == "API tool roundtrip complete"
@@ -116,20 +123,29 @@ def test_sync_api_runs_real_engine_agent_tool_roundtrip(tmp_path):
 def test_stream_api_runs_real_engine_and_finishes_after_internal_tool(tmp_path):
 	engine, provider, client = _real_api(tmp_path)
 	try:
-		response = client.post("/v1/chat/completions", json={
-			"model": "api_agent",
-			"messages": [{"role": "user", "content": "echo api"}],
-			"session_id": "api-stream-session",
-			"stream": True,
-			"stream_options": {"include_usage": True},
-		})
+		response = client.post(
+			"/v1/chat/completions",
+			json={
+				"model": "api_agent",
+				"messages": [{"role": "user", "content": "echo api"}],
+				"session_id": "api-stream-session",
+				"stream": True,
+				"stream_options": {"include_usage": True},
+			},
+		)
 		assert response.status_code == 200
 		assert response.headers["content-type"].startswith("text/event-stream")
 		data_lines = [line[6:] for line in response.text.splitlines() if line.startswith("data: ")]
 		assert data_lines[-1] == "[DONE]"
 		chunks = [json.loads(line) for line in data_lines[:-1]]
-		assert any(chunk.get("choices", [{}])[0].get("delta", {}).get("content") == "API tool roundtrip complete" for chunk in chunks if chunk.get("choices"))
-		assert any("tool_calls" in chunk.get("choices", [{}])[0].get("delta", {}) for chunk in chunks if chunk.get("choices"))
+		assert any(
+			chunk.get("choices", [{}])[0].get("delta", {}).get("content") == "API tool roundtrip complete"
+			for chunk in chunks
+			if chunk.get("choices")
+		)
+		assert any(
+			"tool_calls" in chunk.get("choices", [{}])[0].get("delta", {}) for chunk in chunks if chunk.get("choices")
+		)
 		finish_reasons = [
 			chunk["choices"][0]["finish_reason"]
 			for chunk in chunks

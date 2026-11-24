@@ -1,12 +1,12 @@
-"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-多 Agent 会话的模式画像。
-Mode profiles for multi-agent sessions."""
+"""Mode profiles for multi-agent sessions.
+多 Agent 会话的模式画像。"""
+
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any
 
 from axc_agent_engine.sidecar.multi_agent.scheduler.all_parallel import AllParallelScheduler
 from axc_agent_engine.sidecar.multi_agent.scheduler.debate import DebateScheduler
@@ -24,15 +24,12 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class ModeProfile:
-	"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-一个多 Agent 模式的调度、停止条件和提示配置。
-	Scheduler, stop-condition, and prompt configuration for one multi-agent mode.
-	"""
+	"""Scheduler, stop-condition, and prompt configuration for one multi-agent mode.
+	一个多 Agent 模式的调度、停止条件和提示配置。"""
 
 	mode: SessionMode
-	scheduler_factory: Callable[["ModeRuntime"], Any]
-	stop_factory: Callable[["ModeRuntime"], Any]
+	scheduler_factory: Callable[[ModeRuntime], Any]
+	stop_factory: Callable[[ModeRuntime], Any]
 	prompt_guidance: str = ""
 	requires_supervisor: bool = False
 	min_agents: int = 1
@@ -41,11 +38,8 @@ class ModeProfile:
 
 @dataclass(frozen=True)
 class ModeRuntime:
-	"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-构建模式运行组件所需的运行时输入。
-	Runtime inputs needed to build mode components.
-	"""
+	"""Runtime inputs needed to build mode components.
+	构建模式运行组件所需的运行时输入。"""
 
 	agents: list[Any]
 	supervisor: Any | None = None
@@ -77,11 +71,15 @@ MODE_PROFILES: dict[SessionMode, ModeProfile] = {
 	SessionMode.DEBATE: ModeProfile(
 		mode=SessionMode.DEBATE,
 		scheduler_factory=lambda rt: DebateScheduler(rt.agents),
-		stop_factory=lambda rt: ConsensusStop(
-			llm_client=rt.utility_model,
-			check_interval=3,
-			max_rounds=rt.max_rounds,
-		) if rt.utility_model else MaxRoundsStop(rt.max_rounds),
+		stop_factory=lambda rt: (
+			ConsensusStop(
+				llm_client=rt.utility_model,
+				check_interval=3,
+				max_rounds=rt.max_rounds,
+			)
+			if rt.utility_model
+			else MaxRoundsStop(rt.max_rounds)
+		),
 		prompt_guidance="围绕同一命题提出论点、反驳和证据，直到分歧收敛。",
 		min_agents=2,
 		utility_model_recommended=True,
@@ -102,22 +100,30 @@ MODE_PROFILES: dict[SessionMode, ModeProfile] = {
 	SessionMode.BACKCAST: ModeProfile(
 		mode=SessionMode.BACKCAST,
 		scheduler_factory=lambda rt: RoundRobinScheduler(),
-		stop_factory=lambda rt: GoalReachedStop(
-			llm_client=rt.utility_model,
-			check_interval=3,
-			max_rounds=rt.max_rounds,
-		) if rt.utility_model else MaxRoundsStop(rt.max_rounds),
+		stop_factory=lambda rt: (
+			GoalReachedStop(
+				llm_client=rt.utility_model,
+				check_interval=3,
+				max_rounds=rt.max_rounds,
+			)
+			if rt.utility_model
+			else MaxRoundsStop(rt.max_rounds)
+		),
 		prompt_guidance="从目标倒推关键里程碑、前置条件和当前应做动作。",
 		utility_model_recommended=True,
 	),
 	SessionMode.RETROSPECTIVE: ModeProfile(
 		mode=SessionMode.RETROSPECTIVE,
 		scheduler_factory=lambda rt: RoundRobinScheduler(),
-		stop_factory=lambda rt: CausalChainStop(
-			llm_client=rt.utility_model,
-			check_interval=3,
-			max_rounds=rt.max_rounds,
-		) if rt.utility_model else MaxRoundsStop(rt.max_rounds),
+		stop_factory=lambda rt: (
+			CausalChainStop(
+				llm_client=rt.utility_model,
+				check_interval=3,
+				max_rounds=rt.max_rounds,
+			)
+			if rt.utility_model
+			else MaxRoundsStop(rt.max_rounds)
+		),
 		prompt_guidance="从结果回溯原因，逐步形成可验证的因果链。",
 		utility_model_recommended=True,
 	),
@@ -161,7 +167,9 @@ def build_scheduler_for_mode(mode: SessionMode, runtime: ModeRuntime) -> Any:
 def build_stop_condition_for_mode(mode: SessionMode, runtime: ModeRuntime) -> Any:
 	profile = get_mode_profile(mode)
 	if profile.utility_model_recommended and not runtime.utility_model:
-		logger.warning("[session] Mode %s needs utility_model for semantic stop condition, falling back to MaxRoundsStop", mode)
+		logger.warning(
+			"[session] Mode %s needs utility_model for semantic stop condition, falling back to MaxRoundsStop", mode
+		)
 	return profile.stop_factory(runtime)
 
 

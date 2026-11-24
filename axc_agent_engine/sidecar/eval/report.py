@@ -1,7 +1,6 @@
-"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-评估报告生成。
-Evaluation report generation."""
+"""Evaluation report generation.
+评估报告生成。"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -13,11 +12,9 @@ if TYPE_CHECKING:
 
 @dataclass
 class EvalReport:
-	"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-评估报告。
-	Evaluation report.
-	"""
+	"""Evaluation report.
+	评估报告。"""
+
 	total_cases: int = 0
 	passed: int = 0
 	failed: int = 0
@@ -25,7 +22,7 @@ class EvalReport:
 	total_input_tokens: int = 0
 	total_output_tokens: int = 0
 	total_duration_ms: int = 0
-	results: list["EvalResult"] = field(default_factory=list)
+	results: list[EvalResult] = field(default_factory=list)
 
 	def summary(self) -> str:
 		lines = [
@@ -38,12 +35,9 @@ class EvalReport:
 		return "\n".join(lines)
 
 
-def generate_report(results: list["EvalResult"], pass_threshold: float = 0.6) -> EvalReport:
-	"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-从评估结果生成报告。
-	Generate a report from evaluation results.
-	"""
+def generate_report(results: list[EvalResult], pass_threshold: float = 0.6) -> EvalReport:
+	"""Generate a report from evaluation results.
+	从评估结果生成报告。"""
 	if not results:
 		return EvalReport()
 	total = len(results)
@@ -54,8 +48,12 @@ def generate_report(results: list["EvalResult"], pass_threshold: float = 0.6) ->
 	total_output = sum(r.output_tokens for r in results)
 	total_duration = sum(r.duration_ms for r in results)
 	return EvalReport(
-		total_cases=total, passed=passed, failed=failed,
-		avg_score=avg_score, total_input_tokens=total_input,
-		total_output_tokens=total_output, total_duration_ms=total_duration,
+		total_cases=total,
+		passed=passed,
+		failed=failed,
+		avg_score=avg_score,
+		total_input_tokens=total_input,
+		total_output_tokens=total_output,
+		total_duration_ms=total_duration,
 		results=results,
 	)

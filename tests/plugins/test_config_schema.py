@@ -1,5 +1,6 @@
 """Tests for plugin config_schema declarations.
 中文：插件 config_schema 声明测试。"""
+
 from __future__ import annotations
 
 import pytest
@@ -41,7 +42,7 @@ def test_schema_query_contains_common_fields():
 	schema = registry.get_plugin_config_schema("compress")
 	fields = {field.key: field for field in schema.fields}
 	assert fields["enabled"].label == "启用"
-	assert fields["enabled"].default is True
+	assert fields["enabled"].default is False
 	assert "required" not in fields
 
 
@@ -93,26 +94,40 @@ plugins:
 
 
 def test_validate_plugin_config_rejects_boundary_errors():
-	schema = config_schema("strict", "Strict", "Strict schema.", [
-		config_field("mode", "Mode", "string", "Mode.", enum=["a", "b"], required=True),
-		config_field("count", "Count", "integer", "Count."),
-		config_field("ratio", "Ratio", "number", "Ratio."),
-		config_field("flag", "Flag", "boolean", "Flag."),
-		object_field("nested", "Nested", "Nested object.", [
-			config_field("name", "Name", "string", "Name."),
-		]),
-		array_field("items", "Items", "String items.", config_field("", "Item", "string", "Item.")),
-		config_field("free", "Free", "object", "Free object."),
-	])
-	validate_plugin_config("strict", {
-		"mode": "a",
-		"count": 1,
-		"ratio": 1.5,
-		"flag": False,
-		"nested": {"name": "ok"},
-		"items": ["x"],
-		"free": {"any": {"shape": True}},
-	}, schema)
+	schema = config_schema(
+		"strict",
+		"Strict",
+		"Strict schema.",
+		[
+			config_field("mode", "Mode", "string", "Mode.", enum=["a", "b"], required=True),
+			config_field("count", "Count", "integer", "Count."),
+			config_field("ratio", "Ratio", "number", "Ratio."),
+			config_field("flag", "Flag", "boolean", "Flag."),
+			object_field(
+				"nested",
+				"Nested",
+				"Nested object.",
+				[
+					config_field("name", "Name", "string", "Name."),
+				],
+			),
+			array_field("items", "Items", "String items.", config_field("", "Item", "string", "Item.")),
+			config_field("free", "Free", "object", "Free object."),
+		],
+	)
+	validate_plugin_config(
+		"strict",
+		{
+			"mode": "a",
+			"count": 1,
+			"ratio": 1.5,
+			"flag": False,
+			"nested": {"name": "ok"},
+			"items": ["x"],
+			"free": {"any": {"shape": True}},
+		},
+		schema,
+	)
 	cases = [
 		({"mode": "a", "unknown": 1}, "Unknown config field"),
 		({"count": 1}, "Missing required"),
@@ -131,8 +146,32 @@ def test_validate_plugin_config_rejects_boundary_errors():
 
 
 def test_validate_plugin_config_required_none_is_invalid():
-	schema = config_schema("strict", "Strict", "Strict schema.", [
-		config_field("name", "Name", "string", "Name.", required=True),
-	])
+	schema = config_schema(
+		"strict",
+		"Strict",
+		"Strict schema.",
+		[
+			config_field("name", "Name", "string", "Name.", required=True),
+		],
+	)
 	with pytest.raises(ValueError, match="required"):
 		validate_plugin_config("strict", {"name": None}, schema)
+
+
+@pytest.mark.parametrize("bad", ["read,write", "", {}, [None], ["read", 7], None])
+def test_host_array_requires_an_actual_array_of_strings(bad):
+	schema = config_schema(
+		"example",
+		"Example",
+		"",
+		[
+			array_field("tools", "Tools", "", config_field("", "Tool name", "string", "")),
+		],
+	)
+	with pytest.raises(ValueError, match="array|string"):
+		validate_plugin_config("example", {"tools": bad}, schema)
+
+
+def test_schema_declaration_does_not_split_scalar_enum():
+	with pytest.raises(ValueError, match="list"):
+		config_field("mode", "Mode", "string", "", enum="ab")

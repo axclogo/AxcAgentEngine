@@ -1,26 +1,33 @@
 """流式输出示例：展示所有事件类型"""
+
 import asyncio
 import os
 
-from axc_agent_engine import AgentModels, Engine, LLMConfig, EventType
+from axc_agent_engine import AgentModels, Engine, EventType, LLMConfig
 from axc_agent_engine.llm.client import OpenAIClient
-from axc_agent_engine.plugins.builtin import BuiltinToolsPlugin, TracingPlugin
+from axc_agent_engine.plugins.builtin import BuiltinToolsPlugin, PORPlugin, TracingPlugin
 from axc_agent_engine.plugins.registry import PluginRegistry
 
 
 def _agent_models() -> AgentModels:
-	return AgentModels(default=OpenAIClient(LLMConfig(
-		base_url=os.environ["AXC_LLM_BASE_URL"],
-		api_key=os.environ["AXC_LLM_API_KEY"],
-		model=os.environ.get("AXC_LLM_MODEL", "gpt-4o"),
-	)))
+	return AgentModels(
+		default=OpenAIClient(
+			LLMConfig(
+				base_url=os.environ["AXC_LLM_BASE_URL"],
+				api_key=os.environ["AXC_LLM_API_KEY"],
+				model=os.environ.get("AXC_LLM_MODEL", "gpt-4o"),
+			)
+		)
+	)
 
 
 async def main():
 	registry = PluginRegistry()
-	registry.register_many([BuiltinToolsPlugin, TracingPlugin])
+	registry.register_many([PORPlugin, BuiltinToolsPlugin, TracingPlugin])
 	engine = Engine(plugin_registry=registry)
-	agent = engine.load_agent_template(os.path.join(os.path.dirname(__file__), "agent.yaml")).instantiate(models=_agent_models())
+	agent = engine.load_agent_template(os.path.join(os.path.dirname(__file__), "agent.yaml")).instantiate(
+		models=_agent_models()
+	)
 	async for event in agent.stream("用 Python 算 100 以内的质数"):
 		match event.type:
 			case EventType.THINKING_START:

@@ -1,4 +1,5 @@
 """CausalChainStop — LLM 判断因果链是否完整"""
+
 from axc_agent_engine.sidecar.multi_agent.stop_condition.llm_based import LLMBasedStop
 
 CAUSAL_CHECK_PROMPT = """请判断以下讨论是否已形成完整的因果链分析。

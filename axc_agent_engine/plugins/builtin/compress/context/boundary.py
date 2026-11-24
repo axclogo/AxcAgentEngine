@@ -1,16 +1,20 @@
-"""Compression boundary persistence.
-中文：此文档说明相关引擎组件的行为。"""
+"""Compression boundary persistence. 压缩边界的持久化接口。"""
+
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass, field
+from copy import deepcopy
+from dataclasses import asdict, field
 from typing import Any, Protocol, runtime_checkable
+from urllib.parse import quote
+
+from pydantic import ConfigDict
+from pydantic.dataclasses import dataclass
 
 
-@dataclass
+@dataclass(config=ConfigDict(strict=True))
 class CompressionBoundary:
-	"""Persistent summary boundary for one agent/session.
-中文：此文档说明相关引擎组件的行为。"""
+	"""Persistent summary boundary for one agent/session. 一个 Agent 会话的持久化摘要边界。"""
 
 	agent_name: str
 	session_id: str
@@ -25,35 +29,11 @@ class CompressionBoundary:
 	updated_at: float = field(default_factory=time.time)
 
 	def to_dict(self) -> dict[str, Any]:
-		return {
-			"agent_name": self.agent_name,
-			"session_id": self.session_id,
-			"summary": self.summary,
-			"round_count": self.round_count,
-			"compressed_rounds": self.compressed_rounds,
-			"last_message_index": self.last_message_index,
-			"buffer": list(self.buffer),
-			"file_cache": list(self.file_cache),
-			"tool_summaries": list(self.tool_summaries),
-			"durable_results": list(self.durable_results),
-			"updated_at": self.updated_at,
-		}
+		return asdict(self)
 
 	@classmethod
-	def from_dict(cls, data: dict[str, Any]) -> "CompressionBoundary":
-		return cls(
-			agent_name=str(data.get("agent_name") or ""),
-			session_id=str(data.get("session_id") or ""),
-			summary=str(data.get("summary") or ""),
-			round_count=int(data.get("round_count", 0)),
-			compressed_rounds=int(data.get("compressed_rounds", 0)),
-			last_message_index=int(data.get("last_message_index", 0)),
-			buffer=[str(item) for item in data.get("buffer", []) if str(item)],
-			file_cache=[dict(item) for item in data.get("file_cache", []) if isinstance(item, dict)],
-			tool_summaries=[str(item) for item in data.get("tool_summaries", []) if str(item)],
-			durable_results=[str(item) for item in data.get("durable_results", []) if str(item)],
-			updated_at=float(data.get("updated_at", time.time())),
-		)
+	def from_dict(cls, data: dict[str, Any]) -> CompressionBoundary:
+		return cls(**data)
 
 
 @runtime_checkable
@@ -61,30 +41,34 @@ class CompressionBoundaryStore(Protocol):
 	async def load(self, agent_name: str, session_id: str) -> CompressionBoundary | None: ...
 	async def save(self, boundary: CompressionBoundary) -> None: ...
 	async def delete(self, agent_name: str, session_id: str) -> None: ...
+	async def clear(self, agent_name: str) -> None: ...
 
 
 class InMemoryCompressionBoundaryStore:
-	"""No-database compression boundary fallback.
-中文：此文档说明相关引擎组件的行为。"""
+	"""No-database compression boundary fallback. 无需数据库的压缩边界存储。"""
 
 	def __init__(self) -> None:
 		self._items: dict[tuple[str, str], CompressionBoundary] = {}
 
 	async def load(self, agent_name: str, session_id: str) -> CompressionBoundary | None:
 		item = self._items.get((agent_name, session_id))
-		return CompressionBoundary.from_dict(item.to_dict()) if item else None
+		return deepcopy(item)
 
 	async def save(self, boundary: CompressionBoundary) -> None:
 		boundary.updated_at = time.time()
-		self._items[(boundary.agent_name, boundary.session_id)] = CompressionBoundary.from_dict(boundary.to_dict())
+		self._items[(boundary.agent_name, boundary.session_id)] = deepcopy(boundary)
 
 	async def delete(self, agent_name: str, session_id: str) -> None:
 		self._items.pop((agent_name, session_id), None)
 
+	async def clear(self, agent_name: str) -> None:
+		for key in list(self._items):
+			if key[0] == agent_name:
+				del self._items[key]
+
 
 class KVCompressionBoundaryStore:
-	"""CompressionBoundaryStore backed by the generic KVStore protocol.
-中文：此文档说明相关引擎组件的行为。"""
+	"""CompressionBoundaryStore backed by the generic KVStore protocol. 使用 KVStore 持久化压缩边界。"""
 
 	def __init__(self, kv_store: Any, prefix: str = "compress:boundary:") -> None:
 		self.kv_store = kv_store
@@ -93,8 +77,14 @@ class KVCompressionBoundaryStore:
 	async def load(self, agent_name: str, session_id: str) -> CompressionBoundary | None:
 		if not self.kv_store or not session_id:
 			return None
-		data = await self.kv_store.get(self._key(agent_name, session_id))
-		return CompressionBoundary.from_dict(data) if isinstance(data, dict) else None
+		key = self._key(agent_name, session_id)
+		data = await self.kv_store.get(key)
+		legacy = f"{self.prefix}{agent_name}:{session_id}"
+		if data is None and key != legacy:
+			data = await self.kv_store.get(legacy)
+		if isinstance(data, dict) and (data.get("agent_name"), data.get("session_id")) == (agent_name, session_id):
+			return CompressionBoundary.from_dict(data)
+		return None
 
 	async def save(self, boundary: CompressionBoundary) -> None:
 		if not self.kv_store or not boundary.session_id:
@@ -104,7 +94,27 @@ class KVCompressionBoundaryStore:
 
 	async def delete(self, agent_name: str, session_id: str) -> None:
 		if self.kv_store and session_id:
-			await self.kv_store.delete(self._key(agent_name, session_id))
+			key = self._key(agent_name, session_id)
+			await self.kv_store.delete(key)
+			legacy = f"{self.prefix}{agent_name}:{session_id}"
+			if legacy != key:
+				data = await self.kv_store.get(legacy)
+				if isinstance(data, dict) and (data.get("agent_name"), data.get("session_id")) == (
+					agent_name,
+					session_id,
+				):
+					await self.kv_store.delete(legacy)
+
+	async def clear(self, agent_name: str) -> None:
+		if not self.kv_store:
+			return
+		for prefix in (f"{self.prefix}{agent_name}:", f"v2:{self.prefix}{quote(agent_name, safe='')}:"):
+			for key in await self.kv_store.list_keys(prefix):
+				data = await self.kv_store.get(key)
+				if isinstance(data, dict) and data.get("agent_name") == agent_name:
+					await self.kv_store.delete(key)
 
 	def _key(self, agent_name: str, session_id: str) -> str:
-		return f"{self.prefix}{agent_name}:{session_id}"
+		encoded = f"{quote(agent_name, safe='')}:{quote(session_id, safe='')}"
+		prefix = self.prefix if encoded == f"{agent_name}:{session_id}" else f"v2:{self.prefix}"
+		return f"{prefix}{encoded}"

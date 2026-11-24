@@ -1,29 +1,32 @@
-"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
+"""Configuration, state and services for an execution.
 执行上下文 — config + state + services + 便捷方法。
 
 ExecutionConfig：不可变执行配置（max_rounds、stream、thinking 等）。
 ExecutionState：可变运行时状态（current_round、tokens、cancelled 等）。
 ExecutionServices：类型化基础设施依赖（artifact_store、message_bus 等）。
 ExecutionContext：组合以上对象，并提供 cancel、add_usage、check_cancelled 等便捷方法。"""
+
 from __future__ import annotations
 
+import asyncio
 from copy import deepcopy
 from dataclasses import dataclass, field
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
+
+from axc_agent_engine.core.constants import DEFAULT_MAX_PARALLEL_TOOL_CALLS
 
 if TYPE_CHECKING:
+	from axc_agent_engine.plugins.context import AgentInfo, ModelInfo
+	from axc_agent_engine.runtime.policy import PolicyEvaluator
+	from axc_agent_engine.runtime.sandbox_models import CommandExecutor
 	from axc_agent_engine.storage.artifact_store import ArtifactStore
 	from axc_agent_engine.storage.protocols import AuditSink, CheckpointStore, MessageBus
-	from axc_agent_engine.runtime.sandbox_models import CommandExecutor
-	from axc_agent_engine.runtime.policy import PolicyEvaluator
-	from axc_agent_engine.plugins.context import AgentInfo, ModelInfo
 
 
 @dataclass(frozen=True)
 class ExecutionConfig:
-	"""English: This documentation describes the related engine component behavior.
-中文：单次执行的不可变配置。"""
+	"""Immutable configuration for one run. 单次执行的不可变配置。"""
+
 	system_prompt: str = ""
 	max_rounds: int = 50
 	stream: bool = False
@@ -36,29 +39,36 @@ class ExecutionConfig:
 	workspace: str = ""
 	allowed_capabilities: frozenset[str] = field(default_factory=frozenset)
 
+	max_parallel_tool_calls: int = DEFAULT_MAX_PARALLEL_TOOL_CALLS
+
+	@property
+	def tool_concurrency(self) -> int:
+		if type(self.max_parallel_tool_calls) is not int or self.max_parallel_tool_calls < 1:
+			raise ValueError("max_parallel_tool_calls must be a positive integer")
+		return self.max_parallel_tool_calls if self.parallel_tool_calls else 1
+
 
 @dataclass
 class ExecutionServices:
-	"""English: This documentation describes the related engine component behavior.
-中文：执行所需的类型化基础设施依赖。"""
-	artifact_store: "ArtifactStore | None" = None
-	message_bus: "MessageBus | None" = None
-	dispatcher: "object | None" = None
-	audit_sink: "AuditSink | None" = None
-	checkpoint_store: "CheckpointStore | None" = None
-	command_executor: "CommandExecutor | None" = None
-	policy_evaluator: "PolicyEvaluator | None" = None
-	run_control: "object | None" = None
+	"""Infrastructure dependencies for one execution. 执行所需的类型化基础设施依赖。"""
+
+	artifact_store: ArtifactStore | None = None
+	message_bus: MessageBus | None = None
+	dispatcher: object | None = None
+	audit_sink: AuditSink | None = None
+	checkpoint_store: CheckpointStore | None = None
+	command_executor: CommandExecutor | None = None
+	policy_evaluator: PolicyEvaluator | None = None
+	run_control: object | None = None
 
 
 @dataclass
 class ExecutionState:
-	"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-单次执行的可变运行时状态。
+	"""Mutable state for one execution.
+	单次执行的可变运行时状态。
 
-	只包含通用执行状态；插件专属状态应通过类型化访问器存放在 metadata 中。
-	"""
+	        只包含通用执行状态；插件专属状态应通过类型化访问器存放在 metadata 中。"""
+
 	current_round: int = 0
 	total_input_tokens: int = 0
 	total_output_tokens: int = 0
@@ -72,9 +82,9 @@ class ExecutionState:
 
 @dataclass
 class ExecutionRuntimeState:
-	"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-不可 checkpoint 的运行时内部状态。"""
+	"""Transient resources excluded from checkpoints.
+	不可 checkpoint 的运行时内部状态。"""
+
 	plugin_states: dict[str, Any] = field(default_factory=dict)
 	stream_delta_emitted: bool = False
 	approval_queue: Any = None
@@ -82,47 +92,55 @@ class ExecutionRuntimeState:
 	agent_call_depth: int = 0
 	risk_level: str = ""
 	llm_options: dict[str, Any] = field(default_factory=dict)
-	model_info: "ModelInfo | None" = None
-	agent_info: "AgentInfo | None" = None
-	cancel_source: "ExecutionState | None" = None
+	model_info: ModelInfo | None = None
+	agent_info: AgentInfo | None = None
+	cancel_source: ExecutionState | None = None
 	event_sink: Any = None
+	agent_owner: Any = None
+	plugin_scopes: dict[str, str] = field(default_factory=dict)
+	inbox: Any = None
+	before_write: Any = None
+	after_write: Any = None
+	tool_slots: asyncio.Semaphore | None = None
 
 
 @dataclass
 class ExecutionContext:
-	"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-组合 config + state + services，并提供便捷方法。
+	"""Access execution configuration, state and services.
+	组合 config + state + services，并提供便捷方法。
 
-	通过 ctx.config.max_rounds、ctx.config.stream 等访问配置。
-	通过 ctx.state.current_round、ctx.state.metadata 等访问状态。
-	通过 ctx.services.artifact_store 等访问服务。
-	"""
+	        通过 ctx.config.max_rounds、ctx.config.stream 等访问配置。
+	        通过 ctx.state.current_round、ctx.state.metadata 等访问状态。
+	        通过 ctx.services.artifact_store 等访问服务。"""
+
 	config: ExecutionConfig = field(default_factory=ExecutionConfig)
 	state: ExecutionState = field(default_factory=ExecutionState)
 	services: ExecutionServices = field(default_factory=ExecutionServices)
 	runtime: ExecutionRuntimeState = field(default_factory=ExecutionRuntimeState)
 	utility_model: Any = None
 
-	#English: Source note. 中文：── 便捷方法 ──
+	@property
+	def tool_slots(self) -> asyncio.Semaphore:
+		if self.runtime.tool_slots is None:
+			self.runtime.tool_slots = asyncio.Semaphore(self.config.tool_concurrency)
+		return self.runtime.tool_slots
 
 	def cancel(self, reason: str = "cancelled") -> None:
-		"""English: This documentation describes the related engine component behavior.
-中文：标记执行已取消。"""
+		"""Mark the run as cancelled. 标记执行已取消。"""
 		self.state.cancelled = True
+		if self.runtime.inbox is not None:
+			self.runtime.inbox.open = False
 		self.state.cancel_reason = reason or "cancelled"
 
 	def add_usage(self, input_tokens: int, output_tokens: int) -> None:
-		"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-累加 token 用量。"""
+		"""Accumulate token usage.
+		累加 token 用量。"""
 		self.state.total_input_tokens += input_tokens
 		self.state.total_output_tokens += output_tokens
 
 	def estimate_image_tokens(self, messages: list[dict]) -> int:
-		"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-估算消息中图片的 token 成本。"""
+		"""Estimate tokens used by images.
+		估算消息中图片的 token 成本。"""
 		total = 0
 		for msg in messages:
 			content = msg.get("content")
@@ -135,40 +153,38 @@ class ExecutionContext:
 		return total
 
 	def add_image_tokens(self, messages: list[dict]) -> None:
-		"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-估算并累加图片 token。"""
+		"""Add the estimated image tokens to usage.
+		估算并累加图片 token。"""
 		image_tokens = self.estimate_image_tokens(messages)
 		if image_tokens > 0:
 			self.state.total_input_tokens += image_tokens
 
 	def check_cancelled(self) -> None:
-		"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-如果执行已取消，则抛出 CancelledError。"""
+		"""Raise when this execution has been cancelled.
+		如果执行已取消，则抛出 CancelledError。"""
 		parent_cancelled = bool(self.runtime.cancel_source and self.runtime.cancel_source.cancelled)
 		if self.state.cancelled or parent_cancelled:
 			from axc_agent_engine.core.errors import CancelledError
+
 			reason = self.state.cancel_reason
 			if not reason and self.runtime.cancel_source:
 				reason = getattr(self.runtime.cancel_source, "cancel_reason", "")
 			raise CancelledError(reason or "Execution cancelled")
 
 	def get_plugin_state(self, plugin_name: str, factory: Any = None) -> Any:
-		"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-获取单次执行内的插件状态；首次访问时可用 factory 创建。"""
+		"""Look up or initialize run-local plugin state.
+		获取单次执行内的插件状态；首次访问时可用 factory 创建。"""
 		plugin_states = self.runtime.plugin_states
 		if plugin_name not in plugin_states:
 			plugin_states[plugin_name] = factory() if factory else {}
 		return plugin_states[plugin_name]
 
-	def fork_for_child(self, metadata: dict[str, Any] | None = None) -> "ExecutionContext":
-		"""English: This documentation describes the related engine component behavior.
-中文：为并行子任务创建隔离上下文。
+	def fork_for_child(self, metadata: dict[str, Any] | None = None) -> ExecutionContext:
+		"""Create an isolated context for a parallel subtask.
+		为并行子任务创建隔离上下文。
 
-		子上下文共享基础设施服务与只读运行配置，隔离轮次计数和插件运行态。
-		取消信号从父上下文传播，避免并行步骤失去外部取消控制。
+				子上下文共享基础设施服务与只读运行配置，隔离轮次计数和插件运行态。
+				取消信号从父上下文传播，避免并行步骤失去外部取消控制。
 		"""
 		child_metadata = deepcopy(_checkpoint_safe_metadata(self.state.metadata))
 		if metadata:
@@ -178,6 +194,10 @@ class ExecutionContext:
 			model_info=self.runtime.model_info,
 			agent_info=self.runtime.agent_info,
 			cancel_source=self.state,
+			plugin_scopes=dict(self.runtime.plugin_scopes),
+			before_write=self.runtime.before_write,
+			after_write=self.runtime.after_write,
+			tool_slots=self.tool_slots,
 		)
 		return ExecutionContext(
 			config=self.config,
@@ -189,9 +209,8 @@ class ExecutionContext:
 
 
 def _checkpoint_safe_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
-	"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-复制可跨执行子上下文传播的稳定 metadata。"""
+	"""Copy stable metadata into child execution contexts.
+	复制可跨执行子上下文传播的稳定 metadata。"""
 	allowed = {
 		"run_id",
 		"session_id",

@@ -1,4 +1,5 @@
 """AxcAgentEngine 异常层级。"""
+
 from __future__ import annotations
 
 from copy import deepcopy
@@ -8,8 +9,8 @@ from typing import Any
 
 
 class ErrorCategory(StrEnum):
-	"""Structured error categories for policy, retry, and audit handling.
-中文：此文档说明相关引擎组件的行为。"""
+	"""Structured error categories for policy, retry, and audit handling. 供策略、重试和审计使用的错误分类。"""
+
 	CONFIG = "config"
 	SCHEMA = "schema"
 	PLUGIN = "plugin"
@@ -24,8 +25,8 @@ class ErrorCategory(StrEnum):
 
 @dataclass(frozen=True)
 class ErrorEnvelope:
-	"""Machine-readable error payload used in audit logs and API adapters.
-中文：此文档说明相关引擎组件的行为。"""
+	"""Machine-readable error payload used in audit logs and API adapters. 审计日志和 API 适配器共用的结构化错误数据。"""
+
 	code: str
 	message: str
 	category: str = ErrorCategory.INTERNAL
@@ -52,8 +53,11 @@ class AxcError(Exception):
 
 
 class ConfigError(AxcError):
-	"""English: This documentation describes the related engine component behavior.
-中文：配置错误。"""
+	"""Invalid engine configuration. 配置错误。"""
+
+
+class ConfigValueError(ValueError):
+	"""Invalid configuration value. 配置值不符合要求。"""
 
 
 class SchemaError(ConfigError):
@@ -61,18 +65,15 @@ class SchemaError(ConfigError):
 
 
 class PluginError(AxcError):
-	"""English: This documentation describes the related engine component behavior.
-中文：插件相关错误。"""
+	"""Base class for plugin failures. 插件相关错误。"""
 
 
 class PluginLoadError(PluginError):
-	"""English: This documentation describes the related engine component behavior.
-中文：插件加载失败。"""
+	"""Plugin loading failed. 插件加载失败。"""
 
 
 class PluginInitError(PluginError):
-	"""English: This documentation describes the related engine component behavior.
-中文：插件初始化失败。"""
+	"""Plugin initialization failed. 插件初始化失败。"""
 
 
 class LLMError(AxcError):
@@ -80,15 +81,13 @@ class LLMError(AxcError):
 
 
 class ProviderError(LLMError):
-	"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-所有 LLM provider 都失败。"""
+	"""All model providers failed.
+	所有 LLM provider 都失败。"""
 
 
 class RetryableProviderError(ProviderError):
-	"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-可重试/可 fallback 的 provider 错误。"""
+	"""The model call may be retried or routed to a fallback.
+	可重试/可 fallback 的 provider 错误。"""
 
 
 class ProviderAuthError(ProviderError):
@@ -108,33 +107,28 @@ class LLMTimeoutError(LLMError):
 
 
 class ExecutionError(AxcError):
-	"""English: This documentation describes the related engine component behavior.
-中文：执行器错误。"""
+	"""Execution failed. 执行器错误。"""
 
 
 class MaxRoundsError(ExecutionError):
-	"""English: This documentation describes the related engine component behavior.
-中文：超过最大轮次。"""
+	"""The round limit was exceeded. 超过最大轮次。"""
 
 
 class ExecutionCancelledError(ExecutionError):
-	"""English: This documentation describes the related engine component behavior.
-中文：执行被用户取消。"""
+	"""The caller cancelled execution. 执行被用户取消。"""
 
 
-#English: Source note. 中文：别名
+# Aliases 别名
 CancelledError = ExecutionCancelledError
 
 
 class ExecutionTimeoutError(ExecutionError):
-	"""English: This documentation describes the related engine component behavior.
-中文：执行超时。"""
+	"""Execution timed out. 执行超时。"""
 
 
-#English: Source note. 中文：别名
+# Aliases 别名
 TimeoutError = ExecutionTimeoutError
 
 
 class ToolError(AxcError):
-	"""English: This documentation describes the related engine component behavior.
-中文：工具执行错误。"""
+	"""Tool execution failed. 工具执行错误。"""

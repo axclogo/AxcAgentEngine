@@ -1,20 +1,19 @@
-"""Tool-call batch planning.
-中文：此文档说明相关引擎组件的行为。"""
+"""Tool-call batch planning. 划分工具调用的执行批次。"""
+
 from __future__ import annotations
 
 from axc_agent_engine.tools.registry import ToolRegistry
 
 
-def partition_tool_calls(tool_calls: list[dict], registry: ToolRegistry) -> list[dict]:
-	"""English: This documentation describes the related engine component behavior.
-中文：把工具调用划分为批次：连续只读调用并发，其他调用串行。"""
+def partition_tool_calls(tool_calls: list[dict], registry: ToolRegistry, limit: int | None = None) -> list[dict]:
+	"""Batch adjacent read-only calls and serialize other calls. 把工具调用划分为批次：连续只读调用并发，其他调用串行。"""
 	batches: list[dict] = []
 	for tc in tool_calls:
 		name = tc.get("name", "")
 		tool_def = registry.get(name)
 		is_read_only = tool_def.is_read_only if tool_def else False
 		if is_read_only:
-			if batches and batches[-1]["concurrent"]:
+			if batches and batches[-1]["concurrent"] and (limit is None or len(batches[-1]["calls"]) < limit):
 				batches[-1]["calls"].append(tc)
 			else:
 				batches.append({"concurrent": True, "calls": [tc]})

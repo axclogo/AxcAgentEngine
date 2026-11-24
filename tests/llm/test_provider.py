@@ -1,13 +1,19 @@
 """Tests for LLM provider protocol and client."""
+
 import httpx
 import pytest
 
-from axc_agent_engine.llm.provider import LLMProvider, EmbeddingProvider
+from axc_agent_engine.core.errors import (
+	LLMTimeoutError,
+	ProviderAuthError,
+	ProviderBadRequestError,
+	RetryableProviderError,
+)
+from axc_agent_engine.core.schema import LLMMessage, LLMResponse, LLMStreamChunk
 from axc_agent_engine.llm.client import OpenAIClient, OpenAIErrorMapper, OpenAIResponseParser
 from axc_agent_engine.llm.config import LLMConfig
+from axc_agent_engine.llm.provider import EmbeddingProvider, LLMProvider
 from axc_agent_engine.llm.rate_limited import RateLimitedProvider
-from axc_agent_engine.core.errors import LLMTimeoutError, ProviderAuthError, ProviderBadRequestError, RetryableProviderError
-from axc_agent_engine.core.schema import LLMMessage, LLMResponse, LLMStreamChunk
 from axc_agent_engine.tools.name_mapping import ToolNameMappingConfig
 
 
@@ -15,29 +21,42 @@ class TestLLMProviderProtocol:
 	def test_protocol_check(self):
 		class MyProvider:
 			@property
-			def model(self): return "test"
+			def model(self):
+				return "test"
+
 			@property
-			def tool_name_mapping(self): return None
+			def tool_name_mapping(self):
+				return None
+
 			async def chat(self, messages, tools=None, **kwargs):
 				return LLMResponse(message=LLMMessage(content="ok"))
+
 			async def stream(self, messages, tools=None, **kwargs):
 				yield LLMStreamChunk(content_delta="ok")
-			async def ask(self, prompt, **kwargs): return ""
-			async def close(self): pass
+
+			async def ask(self, prompt, **kwargs):
+				return ""
+
+			async def close(self):
+				pass
 
 		assert isinstance(MyProvider(), LLMProvider)
 
 	def test_non_conforming(self):
 		class Bad:
 			pass
+
 		assert not isinstance(Bad(), LLMProvider)
 
 
 class TestEmbeddingProviderProtocol:
 	def test_protocol_check(self):
 		class MyEmbedder:
-			async def embed(self, texts): return [[0.1, 0.2]]
-			async def close(self): pass
+			async def embed(self, texts):
+				return [[0.1, 0.2]]
+
+			async def close(self):
+				pass
 
 		assert isinstance(MyEmbedder(), EmbeddingProvider)
 
@@ -111,8 +130,10 @@ class TestOpenAIClient:
 	async def test_get_client_reuses_and_close_closes_fake_client(self):
 		class FakeAsyncClient:
 			is_closed = False
+
 			def __init__(self, *args, **kwargs):
 				self.kwargs = kwargs
+
 			async def aclose(self):
 				self.is_closed = True
 
@@ -202,10 +223,13 @@ class TestOpenAIClient:
 		class FakeStreamResponse:
 			def raise_for_status(self):
 				return None
+
 			async def __aenter__(self):
 				return self
+
 			async def __aexit__(self, exc_type, exc, tb):
 				return False
+
 			async def aiter_lines(self):
 				yield ": keepalive"
 				yield "data: not-json"
@@ -214,6 +238,7 @@ class TestOpenAIClient:
 
 		class FakeClient:
 			is_closed = False
+
 			def stream(self, method, path, json):
 				return FakeStreamResponse()
 
@@ -226,10 +251,13 @@ class TestOpenAIClient:
 	@pytest.mark.asyncio
 	async def test_chat_and_stream_error_mapping(self):
 		request = httpx.Request("POST", "http://test/chat/completions")
+
 		class TimeoutClient:
 			is_closed = False
+
 			async def post(self, path, json):
 				raise httpx.TimeoutException("timeout", request=request)
+
 			def stream(self, method, path, json):
 				raise httpx.NetworkError("network")
 
@@ -243,12 +271,18 @@ class TestOpenAIClient:
 	@pytest.mark.asyncio
 	async def test_ask_returns_message_content(self):
 		class FakeResponse:
-			def raise_for_status(self): return None
+			def raise_for_status(self):
+				return None
+
 			def json(self):
 				return {"choices": [{"message": {"content": "answer"}}]}
+
 		class FakeClient:
 			is_closed = False
-			async def post(self, path, json): return FakeResponse()
+
+			async def post(self, path, json):
+				return FakeResponse()
+
 		client = OpenAIClient(LLMConfig(base_url="http://localhost:8080", api_key="key", model="gpt-4"))
 		client._client = FakeClient()
 		assert await client.ask("hi") == "answer"
@@ -258,25 +292,38 @@ class TestOpenAIClient:
 		bad_response = httpx.Response(400, request=request, text="bad")
 		retry_response = httpx.Response(500, request=request, text="down")
 		mapper = OpenAIErrorMapper()
-		assert isinstance(mapper.provider_error_from_status(
-			httpx.HTTPStatusError("bad", request=request, response=bad_response),
-			"LLM returned error",
-		), ProviderBadRequestError)
-		assert isinstance(mapper.provider_error_from_status(
-			httpx.HTTPStatusError("down", request=request, response=retry_response),
-			"LLM returned error",
-		), RetryableProviderError)
+		assert isinstance(
+			mapper.provider_error_from_status(
+				httpx.HTTPStatusError("bad", request=request, response=bad_response),
+				"LLM returned error",
+			),
+			ProviderBadRequestError,
+		)
+		assert isinstance(
+			mapper.provider_error_from_status(
+				httpx.HTTPStatusError("down", request=request, response=retry_response),
+				"LLM returned error",
+			),
+			RetryableProviderError,
+		)
 		auth_response = httpx.Response(401, request=request, text="auth")
 		other_response = httpx.Response(418, request=request, text="teapot")
-		assert isinstance(mapper.provider_error_from_status(
-			httpx.HTTPStatusError("auth", request=request, response=auth_response),
-			"LLM returned error",
-		), ProviderAuthError)
+		assert isinstance(
+			mapper.provider_error_from_status(
+				httpx.HTTPStatusError("auth", request=request, response=auth_response),
+				"LLM returned error",
+			),
+			ProviderAuthError,
+		)
 		from axc_agent_engine.core.errors import ProviderError
-		assert isinstance(mapper.provider_error_from_status(
-			httpx.HTTPStatusError("other", request=request, response=other_response),
-			"LLM returned error",
-		), ProviderError)
+
+		assert isinstance(
+			mapper.provider_error_from_status(
+				httpx.HTTPStatusError("other", request=request, response=other_response),
+				"LLM returned error",
+			),
+			ProviderError,
+		)
 
 	def test_response_parser_empty_choices_and_cached_tokens(self):
 		parser = OpenAIResponseParser()
@@ -293,13 +340,17 @@ class TestRateLimitedProvider:
 		class Inner:
 			model = "inner"
 			tool_name_mapping = None
+
 			async def chat(self, messages, tools=None, **kwargs):
 				self.chat_args = (messages, tools, kwargs)
 				return LLMResponse(message=LLMMessage(content="chat"))
+
 			async def stream(self, messages, tools=None, **kwargs):
 				yield LLMStreamChunk(content_delta="s")
+
 			async def ask(self, prompt, **kwargs):
 				return "ask"
+
 			async def close(self):
 				self.closed = True
 

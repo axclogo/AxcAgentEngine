@@ -1,10 +1,12 @@
 """Hooks 插件 — 声明式规则拦截/转换/日志"""
+
 import ast
 import logging
 import operator
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
-from axc_agent_engine.plugins.base import BasePlugin
+from axc_agent_engine.core.errors import ConfigValueError
+from axc_agent_engine.plugins.base import BasePlugin, PreToolCallDecision
 from axc_agent_engine.plugins.builtin.config_schemas import HOOKS_CONFIG_SCHEMA
 
 if TYPE_CHECKING:
@@ -27,8 +29,9 @@ class HooksPlugin(BasePlugin):
 		for rule in self._rules:
 			_validate_rule(rule)
 
-	async def pre_tool_call(self, exec_ctx: "ExecutionContext", tool_name: str,
-					  arguments: dict) -> tuple[bool, dict]:
+	async def pre_tool_call(
+		self, exec_ctx: "ExecutionContext", tool_name: str, arguments: dict
+	) -> tuple[bool, dict] | PreToolCallDecision:
 		for rule in self._rules:
 			if rule.get("event") != "pre_tool_call":
 				continue
@@ -40,17 +43,16 @@ class HooksPlugin(BasePlugin):
 			if action == "reject":
 				msg = rule.get("params", {}).get("message", "Operation rejected by rule")
 				logger.info(f"[hooks] REJECT: {msg}")
-				self._last_rejection_reason = msg
-				self._last_rejection_code = "tool.rejected_by_hooks"
-				return False, arguments
+				return PreToolCallDecision(False, arguments, self.name, msg, "tool.rejected_by_hooks")
 			if action == "transform":
 				set_fields = rule.get("params", {}).get("set", {})
 				if set_fields:
 					arguments = {**arguments, **set_fields}
 		return True, arguments
 
-	def pre_llm_call(self, exec_ctx: "ExecutionContext", messages: list[dict],
-					 tools: list[dict] | None = None) -> tuple[list[dict], list[dict] | None]:
+	def pre_llm_call(
+		self, exec_ctx: "ExecutionContext", messages: list[dict], tools: list[dict] | None = None
+	) -> tuple[list[dict], list[dict] | None]:
 		for rule in self._rules:
 			if rule.get("event") != "pre_llm_call":
 				continue
@@ -79,8 +81,7 @@ class HooksPlugin(BasePlugin):
 				self._fire_notify(rule, {"event": "on_error", "error": str(error)})
 
 	async def on_plan_created(self, exec_ctx: "ExecutionContext", plan_info: dict) -> None:
-		"""English: This documentation describes the related engine component behavior.
-中文：计划创建事件"""
+		"""Plan creation event 计划创建事件"""
 		for rule in self._rules:
 			if rule.get("event") != "on_plan_created":
 				continue
@@ -91,8 +92,7 @@ class HooksPlugin(BasePlugin):
 				self._fire_notify(rule, {"event": "on_plan_created", **(plan_info or {})})
 
 	async def on_step_completed(self, exec_ctx: "ExecutionContext", step_info: dict) -> None:
-		"""English: This documentation describes the related engine component behavior.
-中文：步骤完成事件"""
+		"""Step completion event 步骤完成事件"""
 		for rule in self._rules:
 			if rule.get("event") != "on_step_completed":
 				continue
@@ -103,21 +103,21 @@ class HooksPlugin(BasePlugin):
 				self._fire_notify(rule, {"event": "on_step_completed", **(step_info or {})})
 
 	def _fire_notify(self, rule: dict, payload: dict) -> None:
-		"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-触发 NOTIFY 动作"""
+		"""Dispatch a notification action.
+		触发 NOTIFY 动作"""
 		callback = rule.get("params", {}).get("callback")
 		if not callable(callback):
-			raise ValueError("hooks notify action requires params.callback")
+			raise ConfigValueError("hooks notify action requires params.callback")
 		callback(payload)
 
-	async def post_tool_call(self, exec_ctx: "ExecutionContext", tool_name: str,
-					   arguments: dict, result: "ToolOutput", duration_ms: int = 0) -> "ToolOutput":
+	async def post_tool_call(
+		self, exec_ctx: "ExecutionContext", tool_name: str, arguments: dict, result: "ToolOutput", duration_ms: int = 0
+	) -> "ToolOutput":
 		for rule in self._rules:
 			if rule.get("event") != "post_tool_call":
 				continue
 			condition = rule.get("condition", "")
-			result_str = result.context_view() if result else ""
+			result_str = result.context_view()
 			eval_ctx = {"tool_name": tool_name, "arguments": arguments, "result": result_str}
 			if condition and not _safe_eval_condition(condition, eval_ctx):
 				continue
@@ -128,9 +128,12 @@ class HooksPlugin(BasePlugin):
 
 
 _SAFE_OPS = {
-	ast.Eq: operator.eq, ast.NotEq: operator.ne,
-	ast.Lt: operator.lt, ast.LtE: operator.le,
-	ast.Gt: operator.gt, ast.GtE: operator.ge,
+	ast.Eq: operator.eq,
+	ast.NotEq: operator.ne,
+	ast.Lt: operator.lt,
+	ast.LtE: operator.le,
+	ast.Gt: operator.gt,
+	ast.GtE: operator.ge,
 	ast.In: lambda a, b: a in b,
 	ast.NotIn: lambda a, b: a not in b,
 }
@@ -140,16 +143,14 @@ _ALLOWED_TYPES = (str, int, float, bool, list, dict, type(None))
 
 
 def _safe_eval_condition(condition: str, context: dict) -> bool:
-	"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-安全求值条件表达式。
+	"""Evaluate a restricted conditional expression.
+	安全求值条件表达式。
 
-	支持语法：比较（==, !=, <, >, in, not in）、布尔运算（and, or, not）、
-	字符串方法（startswith, endswith, get）、下标访问和常量。
-	"""
+	        支持语法：比较（==, !=, <, >, in, not in）、布尔运算（and, or, not）、
+	        字符串方法（startswith, endswith, get）、下标访问和常量。"""
 	if len(condition) > 500:
 		raise ValueError(f"hooks condition is too long: {len(condition)} chars")
-	#English: Bilingual note. 中文：校验 context 只包含安全类型
+	# Restrict the expression context to safe types. 中文：校验 context 只包含安全类型
 	for v in context.values():
 		if not isinstance(v, _ALLOWED_TYPES):
 			return False
@@ -200,7 +201,7 @@ def _eval_node(node: ast.AST, ctx: dict, depth: int = 0) -> Any:
 
 def _validate_rule(rule: dict[str, Any]) -> None:
 	if not isinstance(rule, dict):
-		raise ValueError("hooks rule must be an object")
+		raise ConfigValueError("hooks rule must be an object")
 	condition = str(rule.get("condition", ""))
 	if condition:
 		_validate_condition_syntax(condition)
@@ -218,8 +219,7 @@ def _validate_condition_syntax(condition: str) -> None:
 	except SyntaxError as exc:
 		raise ValueError(f"hooks condition syntax is invalid: {condition}") from exc
 	for node in ast.walk(tree):
-		if isinstance(node, ast.Call):
-			if not isinstance(node.func, ast.Attribute) or node.func.attr not in {"startswith", "endswith", "get"}:
-				raise ValueError(f"hooks condition uses unsupported call: {condition}")
-		elif isinstance(node, ast.Attribute) and not isinstance(getattr(node, "ctx", None), ast.Load):
-			raise ValueError(f"hooks condition uses unsupported attribute write: {condition}")
+		if isinstance(node, ast.Call) and (
+			not isinstance(node.func, ast.Attribute) or node.func.attr not in {"startswith", "endswith", "get"}
+		):
+			raise ValueError(f"hooks condition uses unsupported call: {condition}")

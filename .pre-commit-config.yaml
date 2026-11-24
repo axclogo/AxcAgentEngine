@@ -1,0 +1,21 @@
+repos:
+  - repo: local
+    hooks:
+      - id: ruff-check
+        name: Ruff lint
+        entry: python -m ruff check axc_agent_engine tests examples
+        language: system
+        pass_filenames: false
+        types: [python]
+      - id: ruff-format
+        name: Ruff formatting
+        entry: python -m ruff format --check axc_agent_engine tests examples
+        language: system
+        pass_filenames: false
+        types: [python]
+      - id: mypy
+        name: Engine type checks
+        entry: python -m mypy axc_agent_engine
+        language: system
+        pass_filenames: false
+        types: [python]

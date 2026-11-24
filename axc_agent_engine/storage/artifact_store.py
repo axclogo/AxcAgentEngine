@@ -1,5 +1,6 @@
 """Production artifact storage protocol and in-memory backend.
 中文：生产级 artifact 存储协议和内存后端。"""
+
 from __future__ import annotations
 
 import asyncio
@@ -50,7 +51,7 @@ class _ArtifactEntry:
 @runtime_checkable
 class ArtifactStore(Protocol):
 	"""Artifact backend owned by the host or by the default in-memory backend.
-中文：由宿主或默认内存后端实现的 artifact 存储边界。"""
+	中文：由宿主或默认内存后端实现的 artifact 存储边界。"""
 
 	async def put_text(
 		self,
@@ -96,12 +97,12 @@ class ArtifactStore(Protocol):
 
 class InMemoryArtifactStore:
 	"""Bounded artifact backend for local development and tests.
-中文：用于本地开发和测试的有界 artifact 后端。
+	中文：用于本地开发和测试的有界 artifact 后端。
 
-	Text and bytes are stored in memory. File artifacts store only a file path
-	reference and read/search the file lazily, so registering a 10GB file does
-	not copy it into memory.
-中文：文本和字节存入内存；文件 artifact 只保存路径引用，并在读取或搜索时惰性访问文件，因此注册 10GB 文件不会复制到内存。
+		Text and bytes are stored in memory. File artifacts store only a file path
+		reference and read/search the file lazily, so registering a 10GB file does
+		not copy it into memory.
+	中文：文本和字节存入内存；文件 artifact 只保存路径引用，并在读取或搜索时惰性访问文件，因此注册 10GB 文件不会复制到内存。
 	"""
 
 	def __init__(
@@ -320,8 +321,8 @@ class InMemoryArtifactStore:
 				return f.read(limit).decode("utf-8", errors="replace")
 		content = entry.content or ""
 		if isinstance(content, bytes):
-			return content[offset:offset + limit].decode("utf-8", errors="replace")
-		return content[offset:offset + limit]
+			return content[offset : offset + limit].decode("utf-8", errors="replace")
+		return content[offset : offset + limit]
 
 	def _iter_lines(self, entry: _ArtifactEntry):
 		if entry.source_type == "file":

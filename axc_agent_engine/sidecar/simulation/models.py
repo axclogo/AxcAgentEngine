@@ -1,7 +1,5 @@
-"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
+"""Core simulation data models.
 仿真核心数据模型。
-Core simulation data models.
 
 simulation package 刻意独立于 Engine/Agent/Executor。
 The simulation package is intentionally independent from Engine/Agent/Executor.
@@ -9,6 +7,7 @@ The simulation package is intentionally independent from Engine/Agent/Executor.
 Agent 可以通过适配器作为 policy 使用，但仿真内核拥有场景状态、动作、delta 和时间线记录。
 Agents may be used as policies by adapters, but the simulation kernel owns
 scenario state, actions, deltas, and timeline records."""
+
 from __future__ import annotations
 
 from copy import deepcopy
@@ -18,11 +17,9 @@ from typing import Any
 
 
 class ActionType(StrEnum):
-	"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-常见仿真动作类别。
-	Common simulation action categories.
-	"""
+	"""Common simulation action categories.
+	常见仿真动作类别。"""
+
 	COMMUNICATE = "communicate"
 	INVESTIGATE = "investigate"
 	ATTACK = "attack"
@@ -40,6 +37,7 @@ class SimulationEventType(StrEnum):
 	"""SimulationRunner.stream() 发出的事件类别。
 	Event categories emitted by SimulationRunner.stream().
 	"""
+
 	START = "start"
 	ACTOR_SELECTED = "actor_selected"
 	STEP_STARTED = "step_started"
@@ -50,11 +48,9 @@ class SimulationEventType(StrEnum):
 
 @dataclass
 class AgentProfile:
-	"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-参与场景的 actor 静态描述。
-	Static description of an actor participating in a scenario.
-	"""
+	"""Static description of an actor participating in a scenario.
+	参与场景的 actor 静态描述。"""
+
 	name: str
 	role: str = ""
 	goal: str = ""
@@ -64,11 +60,9 @@ class AgentProfile:
 
 @dataclass
 class WorldState:
-	"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-仿真世界的结构化状态。
-	Structured state of the simulated world.
-	"""
+	"""Structured state of the simulated world.
+	仿真世界的结构化状态。"""
+
 	step: int = 0
 	variables: dict[str, Any] = field(default_factory=dict)
 	resources: dict[str, Any] = field(default_factory=dict)
@@ -81,21 +75,16 @@ class WorldState:
 	artifacts: dict[str, Any] = field(default_factory=dict)
 	metadata: dict[str, Any] = field(default_factory=dict)
 
-	def clone(self) -> "WorldState":
-		"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-返回适合分支快照使用的独立副本。
-		Return a detached copy suitable for branch snapshots.
-		"""
+	def clone(self) -> WorldState:
+		"""Return a detached copy suitable for branch snapshots.
+		返回适合分支快照使用的独立副本。"""
 		import copy
+
 		return copy.deepcopy(self)
 
-	def apply_delta(self, delta: "StateDelta") -> "WorldState":
-		"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-原地应用状态 delta，并返回 self 以支持链式调用。
-		Apply a state delta in place and return self for fluent use.
-		"""
+	def apply_delta(self, delta: StateDelta) -> WorldState:
+		"""Apply a state delta in place and return self for fluent use.
+		原地应用状态 delta，并返回 self 以支持链式调用。"""
 		for fact in delta.facts_removed:
 			if fact in self.facts:
 				self.facts.remove(fact)
@@ -114,11 +103,9 @@ class WorldState:
 
 @dataclass
 class Scenario:
-	"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-一次仿真运行的输入规格。
-	Input specification for a simulation run.
-	"""
+	"""Input specification for a simulation run.
+	一次仿真运行的输入规格。"""
+
 	id: str
 	title: str
 	objective: str = ""
@@ -134,11 +121,9 @@ class Scenario:
 
 @dataclass
 class Observation:
-	"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-面向某个 Agent 的世界视图。
-	Agent-specific view of the world.
-	"""
+	"""Agent-specific view of the world.
+	面向某个 Agent 的世界视图。"""
+
 	agent: str
 	visible_state: WorldState
 	known_facts: list[str] = field(default_factory=list)
@@ -152,6 +137,7 @@ class AgentAction:
 	"""Agent policy 提出的结构化动作。
 	Structured action proposed by an agent policy.
 	"""
+
 	actor: str
 	type: str = ActionType.CUSTOM
 	intent: str = ""
@@ -164,11 +150,9 @@ class AgentAction:
 
 @dataclass
 class StateDelta:
-	"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-应用一个动作后产生的所有世界状态变更。
-	All world mutations produced by applying one action.
-	"""
+	"""All world mutations produced by applying one action.
+	应用一个动作后产生的所有世界状态变更。"""
+
 	facts_added: list[str] = field(default_factory=list)
 	facts_removed: list[str] = field(default_factory=list)
 	variables_changed: dict[str, Any] = field(default_factory=dict)
@@ -182,11 +166,9 @@ class StateDelta:
 
 @dataclass
 class Scorecard:
-	"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-一个仿真步骤的评估结果。
-	Evaluation of one simulation step.
-	"""
+	"""Evaluation of one simulation step.
+	一个仿真步骤的评估结果。"""
+
 	goal_progress: float = 0.0
 	risk_level: float = 0.0
 	cost: float = 0.0
@@ -200,11 +182,9 @@ class Scorecard:
 
 @dataclass
 class SimulationStep:
-	"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-一个已应用动作的可回放记录。
-	Replayable record of one applied action.
-	"""
+	"""Replayable record of one applied action.
+	一个已应用动作的可回放记录。"""
+
 	step_id: int
 	branch_id: str
 	actor: str
@@ -216,11 +196,9 @@ class SimulationStep:
 
 @dataclass
 class SimulationReport:
-	"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-一次仿真运行的最终摘要。
-	Final summary of a simulation run.
-	"""
+	"""Final summary of a simulation run.
+	一次仿真运行的最终摘要。"""
+
 	scenario_id: str
 	title: str
 	final_state: WorldState
@@ -233,11 +211,9 @@ class SimulationReport:
 
 @dataclass
 class SimulationEvent:
-	"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-仿真执行期间发出的结构化事件。
-	Structured event emitted during simulation execution.
-	"""
+	"""Structured event emitted during simulation execution.
+	仿真执行期间发出的结构化事件。"""
+
 	type: SimulationEventType
 	content: str = ""
 	step: SimulationStep | None = None
@@ -245,7 +221,7 @@ class SimulationEvent:
 	metadata: dict[str, Any] = field(default_factory=dict)
 
 	@classmethod
-	def start(cls, scenario: Scenario) -> "SimulationEvent":
+	def start(cls, scenario: Scenario) -> SimulationEvent:
 		return cls(
 			type=SimulationEventType.START,
 			content=scenario.title,
@@ -253,9 +229,9 @@ class SimulationEvent:
 		)
 
 	@classmethod
-	def done(cls, report: SimulationReport) -> "SimulationEvent":
+	def done(cls, report: SimulationReport) -> SimulationEvent:
 		return cls(type=SimulationEventType.DONE, content=report.summary, report=report)
 
 	@classmethod
-	def error(cls, message: str, metadata: dict[str, Any] | None = None) -> "SimulationEvent":
+	def error(cls, message: str, metadata: dict[str, Any] | None = None) -> SimulationEvent:
 		return cls(type=SimulationEventType.ERROR, content=message, metadata=deepcopy(metadata or {}))

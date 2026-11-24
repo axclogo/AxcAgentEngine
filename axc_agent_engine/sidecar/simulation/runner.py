@@ -1,11 +1,13 @@
-"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-仿真运行器。
-Simulation runner."""
+"""Simulation runner.
+仿真运行器。"""
+
 from __future__ import annotations
 
-from typing import Any, AsyncIterator, Callable
+import logging
+from collections.abc import AsyncIterator, Callable
+from typing import Any
 
+from axc_agent_engine.core.run_context import call_context_factory, dict_or_empty, sync_run_id
 from axc_agent_engine.sidecar.simulation.defaults import (
 	DefaultEnvironment,
 	DefaultEvaluator,
@@ -30,17 +32,13 @@ from axc_agent_engine.sidecar.simulation.models import (
 	WorldState,
 )
 from axc_agent_engine.sidecar.simulation.report import SimulationReportGenerator, apply_generated_report
-from axc_agent_engine.core.run_context import call_context_factory, dict_or_empty, sync_run_id
 
 ActorContextFactory = Callable[[str, int], dict]
 
 
 class SimulationReportBuilder:
-	"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-根据仿真状态构建确定性报告。
-	Builds deterministic reports from simulation state.
-	"""
+	"""Builds deterministic reports from simulation state.
+	根据仿真状态构建确定性报告。"""
 
 	def build(
 		self,
@@ -73,11 +71,8 @@ class SimulationReportBuilder:
 
 
 class SimulationStepWorker:
-	"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-按 observe、act、apply、evaluate 流程运行一个 actor 步骤。
-	Runs one actor step through observe, act, apply, and evaluate.
-	"""
+	"""Runs one actor step through observe, act, apply, and evaluate.
+	按 observe、act、apply、evaluate 流程运行一个 actor 步骤。"""
 
 	def __init__(
 		self,
@@ -117,18 +112,15 @@ class SimulationStepWorker:
 
 
 class SimulationRunner:
-	"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-按结构化 observation、action、delta 和 scoring 运行一个场景。
-	Runs a scenario through structured observation, action, delta, and scoring.
+	"""Runs a scenario through structured observation, action, delta, and scoring.
+	按结构化 observation、action、delta 和 scoring 运行一个场景。
 
-	运行器不依赖 Engine、Agent、Executor 或 MultiAgentSession。
-	The runner does not depend on Engine, Agent, Executor, or MultiAgentSession.
+	        运行器不依赖 Engine、Agent、Executor 或 MultiAgentSession。
+	        The runner does not depend on Engine, Agent, Executor, or MultiAgentSession.
 
-	这些系统后续可以提供 AgentPolicy adapter，而无需改动该内核。
-	Those systems can provide AgentPolicy adapters later without changing this
-	kernel.
-	"""
+	        这些系统后续可以提供 AgentPolicy adapter，而无需改动该内核。
+	        Those systems can provide AgentPolicy adapters later without changing this
+	        kernel."""
 
 	def __init__(
 		self,
@@ -166,11 +158,8 @@ class SimulationRunner:
 		actor_run_options: ActorContextFactory | None = None,
 		actor_metadata: ActorContextFactory | None = None,
 	) -> SimulationReport:
-		"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-运行场景直到停止条件触发，并返回报告。
-		Run the scenario until the stop condition triggers and return its report.
-		"""
+		"""Run the scenario until the stop condition triggers and return its report.
+		运行场景直到停止条件触发，并返回报告。"""
 		report: SimulationReport | None = None
 		async for event in self.stream(
 			scenario,
@@ -184,7 +173,9 @@ class SimulationRunner:
 				report = event.report
 		if report is None:
 			state = initial_state.clone() if initial_state else scenario.initial_state.clone()
-			return await self._finalize_report(self._build_report(scenario, state, [], "Simulation ended without report", error="missing_report"))
+			return await self._finalize_report(
+				self._build_report(scenario, state, [], "Simulation ended without report", error="missing_report")
+			)
 		return report
 
 	async def stream(
@@ -196,11 +187,8 @@ class SimulationRunner:
 		actor_run_options: ActorContextFactory | None = None,
 		actor_metadata: ActorContextFactory | None = None,
 	) -> AsyncIterator[SimulationEvent]:
-		"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-运行场景并发出结构化执行事件。
-		Run the scenario and emit structured execution events.
-		"""
+		"""Run the scenario and emit structured execution events.
+		运行场景并发出结构化执行事件。"""
 		state = initial_state.clone() if initial_state else scenario.initial_state.clone()
 		base_run_options = dict_or_empty(run_options, "run_options")
 		base_metadata = dict_or_empty(metadata, "metadata")
@@ -251,8 +239,11 @@ class SimulationRunner:
 						content=actor,
 						metadata={"actor": actor, "next_step_id": len(timeline) + 1},
 					)
-					step = await self._step_worker.run(actor, policy, state, scenario, timeline, request_options, request_metadata)
+					step = await self._step_worker.run(
+						actor, policy, state, scenario, timeline, request_options, request_metadata
+					)
 				except Exception as exc:
+					logging.getLogger(__name__).exception("Agent execution failed")
 					message = f"Simulation step failed for actor '{actor}': {exc}"
 					report = self._build_report(scenario, state, timeline, message, error=str(exc))
 					report = await self._finalize_report(report)

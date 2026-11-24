@@ -1,18 +1,18 @@
-"""Rate-limited LLM provider wrapper.
-中文：此文档说明相关引擎组件的行为。"""
+"""Rate-limited LLM provider wrapper. 带限流的模型供应方包装器。"""
+
 from __future__ import annotations
 
-from typing import Any, AsyncIterator
+from collections.abc import AsyncIterator
+from typing import Any
 
-from axc_agent_engine.runtime.concurrency import RateLimiter
-from axc_agent_engine.llm.provider import LLMProvider
 from axc_agent_engine.core.schema import LLMResponse, LLMStreamChunk
+from axc_agent_engine.llm.provider import LLMProvider
+from axc_agent_engine.runtime.concurrency import RateLimiter
 from axc_agent_engine.tools.name_mapping import ToolNameMappingConfig
 
 
 class RateLimitedProvider:
-	"""Wrap an LLMProvider with provider-level backpressure.
-中文：此文档说明相关引擎组件的行为。"""
+	"""Wrap an LLMProvider with provider-level backpressure. 在模型供应方入口限制并发和请求速率。"""
 
 	def __init__(
 		self,

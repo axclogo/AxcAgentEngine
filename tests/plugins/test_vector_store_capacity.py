@@ -1,5 +1,7 @@
 """Tests for #20 InMemoryVectorStore capacity limit change."""
+
 import pytest
+
 from axc_agent_engine.storage.in_memory import InMemoryVectorStore
 
 

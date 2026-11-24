@@ -1,8 +1,11 @@
 """LLM-as-Judge — 使用 LLM 评估输出质量"""
+
 from __future__ import annotations
 
 import logging
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
+
+from axc_agent_engine.core.errors import LLMError
 
 if TYPE_CHECKING:
 	from axc_agent_engine.sidecar.eval.runner import EvalCase, EvalResult
@@ -26,10 +29,9 @@ class LLMJudge:
 	def __init__(self, llm_client: Any) -> None:
 		self._llm = llm_client
 
-	async def judge(self, case: "EvalCase", result: "EvalResult") -> tuple[float, str]:
-		"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-评估单个结果，返回 (score, reason)"""
+	async def judge(self, case: EvalCase, result: EvalResult) -> tuple[float, str]:
+		"""Score a result and explain the score.
+		评估单个结果，返回 (score, reason)"""
 		prompt = JUDGE_PROMPT.format(
 			input=case.input,
 			expected=case.expected_output or "(无期望输出)",
@@ -38,15 +40,14 @@ class LLMJudge:
 		try:
 			response = await self._llm.ask(prompt)
 			return self._parse_response(response)
-		except Exception as e:
+		except (LLMError, OSError, RuntimeError, ValueError) as e:
 			logger.warning(f"[judge] LLM evaluation failed: {e}")
 			return 0.0, f"评估失败: {e}"
 
 	@staticmethod
 	def _parse_response(response: str) -> tuple[float, str]:
-		"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-解析 LLM 评估响应"""
+		"""Parse a model evaluation.
+		解析 LLM 评估响应"""
 		response = response.strip()
 		if "|" in response:
 			parts = response.split("|", 1)

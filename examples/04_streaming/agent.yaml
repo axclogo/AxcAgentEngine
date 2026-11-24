@@ -2,6 +2,7 @@ name: "streaming-demo"
 description: "流式输出 + thinking 展示"
 
 runtime:
+  strategy: por
   max_rounds: 10
   thinking: "auto"
   workspace: "/tmp/axc-streaming"
@@ -12,6 +13,7 @@ system_prompt: |
   你是一个助手。回答问题时先思考再回答。
 
 plugins:
+  por: {enabled: true, mode: auto}
   builtin_tools:
     enabled: true
     load: ["python_exec", "get_time"]

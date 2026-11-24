@@ -1,93 +1,73 @@
 """PluginManager — 统一分发插件 hook。"""
-import logging
-from dataclasses import dataclass
+
+from copy import deepcopy
+from dataclasses import replace
 from typing import Any
 
 from axc_agent_engine.core.context import ExecutionContext
-from axc_agent_engine.plugins.base import BasePlugin
-
-logger = logging.getLogger(__name__)
-
-
-@dataclass(frozen=True)
-class PreToolCallDecision:
-	allowed: bool
-	arguments: dict
-	plugin_name: str = ""
-	reason: str = ""
-	code: str = "tool.rejected_by_plugin"
-	details: dict | None = None
-
-
-class PluginHookRunner:
-	"""Executes plugin hooks and propagates plugin errors.
-中文：此文档说明相关引擎组件的行为。"""
-
-	async def call_async(self, plugin: BasePlugin, method: str, *args: Any) -> None:
-		await getattr(plugin, method)(*args)
-
-	def call_sync(self, plugin: BasePlugin, method: str, *args: Any) -> Any:
-		return getattr(plugin, method)(*args)
-
-	async def apply_pre_tool_call(
-		self,
-		plugins: list[BasePlugin],
-		ctx: ExecutionContext,
-		tool_name: str,
-		arguments: dict,
-	) -> PreToolCallDecision:
-		for p in plugins:
-			raw = await p.pre_tool_call(ctx, tool_name, arguments)
-			decision = _normalize_pre_tool_decision(raw, p, arguments)
-			arguments = decision.arguments
-			if not decision.allowed:
-				return decision
-		return PreToolCallDecision(True, arguments)
-
-	async def apply_post_tool_call(
-		self,
-		plugins: list[BasePlugin],
-		ctx: ExecutionContext,
-		tool_name: str,
-		arguments: dict,
-		output: Any,
-		duration_ms: int,
-	) -> Any:
-		for p in plugins:
-			output = await p.post_tool_call(ctx, tool_name, arguments, output, duration_ms)
-		return output
+from axc_agent_engine.plugins.base import BasePlugin, PreToolCallDecision
 
 
 class PluginManager:
-	"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-封装插件列表，并提供统一的 hook 分发方法。"""
+	"""Dispatch hooks in plugin order.
+	封装插件列表，并提供统一的 hook 分发方法。"""
 
 	def __init__(self, plugins: list[BasePlugin]) -> None:
 		self._plugins = plugins
-		self._hook_runner = PluginHookRunner()
 
 	@property
 	def plugins(self) -> list[BasePlugin]:
 		return self._plugins
 
-	#English: Bilingual note. 中文：── 异步 hooks ──
+	def fork_checkpoint_fields(self, ctx: ExecutionContext) -> dict:
+		"""Collect portable state only when every plugin supports the cut. 仅在所有插件均支持该切点时采集状态。"""
+		blocked = [plugin.name for plugin in self._plugins if not plugin.supports_session_fork]
+		if blocked:
+			return {"fork_blocker": f"Session state cannot be forked for plugins: {', '.join(blocked)}"}
+		states = {}
+		for plugin in self._plugins:
+			state = plugin.capture_session(ctx)
+			if state is not None and not isinstance(state, dict):
+				raise TypeError(f"{plugin.name}.capture_session must return a dict or None")
+			states[plugin.name] = state
+		return {"fork_state": states}
+
+	def fork_scopes(self, scopes: dict, source: dict, target: dict, states: dict | None) -> dict:
+		names = {p.name for p in self._plugins}
+		if scopes.keys() - names or (states is not None and states.keys() != names):
+			raise ValueError("Fork requires the recorded session plugins")
+		resolved = {}
+		for plugin in self._plugins:
+			if not plugin.supports_session_fork:
+				raise ValueError(f"Plugin {plugin.name} cannot fork its session")
+			state = deepcopy(states[plugin.name]) if states is not None else None
+			scope = plugin.fork_scope(scopes.get(plugin.name), source, target, state)
+			if scope is not None:
+				if not isinstance(scope, str) or not scope.strip():
+					raise TypeError(f"{plugin.name}.fork_scope must return a nonblank string or None")
+				resolved[plugin.name] = scope
+		return resolved
+
+	async def restore_session(self, ctx: ExecutionContext, states: dict) -> None:
+		for plugin in self._plugins:
+			state = states[plugin.name]
+			if state is not None:
+				await plugin.restore_session(ctx, deepcopy(state))
+
+	# Asynchronous hooks. 中文：── 异步 hooks ──
 
 	async def on_execution_start(self, ctx: ExecutionContext) -> None:
-		"""English: This documentation describes the related engine component behavior.
-中文：通知所有插件执行已开始。"""
+		"""Notify plugins when execution begins. 通知所有插件执行已开始。"""
 		for p in self._plugins:
-			await self._call_async_hook(p, "on_execution_start", ctx)
+			await p.on_execution_start(ctx)
 
 	async def on_execution_end(self, ctx: ExecutionContext, result: str, error: str) -> None:
-		"""English: This documentation describes the related engine component behavior.
-中文：通知所有插件执行已结束。"""
+		"""Notify plugins when execution ends. 通知所有插件执行已结束。"""
 		for p in self._plugins:
-			await self._call_async_hook(p, "on_execution_end", ctx, result, error)
+			await p.on_execution_end(ctx, result, error)
 
 	async def on_execution_complete(self, ctx: ExecutionContext, result: str, trace: dict) -> str:
-		"""English: This documentation describes the related engine component behavior.
-中文：执行完成后的流水线，插件可修改最终结果。"""
+		"""Pass the final result through completion hooks. 执行完成后的流水线，插件可修改最终结果。"""
 		for p in self._plugins:
 			result = await p.on_execution_complete(ctx, result, trace)
 		return result
@@ -99,40 +79,42 @@ class PluginManager:
 		assistant_message: str,
 		tool_calls: list,
 	) -> None:
-		"""English: This documentation describes the related engine component behavior.
-中文：通知所有插件一轮执行已结束。"""
+		"""Notify plugins at the end of a round. 通知所有插件一轮执行已结束。"""
 		for p in self._plugins:
-			await self._call_async_hook(p, "on_round_end", ctx, user_message, assistant_message, tool_calls)
+			await p.on_round_end(ctx, user_message, assistant_message, tool_calls)
 
 	async def on_error(self, ctx: ExecutionContext, error: Exception) -> None:
-		"""English: This documentation describes the related engine component behavior.
-中文：通知所有插件发生错误。"""
+		"""Notify plugins of an execution error. 通知所有插件发生错误。"""
 		for p in self._plugins:
-			await self._call_async_hook(p, "on_error", ctx, error)
+			await p.on_error(ctx, error)
 
 	async def on_plan_created(self, ctx: ExecutionContext, plan_info: dict) -> None:
-		"""English: This documentation describes the related engine component behavior.
-中文：通知所有插件计划已创建。"""
+		"""Notify plugins of a new plan. 通知所有插件计划已创建。"""
 		for p in self._plugins:
-			await self._call_async_hook(p, "on_plan_created", ctx, plan_info)
+			await p.on_plan_created(ctx, plan_info)
 
 	async def on_step_completed(self, ctx: ExecutionContext, step_info: dict) -> None:
-		"""English: This documentation describes the related engine component behavior.
-中文：通知所有插件步骤已完成。"""
+		"""Notify plugins of a completed step. 通知所有插件步骤已完成。"""
 		for p in self._plugins:
-			await self._call_async_hook(p, "on_step_completed", ctx, step_info)
+			await p.on_step_completed(ctx, step_info)
 
-	async def post_llm_call(self, ctx: ExecutionContext, messages: list[dict], response: dict, duration_ms: int) -> None:
+	async def post_llm_call(
+		self, ctx: ExecutionContext, messages: list[dict], response: dict, duration_ms: int
+	) -> None:
 		"""LLM 调用后通知所有插件。"""
 		for p in self._plugins:
-			await self._call_async_hook(p, "post_llm_call", ctx, messages, response, duration_ms)
+			await p.post_llm_call(ctx, messages, response, duration_ms)
 
-	async def apply_pre_tool_call(self, ctx: ExecutionContext, tool_name: str,
-								  arguments: dict) -> PreToolCallDecision:
-		"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-执行所有插件的 pre_tool_call hooks，返回带拒绝原因的决策。"""
-		return await self._hook_runner.apply_pre_tool_call(self._plugins, ctx, tool_name, arguments)
+	async def apply_pre_tool_call(self, ctx: ExecutionContext, tool_name: str, arguments: dict) -> PreToolCallDecision:
+		"""Run pre-tool hooks and collect their decision.
+		执行所有插件的 pre_tool_call hooks，返回带拒绝原因的决策。"""
+		for plugin in self._plugins:
+			raw = await plugin.pre_tool_call(ctx, tool_name, arguments)
+			decision = _pre_tool_decision(raw, plugin.name)
+			if not decision.allowed:
+				return decision
+			arguments = decision.arguments
+		return PreToolCallDecision(True, arguments)
 
 	async def apply_post_tool_call(
 		self,
@@ -142,17 +124,11 @@ class PluginManager:
 		output: Any,
 		duration_ms: int,
 	) -> Any:
-		"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-执行所有插件的 post_tool_call hooks，返回修改后的 ToolOutput。"""
-		return await self._hook_runner.apply_post_tool_call(
-			self._plugins,
-			ctx,
-			tool_name,
-			arguments,
-			output,
-			duration_ms,
-		)
+		"""Apply tool output transformations.
+		执行所有插件的 post_tool_call hooks，返回修改后的 ToolOutput。"""
+		for plugin in self._plugins:
+			output = await plugin.post_tool_call(ctx, tool_name, arguments, output, duration_ms)
+		return output
 
 	async def on_tool_call_failed(
 		self,
@@ -162,41 +138,37 @@ class PluginManager:
 		error: dict,
 		duration_ms: int,
 	) -> None:
-		"""English: This documentation describes the related engine component behavior.
-中文：通知工具调用失败；用于观测类插件补齐失败链路。"""
+		"""Notify observers of a failed tool call. 通知工具调用失败；用于观测类插件补齐失败链路。"""
 		for p in self._plugins:
 			await p.on_tool_call_failed(ctx, tool_name, arguments, error, duration_ms)
 
-	#English: Bilingual note. 中文：── 同步 hooks ──
+	# Synchronous hooks. 中文：── 同步 hooks ──
 
 	def collect_context(self, ctx: ExecutionContext) -> str:
-		"""English: This documentation describes the related engine component behavior.
-中文：收集所有插件要注入的上下文。"""
+		"""Collect context contributed by all plugins. 收集所有插件要注入的上下文。"""
 		parts = []
 		for p in self._plugins:
-			result = self._call_sync_hook(p, "inject_context", ctx)
+			result = p.inject_context(ctx)
 			if result:
 				parts.append(result)
 		return "\n\n".join(parts)
 
 	def transform_messages(self, messages: list[dict], ctx: ExecutionContext, current_message: str) -> list[dict]:
-		"""English: This documentation describes the related engine component behavior.
-中文：按顺序应用所有插件的消息转换。"""
+		"""Apply plugin transformations in registration order. 按顺序应用所有插件的消息转换。"""
 		for p in self._plugins:
-			result = self._call_sync_hook(p, "transform_messages", messages, ctx, current_message)
-			if result is not None:
-				messages = result
+			messages = p.transform_messages(messages, ctx, current_message)
+			if not isinstance(messages, list):
+				raise TypeError(f"{p.name}.transform_messages must return a list")
 		return messages
 
 	def check_should_stop(self, ctx: ExecutionContext) -> tuple[bool, str]:
-		"""English: This documentation describes the related engine component behavior.
-中文：检查是否有插件要求停止执行。"""
+		"""Check whether a plugin requested a stop. 检查是否有插件要求停止执行。"""
 		for p in self._plugins:
-			result = self._call_sync_hook(p, "should_stop", ctx)
-			if result is not None:
-				stop, reason = result
-				if stop:
-					return True, reason
+			stop, reason = p.should_stop(ctx)
+			if not isinstance(stop, bool):
+				raise TypeError(f"{p.name}.should_stop must return a boolean stop flag")
+			if stop:
+				return True, reason
 		return False, ""
 
 	def apply_pre_llm_call(
@@ -205,81 +177,24 @@ class PluginManager:
 		messages: list[dict],
 		tools: list[dict] | None,
 	) -> tuple[list[dict], list[dict] | None]:
-		"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
+		"""Apply model request hooks.
 		应用所有插件的 pre-LLM-call hooks。"""
 		for p in self._plugins:
-			result = self._call_sync_hook(p, "pre_llm_call", ctx, messages, tools)
-			if result is not None:
-				messages, tools = result
+			messages, tools = p.pre_llm_call(ctx, messages, tools)
 		return messages, tools
 
-	#English: Source note. 中文：── 内部辅助方法 ──
 
-	def _call_sync_hook(self, plugin: BasePlugin, method: str, *args: Any) -> Any:
-		"""English: Bilingual documentation follows.
-	中文：以下为双语文档说明。
-	调用同步插件方法；插件异常直接抛出。"""
-		return self._hook_runner.call_sync(plugin, method, *args)
-
-	async def _call_async_hook(self, plugin: BasePlugin, method: str, *args: Any) -> None:
-		"""English: Bilingual documentation follows.
-	中文：以下为双语文档说明。
-	调用异步插件方法；插件异常直接抛出。"""
-		await self._hook_runner.call_async(plugin, method, *args)
-
-
-def _normalize_pre_tool_decision(raw: Any, plugin: BasePlugin,
-								 previous_arguments: dict) -> PreToolCallDecision:
-	plugin_name = str(getattr(plugin, "name", "") or plugin.__class__.__name__)
+def _pre_tool_decision(raw: tuple[bool, dict] | PreToolCallDecision, plugin_name: str) -> PreToolCallDecision:
 	if isinstance(raw, PreToolCallDecision):
-		if raw.plugin_name:
-			return raw
-		return PreToolCallDecision(
-			allowed=raw.allowed,
-			arguments=dict(raw.arguments),
-			plugin_name=plugin_name if not raw.allowed else "",
-			reason=raw.reason,
-			code=raw.code,
-			details=dict(raw.details or {}) if raw.details is not None else None,
-		)
-	if not isinstance(raw, tuple) or len(raw) != 2:
+		decision = raw
+	elif isinstance(raw, tuple) and len(raw) == 2:
+		decision = PreToolCallDecision(*raw)
+	else:
 		raise TypeError(f"{plugin_name}.pre_tool_call must return (allowed, arguments) or PreToolCallDecision")
-	allowed, arguments = raw
-	if not isinstance(arguments, dict):
+	if not isinstance(decision.allowed, bool):
+		raise TypeError(f"{plugin_name}.pre_tool_call allowed must be a boolean")
+	if not isinstance(decision.arguments, dict):
 		raise TypeError(f"{plugin_name}.pre_tool_call arguments must be a dict")
-	allowed = bool(allowed)
-	return PreToolCallDecision(
-		allowed=allowed,
-		arguments=dict(arguments),
-		plugin_name=plugin_name if not allowed else "",
-		reason=_plugin_rejection_reason(plugin) if not allowed else "",
-		code=_plugin_rejection_code(plugin) if not allowed else "tool.rejected_by_plugin",
-		details=_plugin_rejection_details(plugin) if not allowed else None,
-	)
-
-
-def _plugin_rejection_reason(plugin: BasePlugin) -> str:
-	return str(
-		getattr(plugin, "last_rejection_reason", "")
-		or getattr(plugin, "_last_rejection_reason", "")
-		or getattr(plugin, "_stop_reason", "")
-		or ""
-	)
-
-
-def _plugin_rejection_code(plugin: BasePlugin) -> str:
-	return str(
-		getattr(plugin, "last_rejection_code", "")
-		or getattr(plugin, "_last_rejection_code", "")
-		or "tool.rejected_by_plugin"
-	)
-
-
-def _plugin_rejection_details(plugin: BasePlugin) -> dict:
-	details = getattr(plugin, "last_rejection_details", None)
-	if details is None:
-		details = getattr(plugin, "_last_rejection_details", {})
-	if not isinstance(details, dict):
-		return {"guard_name": getattr(plugin, "name", "") or plugin.__class__.__name__}
-	return {"guard_name": getattr(plugin, "name", "") or plugin.__class__.__name__, **details}
+	if not decision.allowed and not decision.plugin_name:
+		return replace(decision, plugin_name=plugin_name)
+	return decision

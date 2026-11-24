@@ -1,5 +1,5 @@
-"""Tool audit event recording.
-中文：此文档说明相关引擎组件的行为。"""
+"""Tool audit event recording. 记录工具审计事件。"""
+
 from __future__ import annotations
 
 import logging
@@ -55,18 +55,20 @@ async def audit_tool_event(
 	if not sink:
 		return
 	try:
-		await sink.record(AuditEvent(
-			type=event_type,
-			actor=actor,
-			session_id=session_id,
-			tool_name=tool_name,
-			tool_call_id=tool_call_id,
-			capability=capability,
-			risk_level=risk_level,
-			allowed=allowed,
-			duration_ms=duration_ms,
-			error=error.to_dict() if error else {},
-			metadata=metadata or {},
-		))
+		await sink.record(
+			AuditEvent(
+				type=event_type,
+				actor=actor,
+				session_id=session_id,
+				tool_name=tool_name,
+				tool_call_id=tool_call_id,
+				capability=capability,
+				risk_level=risk_level,
+				allowed=allowed,
+				duration_ms=duration_ms,
+				error=error.to_dict() if error else {},
+				metadata=metadata or {},
+			)
+		)
 	except Exception as e:
-		logger.warning(f"Audit sink record error: {e}")
+		logger.warning(f"Audit sink record error: {e}", exc_info=True)

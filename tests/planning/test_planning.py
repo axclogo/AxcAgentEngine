@@ -1,34 +1,38 @@
 """Tests for planning module — planner, scheduler, observer, replanner, por_runner."""
-import pytest
+
 import json
 from unittest.mock import AsyncMock
 
-from axc_agent_engine.planning.planner import Plan, PlanStep, create_plan, validate_plan
-from axc_agent_engine.planning.planning_service import PlanningService
+import pytest
+
+from axc_agent_engine.core.context import ExecutionConfig, ExecutionContext
 from axc_agent_engine.core.errors import SchemaError
-from axc_agent_engine.planning.scheduler import get_next_steps, get_remaining_count, mark_step_done, mark_step_failed
-from axc_agent_engine.planning.observer import observe_step
-from axc_agent_engine.planning.replanner import replan, should_replan
-from axc_agent_engine.planning.step_executor import build_step_prompt
-from axc_agent_engine.planning.por_runner import PORRunner
-from axc_agent_engine.planning.runtime import PlanRuntime
-from axc_agent_engine.core.schema import StepStatus
-from axc_agent_engine.core.schema import LLMMessage, LLMResponse, LLMUsage, ToolDefinition
 from axc_agent_engine.core.events import EventType
-from axc_agent_engine.core.context import ExecutionContext, ExecutionConfig
+from axc_agent_engine.core.llm_caller import LLMCaller
 from axc_agent_engine.core.message_store import MessageStore
 from axc_agent_engine.core.plugin_manager import PluginManager
-from axc_agent_engine.core.llm_caller import LLMCaller
+from axc_agent_engine.core.schema import LLMMessage, LLMResponse, LLMUsage, StepStatus, ToolDefinition
+from axc_agent_engine.planning.observer import observe_step
+from axc_agent_engine.planning.planner import Plan, PlanStep, create_plan, validate_plan
+from axc_agent_engine.planning.planning_service import PlanningService
+from axc_agent_engine.planning.por_runner import PORRunner
+from axc_agent_engine.planning.replanner import replan, should_replan
+from axc_agent_engine.planning.runtime import PlanRuntime
+from axc_agent_engine.planning.scheduler import get_next_steps, get_remaining_count, mark_step_done, mark_step_failed
+from axc_agent_engine.planning.step_executor import build_step_prompt
 from axc_agent_engine.tools.registry import ToolRegistry
 from axc_agent_engine.tools.tool_output import ToolOutput
 
 
 class TestCreatePlan:
 	def test_basic(self):
-		plan = create_plan("goal", [
-			{"step_id": 1, "description": "step 1"},
-			{"step_id": 2, "description": "step 2", "depends_on": [1]},
-		])
+		plan = create_plan(
+			"goal",
+			[
+				{"step_id": 1, "description": "step 1"},
+				{"step_id": 2, "description": "step 2", "depends_on": [1]},
+			],
+		)
 		assert plan.goal == "goal"
 		assert len(plan.steps) == 2
 		assert plan.steps[1].depends_on == [1]
@@ -43,18 +47,24 @@ class TestCreatePlan:
 		assert plan.steps[0].depends_on == []
 
 	def test_validate_plan_rejects_duplicate_steps(self):
-		plan = create_plan("goal", [
-			{"step_id": 1, "description": "a"},
-			{"step_id": 1, "description": "b"},
-		])
+		plan = create_plan(
+			"goal",
+			[
+				{"step_id": 1, "description": "a"},
+				{"step_id": 1, "description": "b"},
+			],
+		)
 		with pytest.raises(SchemaError, match="Duplicate"):
 			validate_plan(plan)
 
 	def test_validate_plan_rejects_cycles(self):
-		plan = create_plan("goal", [
-			{"step_id": 1, "description": "a", "depends_on": [2]},
-			{"step_id": 2, "description": "b", "depends_on": [1]},
-		])
+		plan = create_plan(
+			"goal",
+			[
+				{"step_id": 1, "description": "a", "depends_on": [2]},
+				{"step_id": 2, "description": "b", "depends_on": [1]},
+			],
+		)
 		with pytest.raises(SchemaError, match="cycle"):
 			validate_plan(plan)
 
@@ -89,37 +99,49 @@ class TestCreatePlan:
 
 class TestScheduler:
 	def test_get_next_steps_no_deps(self):
-		plan = Plan(goal="g", steps=[
-			PlanStep(step_id=1, description="a"),
-			PlanStep(step_id=2, description="b"),
-		])
+		plan = Plan(
+			goal="g",
+			steps=[
+				PlanStep(step_id=1, description="a"),
+				PlanStep(step_id=2, description="b"),
+			],
+		)
 		ready = get_next_steps(plan)
 		assert len(ready) == 2
 
 	def test_get_next_steps_with_deps(self):
-		plan = Plan(goal="g", steps=[
-			PlanStep(step_id=1, description="a"),
-			PlanStep(step_id=2, description="b", depends_on=[1]),
-		])
+		plan = Plan(
+			goal="g",
+			steps=[
+				PlanStep(step_id=1, description="a"),
+				PlanStep(step_id=2, description="b", depends_on=[1]),
+			],
+		)
 		ready = get_next_steps(plan)
 		assert len(ready) == 1
 		assert ready[0].step_id == 1
 
 	def test_get_next_steps_dep_done(self):
-		plan = Plan(goal="g", steps=[
-			PlanStep(step_id=1, description="a", status=StepStatus.DONE),
-			PlanStep(step_id=2, description="b", depends_on=[1]),
-		])
+		plan = Plan(
+			goal="g",
+			steps=[
+				PlanStep(step_id=1, description="a", status=StepStatus.DONE),
+				PlanStep(step_id=2, description="b", depends_on=[1]),
+			],
+		)
 		ready = get_next_steps(plan)
 		assert len(ready) == 1
 		assert ready[0].step_id == 2
 
 	def test_get_remaining_count(self):
-		plan = Plan(goal="g", steps=[
-			PlanStep(step_id=1, description="a", status=StepStatus.DONE),
-			PlanStep(step_id=2, description="b"),
-			PlanStep(step_id=3, description="c"),
-		])
+		plan = Plan(
+			goal="g",
+			steps=[
+				PlanStep(step_id=1, description="a", status=StepStatus.DONE),
+				PlanStep(step_id=2, description="b"),
+				PlanStep(step_id=3, description="c"),
+			],
+		)
 		assert get_remaining_count(plan) == 2
 
 	def test_mark_step_done(self):
@@ -163,7 +185,9 @@ class TestObserver:
 	@pytest.mark.asyncio
 	async def test_observe_with_llm(self):
 		llm = AsyncMock()
-		llm.ask = AsyncMock(return_value='{"step_ok": true, "goal_achieved": false, "action": "continue", "reason": "ok"}')
+		llm.ask = AsyncMock(
+			return_value='{"step_ok": true, "goal_achieved": false, "action": "continue", "reason": "ok"}'
+		)
 		obs = await observe_step(1, StepStatus.DONE, "result", "desc", "goal", 2, llm)
 		assert obs.action == "continue"
 
@@ -184,10 +208,13 @@ class TestReplanner:
 
 	@pytest.mark.asyncio
 	async def test_replan_without_new_steps(self):
-		plan = Plan(goal="g", steps=[
-			PlanStep(step_id=1, description="a", status=StepStatus.FAILED),
-			PlanStep(step_id=2, description="b", depends_on=[1]),
-		])
+		plan = Plan(
+			goal="g",
+			steps=[
+				PlanStep(step_id=1, description="a", status=StepStatus.FAILED),
+				PlanStep(step_id=2, description="b", depends_on=[1]),
+			],
+		)
 		result = await replan(plan, 1)
 		assert result.replan_count == 1
 		assert result.steps[1].status == StepStatus.SKIPPED
@@ -196,19 +223,25 @@ class TestReplanner:
 	async def test_replan_with_llm(self):
 		llm = AsyncMock()
 		llm.ask = AsyncMock(return_value='[{"step_id": 5, "description": "retry"}]')
-		plan = Plan(goal="g", steps=[
-			PlanStep(step_id=1, description="a", status=StepStatus.FAILED, error="oops"),
-		])
+		plan = Plan(
+			goal="g",
+			steps=[
+				PlanStep(step_id=1, description="a", status=StepStatus.FAILED, error="oops"),
+			],
+		)
 		result = await replan(plan, 1, llm)
 		assert any(s.step_id == 5 for s in result.steps)
 
 
 class TestStepExecutor:
 	def test_build_step_prompt(self):
-		plan = Plan(goal="Build app", steps=[
-			PlanStep(step_id=1, description="Setup", status=StepStatus.DONE, result="done"),
-			PlanStep(step_id=2, description="Code", tools_needed=["file_write"]),
-		])
+		plan = Plan(
+			goal="Build app",
+			steps=[
+				PlanStep(step_id=1, description="Setup", status=StepStatus.DONE, result="done"),
+				PlanStep(step_id=2, description="Code", tools_needed=["file_write"]),
+			],
+		)
 		prompt = build_step_prompt(plan, plan.steps[1])
 		assert "Build app" in prompt
 		assert "Code" in prompt
@@ -270,11 +303,14 @@ class TestPORRunner:
 		reg = ToolRegistry()
 		runtime = PlanRuntime(llm_caller=caller, message_store=ms, registry=reg, plugin_manager=pm, ctx=ctx)
 		runner = PORRunner(runtime=runtime)
-		plan = Plan(goal="parallel plan", steps=[
-			PlanStep(step_id=1, description="First independent step"),
-			PlanStep(step_id=2, description="Second independent step"),
-			PlanStep(step_id=3, description="Dependent step", depends_on=[1, 2]),
-		])
+		plan = Plan(
+			goal="parallel plan",
+			steps=[
+				PlanStep(step_id=1, description="First independent step"),
+				PlanStep(step_id=2, description="Second independent step"),
+				PlanStep(step_id=3, description="Dependent step", depends_on=[1, 2]),
+			],
+		)
 		events = []
 		async for event in runner.run(plan, "parallel plan"):
 			events.append(event)
@@ -297,10 +333,12 @@ class TestPORRunner:
 				return LLMResponse(
 					message=LLMMessage(
 						content="",
-						tool_calls=[{
-							"id": "tc-1",
-							"function": {"name": "noop", "arguments": json.dumps({})},
-						}],
+						tool_calls=[
+							{
+								"id": "tc-1",
+								"function": {"name": "noop", "arguments": json.dumps({})},
+							}
+						],
 					),
 					usage=LLMUsage(input_tokens=1, output_tokens=1),
 				)
@@ -351,10 +389,12 @@ class TestPORRunner:
 					return LLMResponse(
 						message=LLMMessage(
 							content="",
-							tool_calls=[{
-								"id": "tc-1",
-								"function": {"name": "noop", "arguments": json.dumps({})},
-							}],
+							tool_calls=[
+								{
+									"id": "tc-1",
+									"function": {"name": "noop", "arguments": json.dumps({})},
+								}
+							],
 						),
 						usage=LLMUsage(input_tokens=1, output_tokens=1),
 					)
@@ -395,4 +435,49 @@ class TestPORRunner:
 
 def _response(content: str):
 	from axc_agent_engine.core.schema import LLMMessage, LLMResponse, LLMUsage
+
 	return LLMResponse(message=LLMMessage(content=content), usage=LLMUsage(input_tokens=1, output_tokens=1))
+
+
+@pytest.mark.parametrize(
+	"bad_step",
+	[
+		"text",
+		{"step_id": "1", "description": "do"},
+		{"step_id": True, "description": "do"},
+		{"step_id": 1, "description": ["action"]},
+		{"step_id": 1, "description": "do", "depends_on": 12},
+		{"step_id": 1, "description": "do", "tools_needed": "fetch"},
+	],
+)
+def test_bad_model_step_is_ignored(bad_step):
+	assert PlanningService.detect_plan({"content": json.dumps({"goal": "example", "steps": [bad_step]})}) is None
+
+
+async def test_invalid_replan_keeps_previous_progress_and_uses_fallback():
+	done = PlanStep(1, "done", status=StepStatus.DONE, result="useful output")
+	failed = PlanStep(2, "failed", status=StepStatus.FAILED)
+	pending = PlanStep(3, "independent")
+	plan = Plan("review", [done, failed, pending])
+	model = AsyncMock()
+	model.ask.return_value = '[{"step_id":1,"description":"repeat completed work"}]'
+	await replan(plan, 2, model)
+	assert plan.replan_count == 1
+	assert plan.steps == [done, failed, pending]
+	assert done.result == "useful output"
+
+
+def test_long_plan_with_forward_references():
+	count = 1500
+	plan = Plan(
+		"long chain", [PlanStep(i, "step", depends_on=[i + 1] if i < count else []) for i in range(1, count + 1)]
+	)
+	validate_plan(plan)
+
+
+def test_step_prompt_keeps_old_direct_dependencies_once():
+	completed = [PlanStep(i, str(i), status=StepStatus.DONE, result=f"output-{i}") for i in range(1, 7)]
+	target = PlanStep(7, "package", depends_on=[1, 6])
+	prompt = build_step_prompt(Plan("release", [*completed, target]), target)
+	assert all(prompt.count(f"output-{i}") == 1 for i in (1, 4, 5, 6))
+	assert "output-2" not in prompt

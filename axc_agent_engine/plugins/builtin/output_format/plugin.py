@@ -1,7 +1,8 @@
 """OutputFormat 插件 — 输出格式约束与校验"""
+
 import json
 import logging
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from axc_agent_engine.core.errors import ErrorCategory, ErrorEnvelope, PluginError
 from axc_agent_engine.core.schema import ToolDefinition
@@ -44,9 +45,8 @@ class OutputFormatPlugin(BasePlugin):
 		self._plugin_ctx = plugin_ctx
 
 	def inject_context(self, exec_ctx: "ExecutionContext", topic: str = "") -> str:
-		"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-注入格式要求到 system_prompt"""
+		"""Add output formatting requirements to the system prompt.
+		注入格式要求到 system_prompt"""
 		if not self._type:
 			return ""
 		if self._type == "json_schema" and self._schema:
@@ -59,9 +59,8 @@ class OutputFormatPlugin(BasePlugin):
 		return ""
 
 	async def on_execution_complete(self, exec_ctx: "ExecutionContext", result: str, trace: dict) -> str:
-		"""English: This documentation describes the related engine component behavior.
-中文：校验并可选修复最终输出。"""
-		if not result or not self._type:
+		"""Validate and optionally repair the final output. 校验并可选修复最终输出。"""
+		if not self._type:
 			return result
 		service = self._service()
 		repair_result = None
@@ -88,22 +87,24 @@ class OutputFormatPlugin(BasePlugin):
 		return result
 
 	def get_tools(self) -> list[ToolDefinition]:
-		return [ToolDefinition(
-			name="output_format_validate",
-			description="根据已配置的输出格式契约校验草稿内容。",
-			parameters={
-				"type": "object",
-				"properties": {
-					"content": {"type": "string", "description": "需要校验的草稿内容"},
-					"repair": {"type": "boolean", "description": "是否尝试修复", "default": False},
+		return [
+			ToolDefinition(
+				name="output_format_validate",
+				description="根据已配置的输出格式契约校验草稿内容。",
+				parameters={
+					"type": "object",
+					"properties": {
+						"content": {"type": "string", "description": "需要校验的草稿内容"},
+						"repair": {"type": "boolean", "description": "是否尝试修复", "default": False},
+					},
+					"required": ["content"],
 				},
-				"required": ["content"],
-			},
-			is_read_only=True,
-			capability="output_validation",
-			risk_level="safe",
-			execute=self._tool_validate,
-		)]
+				is_read_only=True,
+				capability="output_validation",
+				risk_level="safe",
+				execute=self._tool_validate,
+			)
+		]
 
 	def _validate_output(self, output: str) -> bool:
 		return self._service().validate(output).valid
@@ -140,6 +141,7 @@ class OutputFormatPlugin(BasePlugin):
 
 	async def _tool_validate(self, args: dict, context: dict):
 		from axc_agent_engine.tools.tool_output import ToolOutput
+
 		content = str(args.get("content", ""))
 		if not content:
 			return ToolOutput.error("content 不能为空")
@@ -147,11 +149,17 @@ class OutputFormatPlugin(BasePlugin):
 		service = self._service()
 		if repair:
 			result = await service.repair_with_result(content, max_attempts=self._repair_attempts)
-			return ToolOutput.json_output(result.to_dict(), summary="输出格式校验通过" if result.validation.valid else "输出格式校验失败")
+			return ToolOutput.json_output(
+				result.to_dict(), summary="输出格式校验通过" if result.validation.valid else "输出格式校验失败"
+			)
 		validation = service.validate(content)
-		return ToolOutput.json_output(validation.to_dict(), summary="输出格式校验通过" if validation.valid else "输出格式校验失败")
+		return ToolOutput.json_output(
+			validation.to_dict(), summary="输出格式校验通过" if validation.valid else "输出格式校验失败"
+		)
 
-	async def _record_result(self, exec_ctx: "ExecutionContext", validation, repair_result=None, strict_failed: bool = False) -> None:
+	async def _record_result(
+		self, exec_ctx: "ExecutionContext", validation, repair_result=None, strict_failed: bool = False
+	) -> None:
 		payload = {
 			"valid": validation.valid,
 			"format_type": self._type,
@@ -172,6 +180,7 @@ class OutputFormatPlugin(BasePlugin):
 		if not exec_ctx.services.audit_sink:
 			return
 		from axc_agent_engine.observability.audit import AuditEvent
+
 		metadata = exec_ctx.state.metadata
 		error = {}
 		if not payload["valid"]:
@@ -182,22 +191,23 @@ class OutputFormatPlugin(BasePlugin):
 				retryable=bool(self._auto_repair and payload["repair_attempts"] < self._repair_attempts),
 				details={"errors": payload["errors"]},
 			).to_dict()
-		await exec_ctx.services.audit_sink.record(AuditEvent(
-			type="output_format_validated" if payload["valid"] else "output_format_failed",
-			actor=str(metadata.get("agent_name") or metadata.get("user_id") or ""),
-			session_id=str(metadata.get("session_id") or ""),
-			tool_name="output_format",
-			capability="output_validation",
-			risk_level="safe",
-			allowed=payload["valid"],
-			error=error,
-			metadata=payload,
-		))
+		await exec_ctx.services.audit_sink.record(
+			AuditEvent(
+				type="output_format_validated" if payload["valid"] else "output_format_failed",
+				actor=str(metadata.get("agent_name") or metadata.get("user_id") or ""),
+				session_id=str(metadata.get("session_id") or ""),
+				tool_name="output_format",
+				capability="output_validation",
+				risk_level="safe",
+				allowed=payload["valid"],
+				error=error,
+				metadata=payload,
+			)
+		)
 
 
 class OutputContractError(PluginError):
-	"""Raised when strict output contract validation fails.
-中文：此文档说明相关引擎组件的行为。"""
+	"""Raised when strict output contract validation fails. 严格输出契约校验失败。"""
 
 	def __init__(self, errors: list[str], details: dict[str, Any] | None = None) -> None:
 		self.errors = list(errors)

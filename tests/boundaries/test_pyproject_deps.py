@@ -5,6 +5,7 @@ class TestDependencyRanges:
 	def test_httpx_range_tightened(self):
 		"""Verify httpx dependency is <0.29 not <1.0."""
 		import tomllib
+
 		with open("pyproject.toml", "rb") as f:
 			data = tomllib.load(f)
 		deps = data["project"]["dependencies"]
@@ -14,6 +15,7 @@ class TestDependencyRanges:
 
 	def test_pydantic_range(self):
 		import tomllib
+
 		with open("pyproject.toml", "rb") as f:
 			data = tomllib.load(f)
 		deps = data["project"]["dependencies"]
@@ -23,6 +25,7 @@ class TestDependencyRanges:
 
 	def test_pyyaml_range(self):
 		import tomllib
+
 		with open("pyproject.toml", "rb") as f:
 			data = tomllib.load(f)
 		deps = data["project"]["dependencies"]

@@ -1,11 +1,10 @@
-"""English: This documentation describes the related engine component behavior.
-中文：数学工具函数。"""
+"""Vector math helpers. 数学工具函数。"""
+
 import math
 
 
 def cosine_similarity(vec_a: list[float], vec_b: list[float]) -> float:
-	"""English: This documentation describes the related engine component behavior.
-中文：计算两个向量的余弦相似度。"""
+	"""Compute cosine similarity between two vectors. 计算两个向量的余弦相似度。"""
 	if not vec_a or not vec_b or len(vec_a) != len(vec_b):
 		return 0.0
 	dot = sum(a * b for a, b in zip(vec_a, vec_b))

@@ -1,7 +1,6 @@
-"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-从 Agent 执行轨迹中蒸馏可复用指导。
-Distill reusable guidance from Agent execution traces."""
+"""Distill reusable guidance from Agent execution traces.
+从 Agent 执行轨迹中蒸馏可复用指导。"""
+
 from __future__ import annotations
 
 from collections import Counter, defaultdict
@@ -11,11 +10,9 @@ from typing import Any
 
 @dataclass(frozen=True)
 class TraceStep:
-	"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-用于蒸馏的最小可回放步骤。
-	Minimal replayable step for distillation.
-	"""
+	"""Minimal replayable step for distillation.
+	用于蒸馏的最小可回放步骤。"""
+
 	role: str
 	content: str = ""
 	tool_name: str = ""
@@ -26,11 +23,9 @@ class TraceStep:
 
 @dataclass(frozen=True)
 class ExecutionTrace:
-	"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-宿主提供的执行轨迹。
-	Host-provided execution trace.
-	"""
+	"""Host-provided execution trace.
+	宿主提供的执行轨迹。"""
+
 	trace_id: str
 	task: str = ""
 	agent_name: str = ""
@@ -42,11 +37,9 @@ class ExecutionTrace:
 
 @dataclass(frozen=True)
 class DistilledRule:
-	"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-一条蒸馏出的行为规则。
-	One distilled behavior rule.
-	"""
+	"""One distilled behavior rule.
+	一条蒸馏出的行为规则。"""
+
 	text: str
 	confidence: float
 	evidence: list[str] = field(default_factory=list)
@@ -54,11 +47,9 @@ class DistilledRule:
 
 @dataclass(frozen=True)
 class DistillationReport:
-	"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-适用于 prompt、skill 或 policy 更新的蒸馏结果。
-	Distillation result suitable for prompt, skill, or policy updates.
-	"""
+	"""Distillation result suitable for prompt, skill, or policy updates.
+	适用于 prompt、skill 或 policy 更新的蒸馏结果。"""
+
 	rules: list[DistilledRule] = field(default_factory=list)
 	tool_preferences: list[str] = field(default_factory=list)
 	anti_patterns: list[DistilledRule] = field(default_factory=list)
@@ -67,11 +58,8 @@ class DistillationReport:
 
 
 class DistillationReportBuilder:
-	"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-从轨迹聚合中构建确定性的蒸馏报告。
-	Builds deterministic distillation reports from trace aggregates.
-	"""
+	"""Builds deterministic distillation reports from trace aggregates.
+	从轨迹聚合中构建确定性的蒸馏报告。"""
 
 	def build(self, traces: list[ExecutionTrace], min_success_score: float = 0.7) -> DistillationReport:
 		successes = [trace for trace in traces if trace.success and trace.score >= min_success_score]
@@ -98,16 +86,16 @@ class DistillationReportBuilder:
 			DistilledRule(
 				text=f"Avoid repeating failure pattern: {error}",
 				confidence=round(count / max(1, len(failures)), 3),
-				evidence=[trace.trace_id for trace in failures if any(_compact(step.error) == error for step in trace.steps)],
+				evidence=[
+					trace.trace_id for trace in failures if any(_compact(step.error) == error for step in trace.steps)
+				],
 			)
 			for error, count in failure_errors.most_common(5)
 			if error
 		]
 		tool_preferences = [tool for tool, _ in tool_success.most_common()]
 		skill_candidates = [
-			f"Create a skill for recurring '{task}' tasks"
-			for task, count in task_patterns.most_common(5)
-			if count >= 3
+			f"Create a skill for recurring '{task}' tasks" for task, count in task_patterns.most_common(5) if count >= 3
 		]
 		return DistillationReport(
 			rules=rules,
@@ -130,18 +118,22 @@ class DistillationReportBuilder:
 			success_count = tool_success[tool]
 			if count >= 2 and success_count > 0:
 				confidence = success_count / count
-				rules.append(DistilledRule(
-					text=f"Prefer tool '{tool}' for similar tasks when its inputs are available.",
-					confidence=round(confidence, 3),
-					evidence=evidence_by_tool[tool][:5],
-				))
+				rules.append(
+					DistilledRule(
+						text=f"Prefer tool '{tool}' for similar tasks when its inputs are available.",
+						confidence=round(confidence, 3),
+						evidence=evidence_by_tool[tool][:5],
+					)
+				)
 		for task, count in task_patterns.most_common(5):
 			if count >= 2:
-				rules.append(DistilledRule(
-					text=f"Treat '{task}' tasks as a recurring task family and route them through a repeatable checklist.",
-					confidence=round(min(1.0, count / max(1, len(traces))), 3),
-					evidence=[trace.trace_id for trace in traces if _task_family(trace.task) == task][:5],
-				))
+				rules.append(
+					DistilledRule(
+						text=f"Treat '{task}' tasks as a recurring task family and route them through a repeatable checklist.",
+						confidence=round(min(1.0, count / max(1, len(traces))), 3),
+						evidence=[trace.trace_id for trace in traces if _task_family(trace.task) == task][:5],
+					)
+				)
 		return rules
 
 

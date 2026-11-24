@@ -14,7 +14,6 @@ from axc_agent_engine.plugins.builtin.memory.plugin import (
 	_layer_counts,
 	_normalize_fact_text,
 	_public_memory,
-	_resource_name,
 )
 from axc_agent_engine.plugins.builtin.memory.support.graph import DefaultEntityResolver, GraphMemory
 from axc_agent_engine.plugins.builtin.memory.support.service import (
@@ -51,12 +50,16 @@ async def test_memory_repository_scope_privacy_and_helpers():
 	class Store:
 		def __init__(self):
 			self.values = {}
+
 		async def list_keys(self, prefix):
 			return [key for key in self.values if key.startswith(prefix)]
+
 		async def get(self, key):
 			return self.values.get(key)
+
 		async def set(self, key, value):
 			self.values[key] = value
+
 		async def delete(self, key):
 			self.values.pop(key, None)
 
@@ -86,22 +89,28 @@ async def test_memory_repository_scope_privacy_and_helpers():
 	assert _changed_access_ids(before, after) == ["m"]
 	assert _access_snapshot(after)["m"] == ("new", 1)
 	assert _public_memory({"id": "m", "extra": "hidden"}) == {
-		"id": "m", "layer": "", "content": "", "fact_type": "", "importance": 0.0,
-		"confidence": 0.0, "source": "", "created_at": "", "last_accessed_at": "",
-		"access_count": 0, "metadata": {},
+		"id": "m",
+		"layer": "",
+		"content": "",
+		"fact_type": "",
+		"importance": 0.0,
+		"confidence": 0.0,
+		"source": "",
+		"created_at": "",
+		"last_accessed_at": "",
+		"access_count": 0,
+		"metadata": {},
 	}
 	assert _layer_counts([{"layer": "semantic"}, {"layer": "semantic"}]) == {"semantic": 2}
 	assert _is_negative_fact("I do not like this")
 	assert _normalize_fact_text("I do not like this") == "i do like this"
-	assert _resource_name(None, "d") == "d"
-	assert _resource_name(False, "d") == ""
-	assert _resource_name("x", "d") == "x"
 
 
 async def test_memory_plugin_loading_capacity_audit_and_extraction_paths():
 	class LLM:
 		def __init__(self, response):
 			self.response = response
+
 		async def ask(self, prompt):
 			if isinstance(self.response, Exception):
 				raise self.response
@@ -109,26 +118,31 @@ async def test_memory_plugin_loading_capacity_audit_and_extraction_paths():
 
 	audit = InMemoryAuditSink()
 	plugin = MemoryPlugin()
-	plugin.initialize({"min_content_length": 3, "max_memories": 1, "auto_extract": True}, PluginContext(kv_store=None, utility_model=None))
+	plugin.initialize(
+		{"min_content_length": 3, "max_memories": 1, "auto_extract": True},
+		PluginContext(kv_store=None, utility_model=None),
+	)
 	ctx = ExecutionContext(services=ExecutionServices(audit_sink=audit))
 	ctx.state.metadata["agent_name"] = "agent"
 	await plugin.on_execution_start(ctx)
-	assert plugin._loaded_scopes
+	assert plugin._scope(ctx).loaded
 	await plugin.on_round_end(ctx, "long enough memory", "", [])
-	await plugin._add_memory("second memory", 0.2, exec_ctx=ctx)
-	assert len(plugin._memories) == 1
+	await plugin._scope(ctx)._add_memory("second memory", 0.2, exec_ctx=ctx)
+	assert len(plugin._scope(ctx)._service.dump()) == 1
 	assert (await audit.list_events())[-1].type == "memory_added"
-	assert plugin._compute_score({"importance": 1, "created_at": "bad", "content": "second memory"}, "second") > 0
-	assert plugin._valid_extracted_fact({"content": "x", "importance": "bad"}) is False
-	assert plugin._valid_extracted_fact({"content": "", "importance": 0.5}) is False
-	assert plugin._ttl_expired_ids() == []
-	plugin._schedule_persist([plugin._memories[0]["id"]], ctx)
-	await plugin._flush_background_tasks()
+	assert plugin._scope(ctx)._valid_extracted_fact({"content": "x", "importance": "bad"}) is False
+	assert plugin._scope(ctx)._valid_extracted_fact({"content": "", "importance": 0.5}) is False
+	assert plugin._scope(ctx)._ttl_expired_ids() == []
+	plugin.inject_context(ctx)
+	await plugin.on_execution_end(ctx, "", "")
 
 	with_llm = MemoryPlugin()
-	with_llm.initialize({"min_content_length": 3}, PluginContext(kv_store=None, utility_model=LLM('[{"content":"json fact","importance":0.9,"type":"episodic"}]')))
+	with_llm.initialize(
+		{"min_content_length": 3},
+		PluginContext(kv_store=None, utility_model=LLM('[{"content":"json fact","importance":0.9,"type":"episodic"}]')),
+	)
 	await with_llm.on_round_end(ExecutionContext(), "hello", "world", [])
-	assert with_llm._memories[0]["layer"] == MemoryLayer.EPISODIC
+	assert with_llm._scope(None)._service.dump()[0]["layer"] == MemoryLayer.EPISODIC
 
 	failing = MemoryPlugin()
 	failing.initialize({"min_content_length": 3}, PluginContext(kv_store=None, utility_model=LLM(RuntimeError("down"))))
@@ -136,7 +150,8 @@ async def test_memory_plugin_loading_capacity_audit_and_extraction_paths():
 	await failing.on_round_end(fail_ctx, "hello", "world", [])
 	assert fail_ctx.state.metadata["memory"]["stats"]["extraction_failures"] == 1
 
-	assert (await plugin._add_memory_tool_result("x", 0.1, "bad-layer", "fact", ctx)).is_error
+	add = next(tool for tool in plugin.get_tools() if tool.name == "memory_add")
+	assert (await add.execute({"content": "x", "layer": "bad-layer"}, {"exec_ctx": ctx})).is_error
 
 
 def test_memory_service_store_dedup_decay_context_and_fact_parsing_edges():
@@ -180,16 +195,21 @@ def test_memory_service_external_store_replace_all_path_and_custom_protocols():
 	class Store:
 		def __init__(self):
 			self.items = {}
+
 		def add_item(self, item):
 			self.items[item.id] = item
 			return item
+
 		def get_item(self, item_id):
 			return self.items.get(item_id)
+
 		def list_items(self, layer=None):
 			return [item for item in self.items.values() if not layer or item.layer == str(layer)]
+
 		def update_item(self, item):
 			self.items[item.id] = item
 			return item
+
 		def delete_item(self, item_id):
 			return self.items.pop(item_id, None) is not None
 
@@ -217,13 +237,16 @@ def test_memory_fact_parser_similarity_and_item_roundtrip_edges():
 	assert parse_facts_response("no json") == []
 	assert parse_facts_response("[bad") == []
 	assert parse_facts_response('{"not":"list"}') == []
-	assert parse_facts_response("```json\n[{\"content\":\" x \",\"importance\":9,\"type\":\"lesson\"}]\n```") == [
+	assert parse_facts_response('```json\n[{"content":" x ","importance":9,"type":"lesson"}]\n```') == [
 		{"type": "lesson", "content": "x", "importance": 0.9}
 	]
 	assert parse_facts_response('[{"content":""}, "bad"]') == []
 	assert char_similarity("", "x") == 0.0
 	assert char_similarity("a", "a") == 1.0
-	assert SimilarityDeduplicator(1.0).find_duplicate("abc", [MemoryItem(id="m", layer="semantic", content="abc")]).id == "m"
+	assert (
+		SimilarityDeduplicator(1.0).find_duplicate("abc", [MemoryItem(id="m", layer="semantic", content="abc")]).id
+		== "m"
+	)
 	item = MemoryItem.from_dict({"content": "x", "importance": "0.2", "confidence": "0.3", "access_count": "2"})
 	assert item.content == "x"
 	assert item.access_count == 2

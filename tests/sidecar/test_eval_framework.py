@@ -1,6 +1,7 @@
+from axc_agent_engine.core.events import Event
 from axc_agent_engine.sidecar.eval import (
-	AnnotationReply,
 	AnnotationMatcher,
+	AnnotationReply,
 	EvalCase,
 	EvalDataset,
 	EvalResult,
@@ -11,7 +12,6 @@ from axc_agent_engine.sidecar.eval import (
 from axc_agent_engine.sidecar.eval.judge import LLMJudge
 from axc_agent_engine.sidecar.eval.report import generate_report
 from axc_agent_engine.sidecar.eval.runner import EvalCaseExecutor, EvalScorer
-from axc_agent_engine.core.events import Event
 
 
 class FakeAgent:
@@ -21,6 +21,7 @@ class FakeAgent:
 	async def stream(self, message, **kwargs):
 		self.calls.append({"message": message, **kwargs})
 		from axc_agent_engine.core.events import Event
+
 		yield Event.done(f"answer:{message}")
 
 
@@ -190,11 +191,13 @@ async def test_eval_store_replaces_results_by_case_id():
 
 async def test_annotation_matcher_exact_and_lexical_match():
 	store = InMemoryAnnotationStore()
-	await store.save_reply(AnnotationReply(
-		case_id="a1",
-		answer="cached answer",
-		metadata={"input": "how do I reset my password"},
-	))
+	await store.save_reply(
+		AnnotationReply(
+			case_id="a1",
+			answer="cached answer",
+			metadata={"input": "how do I reset my password"},
+		)
+	)
 	matcher = AnnotationMatcher(store, threshold=0.6)
 
 	exact = await matcher.match("how do I reset my password")
@@ -217,11 +220,13 @@ async def test_annotation_matcher_uses_embedding_provider():
 			pass
 
 	store = InMemoryAnnotationStore()
-	await store.save_reply(AnnotationReply(
-		case_id="a1",
-		answer="billing answer",
-		metadata={"input": "invoice payment issue"},
-	))
+	await store.save_reply(
+		AnnotationReply(
+			case_id="a1",
+			answer="billing answer",
+			metadata={"input": "invoice payment issue"},
+		)
+	)
 	matcher = AnnotationMatcher(store, embedding_provider=Embeddings(), threshold=0.9)
 
 	match = await matcher.match("billing question")
@@ -316,12 +321,15 @@ async def test_llm_judge_parse_and_error_paths():
 		def __init__(self, response="", fail=False):
 			self.response = response
 			self.fail = fail
+
 		async def ask(self, prompt):
 			if self.fail:
 				raise RuntimeError("down")
 			return self.response
 
-	score, reason = await LLMJudge(LLM("1.5|great")).judge(EvalCase(input="i", expected_output="e"), EvalResult("c", "i", "a"))
+	score, reason = await LLMJudge(LLM("1.5|great")).judge(
+		EvalCase(input="i", expected_output="e"), EvalResult("c", "i", "a")
+	)
 	assert score == 1.0
 	assert reason == "great"
 	assert LLMJudge._parse_response("0.4 maybe")[0] == 0.4
@@ -334,10 +342,13 @@ async def test_llm_judge_parse_and_error_paths():
 def test_generate_report_summary_and_empty():
 	empty = generate_report([])
 	assert empty.total_cases == 0
-	report = generate_report([
-		EvalResult("c1", "i", "a", score=1.0, input_tokens=1, output_tokens=2, duration_ms=3),
-		EvalResult("c2", "i", "b", score=0.2, input_tokens=4, output_tokens=5, duration_ms=6),
-	], pass_threshold=0.6)
+	report = generate_report(
+		[
+			EvalResult("c1", "i", "a", score=1.0, input_tokens=1, output_tokens=2, duration_ms=3),
+			EvalResult("c2", "i", "b", score=0.2, input_tokens=4, output_tokens=5, duration_ms=6),
+		],
+		pass_threshold=0.6,
+	)
 	assert report.passed == 1
 	assert report.failed == 1
 	assert report.avg_score == 0.6

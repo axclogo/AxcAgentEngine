@@ -1,9 +1,15 @@
 """Tests for #25 Event type categories and #7 Event factory methods."""
+
 from axc_agent_engine.core.events import (
-	Event, EventType,
-	STREAM_EVENTS, THINKING_EVENTS, TOOL_EVENTS,
-	PLAN_EVENTS, SYSTEM_EVENTS, TERMINAL_EVENTS,
+	PLAN_EVENTS,
+	STREAM_EVENTS,
 	SUB_AGENT_EVENTS,
+	SYSTEM_EVENTS,
+	TERMINAL_EVENTS,
+	THINKING_EVENTS,
+	TOOL_EVENTS,
+	Event,
+	EventType,
 )
 
 
@@ -52,8 +58,13 @@ class TestEventCategories:
 
 	def test_all_event_types_categorized(self):
 		all_categorized = (
-			STREAM_EVENTS | THINKING_EVENTS | TOOL_EVENTS | PLAN_EVENTS | SYSTEM_EVENTS | TERMINAL_EVENTS |
-			SUB_AGENT_EVENTS
+			STREAM_EVENTS
+			| THINKING_EVENTS
+			| TOOL_EVENTS
+			| PLAN_EVENTS
+			| SYSTEM_EVENTS
+			| TERMINAL_EVENTS
+			| SUB_AGENT_EVENTS
 		)
 		all_types = set(EventType)
 		assert all_types == all_categorized
@@ -78,7 +89,7 @@ class TestEventCategories:
 			SUB_AGENT_EVENTS,
 		]
 		for i, cat_a in enumerate(categories):
-			for cat_b in categories[i+1:]:
+			for cat_b in categories[i + 1 :]:
 				assert cat_a & cat_b == frozenset()
 
 

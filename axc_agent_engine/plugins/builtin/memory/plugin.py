@@ -1,16 +1,22 @@
 """Memory 插件 — 记忆提取/存储/召回/衰减（KVStore 持久化）"""
+
 import asyncio
 import logging
-import math
 import re
-from datetime import datetime, timedelta, timezone
-from typing import Any, TYPE_CHECKING
+from datetime import UTC, datetime, timedelta
+from typing import TYPE_CHECKING, Any
 
+from axc_agent_engine.core.errors import LLMError
 from axc_agent_engine.core.schema import ToolDefinition
-from axc_agent_engine.plugins.builtin.memory.support.service import MemoryLayer, MemoryService, char_similarity, parse_facts_response
 from axc_agent_engine.plugins.base import BasePlugin
 from axc_agent_engine.plugins.builtin.common import bounded_int
 from axc_agent_engine.plugins.builtin.config_schemas import MEMORY_CONFIG_SCHEMA
+from axc_agent_engine.plugins.builtin.memory.support.service import (
+	MemoryLayer,
+	MemoryService,
+	char_similarity,
+	parse_facts_response,
+)
 
 if TYPE_CHECKING:
 	from axc_agent_engine.core.context import ExecutionContext
@@ -28,25 +34,36 @@ _DEFAULT_SENSITIVE_PATTERNS = [
 ]
 
 
+def _scope_component(value: str) -> str:
+	return value.replace("%", "%25").replace("|", "%7C").replace("=", "%3D").replace(":", "%3A")
+
+
 class MemoryScopeResolver:
 	def __init__(self, namespace: str, scope_keys: list[str], include_session_scope: bool) -> None:
 		self.namespace = namespace
 		self.scope_keys = scope_keys
 		self.include_session_scope = include_session_scope
 
+	@property
+	def is_private(self) -> bool:
+		return self.include_session_scope or "session_id" in self.scope_keys or "run_id" in self.scope_keys
+
 	def scope_id(self, exec_ctx: "ExecutionContext | None") -> str:
-		parts = [self.namespace]
-		metadata = exec_ctx.state.metadata if exec_ctx else {}
+		return self.from_metadata(exec_ctx.state.metadata if exec_ctx else {})
+
+	def from_metadata(self, metadata: dict) -> str:
+		parts = [_scope_component(self.namespace)]
 		for key in self.scope_keys:
 			value = metadata.get(key)
-			if value:
-				parts.append(f"{key}={value}")
+			if value not in (None, ""):
+				parts.append(f"{_scope_component(key)}={_scope_component(str(value))}")
 		if self.include_session_scope and metadata.get("session_id"):
-			parts.append(f"session_id={metadata['session_id']}")
+			parts.append(f"session_id={_scope_component(str(metadata['session_id']))}")
 		return "|".join(parts)
 
 	def key_prefix(self, scope: str) -> str:
-		return f"{_MEMORY_KEY_PREFIX}{scope}:"
+		prefix = "memory-v2:" if "%" in scope else _MEMORY_KEY_PREFIX
+		return f"{prefix}{scope}:"
 
 
 class MemoryPrivacyPolicy:
@@ -77,9 +94,12 @@ class MemoryRepository:
 		if not self.store:
 			return []
 		records: list[dict] = []
-		for key in await self.store.list_keys(self.scope_resolver.key_prefix(scope)):
+		prefix = self.scope_resolver.key_prefix(scope)
+		for key in await self.store.list_keys(prefix):
+			if ":" in key[len(prefix) :]:
+				continue
 			data = await self.store.get(key)
-			if data:
+			if data and key == f"{prefix}{data.get('id')}" and data.get("metadata", {}).get("scope", scope) == scope:
 				records.append(data)
 		return records
 
@@ -136,7 +156,14 @@ class MemoryExtractionService:
 						continue
 					if len(item["content"]) >= self.min_content_length and not is_duplicate(item["content"]):
 						layer = MemoryLayer.EPISODIC if item.get("type") == "episodic" else MemoryLayer.SEMANTIC
-						await add_memory(item["content"], item.get("importance", 0.5), fact_type=item.get("type", "fact"), layer=layer, source="auto_extract", exec_ctx=exec_ctx)
+						await add_memory(
+							item["content"],
+							item.get("importance", 0.5),
+							fact_type=item.get("type", "fact"),
+							layer=layer,
+							source="auto_extract",
+							exec_ctx=exec_ctx,
+						)
 				return
 			for line in content.strip().split("\n"):
 				line = line.strip()
@@ -150,154 +177,20 @@ class MemoryExtractionService:
 					continue
 				if len(fact) >= self.min_content_length and not is_duplicate(fact):
 					await add_memory(fact, min(max(importance, 0.0), 1.0), source="auto_extract", exec_ctx=exec_ctx)
-		except Exception as e:
+		except (LLMError, OSError, RuntimeError, ValueError) as e:
 			await on_failure(e)
 
 
-class MemoryToolHandlers:
-	def __init__(self, plugin: "MemoryPlugin") -> None:
-		self.plugin = plugin
-
-	async def add(self, args: dict, context: dict):
-		return await self.add_memory_result(
-			content=args.get("content", ""),
-			importance=args.get("importance", 0.7),
-			layer=args.get("layer", MemoryLayer.SEMANTIC),
-			fact_type=args.get("fact_type", "fact"),
-			exec_ctx=context.get("exec_ctx") if isinstance(context, dict) else None,
-		)
-
-	async def add_fact(self, args: dict, context: dict):
-		return await self.add_memory_result(
-			content=args.get("content", ""),
-			importance=args.get("importance", 0.7),
-			layer=MemoryLayer.SEMANTIC,
-			fact_type=args.get("fact_type", "fact"),
-			exec_ctx=context.get("exec_ctx") if isinstance(context, dict) else None,
-		)
-
-	async def add_lesson(self, args: dict, context: dict):
-		return await self.add_memory_result(
-			content=args.get("content", ""),
-			importance=args.get("importance", 0.9),
-			layer=MemoryLayer.LESSON,
-			fact_type="lesson",
-			exec_ctx=context.get("exec_ctx") if isinstance(context, dict) else None,
-		)
-
-	async def add_memory_result(self, content: str, importance: float, layer: str, fact_type: str,
-								exec_ctx: "ExecutionContext | None" = None):
-		from axc_agent_engine.tools.tool_output import ToolOutput
-		if not content:
-			return ToolOutput.error("content 不能为空")
-		try:
-			layer_value = MemoryLayer(str(layer))
-		except ValueError:
-			return ToolOutput.error(f"invalid memory layer: {layer}")
-		plugin = self.plugin
-		async with plugin._lock:
-			await plugin._load_memories(exec_ctx)
-			sanitized, privacy = plugin._privacy_policy.sanitize(content)
-			if privacy["rejected"]:
-				return ToolOutput.error("memory rejected by sensitive content policy")
-			if plugin._is_duplicate(sanitized):
-				plugin._stats["duplicates"] += 1
-				plugin._sync_metadata(exec_ctx)
-				return ToolOutput.json_output({"status": "duplicate", "message": "记忆已存在"})
-			conflict = plugin._find_conflict(sanitized, fact_type, str(layer_value))
-			await plugin._add_memory(content, importance, fact_type=fact_type, layer=layer_value, exec_ctx=exec_ctx, metadata={"manual": True})
-		payload = {
-			"status": "ok",
-			"message": "记忆已添加",
-			"layer": str(layer_value),
-			"fact_type": fact_type,
-			"redacted": privacy["redacted"],
-			"conflict": bool(conflict),
-			"conflict_with": conflict["id"] if conflict else "",
-		}
-		return ToolOutput.json_output(
-			payload,
-			summary=f"记忆已添加到 {layer_value}",
-		)
-
-	async def search(self, args: dict, context: dict):
-		from axc_agent_engine.tools.tool_output import ToolOutput
-		plugin = self.plugin
-		exec_ctx = context.get("exec_ctx") if isinstance(context, dict) else None
-		query = str(args.get("query", ""))
-		layer = args.get("layer")
-		top_k = bounded_int(args.get("top_k", 5), 1, 50)
-		async with plugin._lock:
-			await plugin._load_memories(exec_ctx)
-			items = await plugin._retrieve_memories(query, layer, top_k, exec_ctx)
-			plugin._stats["searches"] += 1
-			await plugin._persist_memories([item.id for item in items], exec_ctx)
-			plugin._sync_metadata(exec_ctx)
-		memories = [_public_memory(item.to_dict()) for item in items]
-		return ToolOutput(
-			content={"memories": memories, "query": query},
-			content_type="json",
-			summary=f"找到 {len(items)} 条记忆",
-			llm_view=_memory_search_llm_view(query, memories),
-		)
-
-	async def list(self, args: dict, context: dict):
-		from axc_agent_engine.tools.tool_output import ToolOutput
-		plugin = self.plugin
-		exec_ctx = context.get("exec_ctx") if isinstance(context, dict) else None
-		layer = args.get("layer")
-		limit = bounded_int(args.get("limit", 20), 1, 200)
-		async with plugin._lock:
-			await plugin._load_memories(exec_ctx)
-			items = [item for item in plugin._service.items if not layer or item.layer == str(layer)]
-			items.sort(key=lambda item: item.created_at, reverse=True)
-			plugin._sync_metadata(exec_ctx)
-		return ToolOutput.json_output(
-			{"memories": [_public_memory(item.to_dict()) for item in items[:limit]], "count": len(items)},
-			summary=f"列出 {min(len(items), limit)} 条记忆",
-		)
-
-	async def delete(self, args: dict, context: dict):
-		from axc_agent_engine.tools.tool_output import ToolOutput
-		plugin = self.plugin
-		exec_ctx = context.get("exec_ctx") if isinstance(context, dict) else None
-		mem_id = str(args.get("id", ""))
-		if not mem_id:
-			return ToolOutput.error("id 不能为空")
-		async with plugin._lock:
-			await plugin._load_memories(exec_ctx)
-			deleted = plugin._service.store.delete_item(mem_id)
-			if deleted:
-				plugin._sync_memories_view()
-				await plugin._delete_memories([mem_id], exec_ctx)
-				plugin._stats["deleted"] += 1
-				await plugin._audit_memory(exec_ctx, "deleted", mem_id, capability="memory_delete", risk_level="dangerous")
-			plugin._sync_metadata(exec_ctx)
-		return ToolOutput.json_output({"deleted": deleted, "id": mem_id}, summary="记忆已删除" if deleted else "记忆不存在")
-
-	async def export(self, args: dict, context: dict):
-		from axc_agent_engine.tools.tool_output import ToolOutput
-		plugin = self.plugin
-		exec_ctx = context.get("exec_ctx") if isinstance(context, dict) else None
-		layer = args.get("layer")
-		async with plugin._lock:
-			await plugin._load_memories(exec_ctx)
-			memories = [_public_memory(item) for item in plugin._memories if not layer or item.get("layer") == str(layer)]
-			plugin._sync_metadata(exec_ctx)
-		return ToolOutput.json_output({"memories": memories, "count": len(memories)}, summary=f"导出 {len(memories)} 条记忆")
-
-
 class MemoryPlugin(BasePlugin):
-	"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-记忆系统 — 依赖 KVStore Protocol 持久化
+	"""Persist memory through the host key-value store.
+	记忆系统 — 依赖 KVStore Protocol 持久化
 
-	配置项：
-	  context_budget: int = 2000          # 上下文注入字符预算
-	  decay_half_life: int = 7            # 衰减半衰期（天）
-	  dedup_threshold: float = 0.85       # 去重相似度阈值
-	  min_content_length: int = 50        # 最小记忆内容长度
-	"""
+	        配置项：
+	          context_budget: int = 2000          # 上下文注入字符预算
+	          decay_half_life: int = 7            # 衰减半衰期（天）
+	          dedup_threshold: float = 0.85       # 去重相似度阈值
+	          min_content_length: int = 50        # 最小记忆内容长度"""
+
 	name = "memory"
 	display_name = "记忆系统"
 	priority = 20
@@ -309,93 +202,83 @@ class MemoryPlugin(BasePlugin):
 		self._decay_half_life = config.get("decay_half_life", 7)
 		self._dedup_threshold = config.get("dedup_threshold", 0.85)
 		self._min_content_length = config.get("min_content_length", 50)
-		self._namespace = str(config.get("namespace", "default"))
-		self._scope_keys = list(config.get("scope_keys", ["tenant_id", "user_id", "agent_name"]))
-		self._include_session_scope = bool(config.get("session_scope", False))
-		self._sensitive_policy = str(config.get("sensitive_policy", "redact"))
-		self._sensitive_patterns = [re.compile(pattern) for pattern in config.get("sensitive_patterns", _DEFAULT_SENSITIVE_PATTERNS)]
-		self._scope_resolver = MemoryScopeResolver(self._namespace, self._scope_keys, self._include_session_scope)
-		self._privacy_policy = MemoryPrivacyPolicy(self._sensitive_policy, self._sensitive_patterns)
-		self._max_memories = int(config.get("max_memories", 10000))
-		self._ttl_days = int(config.get("ttl_days", 0) or 0)
-		self._auto_extract = bool(config.get("auto_extract", True))
-		self._plugin_ctx = plugin_ctx
-		self._store = plugin_ctx.kv_store
-		self._repository = MemoryRepository(self._store, self._scope_resolver)
-		self._extraction_service = MemoryExtractionService(self._min_content_length)
-		self._tool_handlers = MemoryToolHandlers(self)
-		self._memories: list[dict] = []
-		self._service = MemoryService(
-			dedup_threshold=self._dedup_threshold,
-			decay_half_life_days=self._decay_half_life,
+		self._scope_resolver = MemoryScopeResolver(
+			config.get("namespace", "default"),
+			config.get("scope_keys", ["tenant_id", "user_id", "agent_name"]),
+			config.get("session_scope", False),
 		)
-		self._loaded_scopes: set[str] = set()
-		self._scope_cache: dict[str, list[dict]] = {}
-		self._active_scope = self._scope_resolver.scope_id(None)
-		self._lock = asyncio.Lock()
-		self._background_tasks: set[asyncio.Task] = set()
-		self._stats = {
-			"loaded": 0,
-			"added": 0,
-			"duplicates": 0,
-			"deleted": 0,
-			"searches": 0,
-			"redacted": 0,
-			"rejected_sensitive": 0,
-			"conflicts": 0,
-			"extraction_failures": 0,
-		}
+		self._privacy_policy = MemoryPrivacyPolicy(
+			config.get("sensitive_policy", "redact"),
+			[re.compile(pattern) for pattern in config.get("sensitive_patterns", _DEFAULT_SENSITIVE_PATTERNS)],
+		)
+		self._max_memories = config.get("max_memories", 10000)
+		self._ttl_days = config.get("ttl_days", 0)
+		self._auto_extract = config.get("auto_extract", True)
+		self._plugin_ctx = plugin_ctx
+		self._repository = MemoryRepository(plugin_ctx.kv_store, self._scope_resolver)
+		self._extraction_service = MemoryExtractionService(self._min_content_length)
+		self._scopes: dict[str, ScopeMemory] = {}
 
-	async def _load_memories(self, exec_ctx: "ExecutionContext | None" = None) -> None:
-		"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-从 KVStore 加载记忆"""
-		scope = self._scope_resolver.scope_id(exec_ctx)
-		self._active_scope = scope
-		if scope in self._scope_cache:
-			self._service.load(self._scope_cache[scope])
-			self._sync_memories_view()
-			self._sync_metadata(exec_ctx)
+	def restore_legacy_scope(self, saved: dict, supplied: dict) -> str:
+		identity = dict(saved)
+		for key in self._scope_resolver.scope_keys:
+			if key in {"agent_name", "session_id"}:
+				continue
+			stored = saved.get(key)
+			if key in supplied and stored not in (None, "") and supplied[key] != stored:
+				raise ValueError(f"Resume metadata conflicts with checkpoint memory scope key: {key}")
+			value = supplied.get(key, stored)
+			if value is None or not str(value).strip():
+				raise ValueError(f"Legacy checkpoint lacks memory scope. Supply original resume metadata for: {key}")
+			identity[key] = value
+		return self._scope_resolver.from_metadata(identity)
+
+	def fork_scope(self, scope: str | None, source: dict, target: dict, state: dict | None) -> str:
+		if state is not None and ("memories" in state) != self._scope_resolver.is_private:
+			raise ValueError("Fork requires the recorded memory scope configuration")
+		for key in self._scope_resolver.scope_keys:
+			value = source.get(key)
+			if key not in {"agent_name", "session_id", "run_id"} and (value is None or not str(value).strip()):
+				raise ValueError(f"Fork requires original memory scope key: {key}")
+		if scope != self._scope_resolver.from_metadata(source):
+			raise ValueError("Fork identity conflicts with checkpoint memory scope")
+		return self._scope_resolver.from_metadata(target)
+
+	def capture_session(self, ctx: "ExecutionContext") -> dict:
+		if self._scope_resolver.is_private:
+			return {"memories": self._scope(ctx).snapshot_records()}
+		return {}
+
+	async def restore_session(self, ctx: "ExecutionContext", state: dict) -> None:
+		if "memories" not in state:
 			return
-		if not self._store:
-			self._service.load([])
-			self._sync_memories_view()
-			self._scope_cache[scope] = list(self._memories)
-			self._loaded_scopes.add(scope)
-			return
-		try:
-			records = await self._repository.load_scope(scope)
-			self._service.load(records)
-			self._sync_memories_view()
-			self._loaded_scopes.add(scope)
-			self._stats["loaded"] += len(records)
-			self._sync_metadata(exec_ctx)
-			if self._memories:
-				logger.info(f"[memory] Loaded {len(self._memories)} memories for scope={scope}")
-		except Exception as e:
-			logger.warning(f"[memory] Failed to load memories: {e}")
+		await self._scope(ctx).restore_records(state["memories"])
+
+	def _scope(self, ctx: "ExecutionContext | None") -> "ScopeMemory":
+		key = self._scope_resolver.scope_id(ctx)
+		if ctx is not None:
+			key = ctx.runtime.plugin_scopes.setdefault(self.name, key)
+		if key not in self._scopes:
+			self._scopes[key] = ScopeMemory(self, key)
+		return self._scopes[key]
 
 	async def on_execution_start(self, exec_ctx: "ExecutionContext") -> None:
-		"""English: This documentation describes the related engine component behavior.
-中文：执行开始时加载记忆"""
-		async with self._lock:
-			await self._load_memories(exec_ctx)
+		await self._scope(exec_ctx).on_execution_start(exec_ctx)
 
 	def inject_context(self, exec_ctx: "ExecutionContext", topic: str = "") -> str:
-		self._active_scope = self._scope_resolver.scope_id(exec_ctx)
-		before = _access_snapshot(self._service.dump())
-		context = self._service.build_context(topic, budget_chars=self._context_budget)
-		self._sync_memories_view()
-		touched = _changed_access_ids(before, self._memories)
-		if touched:
-			self._schedule_persist(touched, exec_ctx)
-		self._sync_metadata(exec_ctx)
-		return context
+		return self._scope(exec_ctx).inject_context(exec_ctx, topic)
+
+	async def on_round_end(
+		self, exec_ctx: "ExecutionContext", user_message: str, assistant_message: str, tool_calls: list[dict]
+	) -> None:
+		await self._scope(exec_ctx).on_round_end(exec_ctx, user_message, assistant_message, tool_calls)
+
+	async def on_execution_end(self, exec_ctx: "ExecutionContext", result: str, error: str) -> None:
+		await self._scope(exec_ctx).on_execution_end(exec_ctx)
 
 	def get_tools(self) -> list[ToolDefinition]:
-		"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-提供 memory_add 和分层记忆工具。"""
+		"""Expose memory and tiered recall tools.
+		提供 memory_add 和分层记忆工具。"""
 		return [
 			ToolDefinition(
 				name="memory_add",
@@ -405,7 +288,12 @@ class MemoryPlugin(BasePlugin):
 					"properties": {
 						"content": {"type": "string", "description": "要记忆的内容"},
 						"importance": {"type": "number", "description": "重要程度 0.0-1.0", "default": 0.7},
-						"layer": {"type": "string", "description": "记忆层级", "enum": [item.value for item in MemoryLayer], "default": MemoryLayer.SEMANTIC.value},
+						"layer": {
+							"type": "string",
+							"description": "记忆层级",
+							"enum": [item.value for item in MemoryLayer],
+							"default": MemoryLayer.SEMANTIC.value,
+						},
 						"fact_type": {"type": "string", "description": "事实类型", "default": "fact"},
 					},
 					"required": ["content"],
@@ -451,11 +339,14 @@ class MemoryPlugin(BasePlugin):
 			ToolDefinition(
 				name="memory_search",
 				description="搜索当前作用域内的记忆",
-				parameters={"type": "object", "properties": {
-					"query": {"type": "string", "description": "搜索主题"},
-					"layer": {"type": "string", "enum": [item.value for item in MemoryLayer]},
-					"top_k": {"type": "integer", "default": 5},
-				}},
+				parameters={
+					"type": "object",
+					"properties": {
+						"query": {"type": "string", "description": "搜索主题"},
+						"layer": {"type": "string", "enum": [item.value for item in MemoryLayer]},
+						"top_k": {"type": "integer", "default": 5},
+					},
+				},
 				is_read_only=True,
 				capability="memory_read",
 				risk_level="safe",
@@ -464,10 +355,13 @@ class MemoryPlugin(BasePlugin):
 			ToolDefinition(
 				name="memory_list",
 				description="列出当前作用域内的记忆",
-				parameters={"type": "object", "properties": {
-					"layer": {"type": "string", "enum": [item.value for item in MemoryLayer]},
-					"limit": {"type": "integer", "default": 20},
-				}},
+				parameters={
+					"type": "object",
+					"properties": {
+						"layer": {"type": "string", "enum": [item.value for item in MemoryLayer]},
+						"limit": {"type": "integer", "default": 20},
+					},
+				},
 				is_read_only=True,
 				capability="memory_read",
 				risk_level="safe",
@@ -476,9 +370,13 @@ class MemoryPlugin(BasePlugin):
 			ToolDefinition(
 				name="memory_delete",
 				description="删除当前作用域内的一条记忆",
-				parameters={"type": "object", "properties": {
-					"id": {"type": "string", "description": "记忆 ID"},
-				}, "required": ["id"]},
+				parameters={
+					"type": "object",
+					"properties": {
+						"id": {"type": "string", "description": "记忆 ID"},
+					},
+					"required": ["id"],
+				},
 				is_read_only=False,
 				capability="memory_delete",
 				risk_level="dangerous",
@@ -487,9 +385,12 @@ class MemoryPlugin(BasePlugin):
 			ToolDefinition(
 				name="memory_export",
 				description="导出当前作用域内的记忆",
-				parameters={"type": "object", "properties": {
-					"layer": {"type": "string", "enum": [item.value for item in MemoryLayer]},
-				}},
+				parameters={
+					"type": "object",
+					"properties": {
+						"layer": {"type": "string", "enum": [item.value for item in MemoryLayer]},
+					},
+				},
 				is_read_only=True,
 				capability="memory_read",
 				risk_level="safe",
@@ -497,56 +398,276 @@ class MemoryPlugin(BasePlugin):
 			),
 		]
 
-	async def on_round_end(self, exec_ctx: "ExecutionContext", user_message: str,
-						   assistant_message: str, tool_calls: list[dict]) -> None:
-		"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-调 utility_model 从对话中提取事实"""
-		if not self._auto_extract or (not user_message and not assistant_message):
+	async def _tool_memory_add(self, args: dict, context: dict):
+		"""memory_add 工具实现"""
+		return await self._scope(context.get("exec_ctx")).add(args, context)
+
+	async def _tool_memory_add_fact(self, args: dict, context: dict):
+		return await self._scope(context.get("exec_ctx")).add_fact(args, context)
+
+	async def _tool_memory_add_lesson(self, args: dict, context: dict):
+		return await self._scope(context.get("exec_ctx")).add_lesson(args, context)
+
+	async def _tool_memory_search(self, args: dict, context: dict):
+		return await self._scope(context.get("exec_ctx")).search(args, context)
+
+	async def _tool_memory_list(self, args: dict, context: dict):
+		return await self._scope(context.get("exec_ctx")).list_memories(args, context)
+
+	async def _tool_memory_delete(self, args: dict, context: dict):
+		return await self._scope(context.get("exec_ctx")).delete(args, context)
+
+	async def _tool_memory_export(self, args: dict, context: dict):
+		return await self._scope(context.get("exec_ctx")).export(args, context)
+
+
+class ScopeMemory:
+	def __init__(self, plugin: MemoryPlugin, key: str) -> None:
+		self.plugin = plugin
+		self.key = key
+		self._service = MemoryService(
+			dedup_threshold=plugin._dedup_threshold,
+			decay_half_life_days=plugin._decay_half_life,
+		)
+		self.loaded = False
+		self._lock = asyncio.Lock()
+		self._pending_access: set[str] = set()
+		self._stats = {
+			"loaded": 0,
+			"added": 0,
+			"duplicates": 0,
+			"deleted": 0,
+			"searches": 0,
+			"redacted": 0,
+			"rejected_sensitive": 0,
+			"conflicts": 0,
+			"extraction_failures": 0,
+		}
+
+	async def add(self, args: dict, context: dict):
+		return await self.add_memory_result(
+			content=args.get("content", ""),
+			importance=args.get("importance", 0.7),
+			layer=args.get("layer", MemoryLayer.SEMANTIC),
+			fact_type=args.get("fact_type", "fact"),
+			exec_ctx=context.get("exec_ctx"),
+		)
+
+	async def add_fact(self, args: dict, context: dict):
+		return await self.add_memory_result(
+			content=args.get("content", ""),
+			importance=args.get("importance", 0.7),
+			layer=MemoryLayer.SEMANTIC,
+			fact_type=args.get("fact_type", "fact"),
+			exec_ctx=context.get("exec_ctx"),
+		)
+
+	async def add_lesson(self, args: dict, context: dict):
+		return await self.add_memory_result(
+			content=args.get("content", ""),
+			importance=args.get("importance", 0.9),
+			layer=MemoryLayer.LESSON,
+			fact_type="lesson",
+			exec_ctx=context.get("exec_ctx"),
+		)
+
+	async def add_memory_result(
+		self, content: str, importance: float, layer: str, fact_type: str, exec_ctx: "ExecutionContext | None" = None
+	):
+		from axc_agent_engine.tools.tool_output import ToolOutput
+
+		if not content:
+			return ToolOutput.error("content 不能为空")
+		try:
+			layer_value = MemoryLayer(str(layer))
+		except ValueError:
+			return ToolOutput.error(f"invalid memory layer: {layer}")
+		async with self._lock:
+			await self._load_memories(exec_ctx)
+			sanitized, privacy = self.plugin._privacy_policy.sanitize(content)
+			if privacy["rejected"]:
+				return ToolOutput.error("memory rejected by sensitive content policy")
+			if self._is_duplicate(sanitized):
+				self._stats["duplicates"] += 1
+				self._sync_metadata(exec_ctx)
+				return ToolOutput.json_output({"status": "duplicate", "message": "记忆已存在"})
+			conflict = self._find_conflict(sanitized, fact_type, str(layer_value))
+			await self._add_memory(
+				content,
+				importance,
+				fact_type=fact_type,
+				layer=layer_value,
+				exec_ctx=exec_ctx,
+				metadata={"manual": True},
+			)
+		payload = {
+			"status": "ok",
+			"message": "记忆已添加",
+			"layer": str(layer_value),
+			"fact_type": fact_type,
+			"redacted": privacy["redacted"],
+			"conflict": bool(conflict),
+			"conflict_with": conflict["id"] if conflict else "",
+		}
+		return ToolOutput.json_output(
+			payload,
+			summary=f"记忆已添加到 {layer_value}",
+		)
+
+	async def search(self, args: dict, context: dict):
+		from axc_agent_engine.tools.tool_output import ToolOutput
+
+		exec_ctx = context.get("exec_ctx")
+		query = str(args.get("query", ""))
+		layer = args.get("layer")
+		top_k = bounded_int(args.get("top_k", 5), 1, 50)
+		async with self._lock:
+			await self._load_memories(exec_ctx)
+			items = self._service.retrieve(query, layer=layer, top_k=top_k)
+			self._stats["searches"] += 1
+			await self._persist_memories([item.id for item in items])
+			self._sync_metadata(exec_ctx)
+		memories = [_public_memory(item.to_dict()) for item in items]
+		return ToolOutput(
+			content={"memories": memories, "query": query},
+			content_type="json",
+			summary=f"找到 {len(items)} 条记忆",
+			llm_view=_memory_search_llm_view(query, memories),
+		)
+
+	async def list_memories(self, args: dict, context: dict):
+		from axc_agent_engine.tools.tool_output import ToolOutput
+
+		exec_ctx = context.get("exec_ctx")
+		layer = args.get("layer")
+		limit = bounded_int(args.get("limit", 20), 1, 200)
+		async with self._lock:
+			await self._load_memories(exec_ctx)
+			items = [item for item in self._service.items if not layer or item.layer == str(layer)]
+			items.sort(key=lambda item: item.created_at, reverse=True)
+			self._sync_metadata(exec_ctx)
+		return ToolOutput.json_output(
+			{"memories": [_public_memory(item.to_dict()) for item in items[:limit]], "count": len(items)},
+			summary=f"列出 {min(len(items), limit)} 条记忆",
+		)
+
+	async def delete(self, args: dict, context: dict):
+		from axc_agent_engine.tools.tool_output import ToolOutput
+
+		exec_ctx = context.get("exec_ctx")
+		mem_id = str(args.get("id", ""))
+		if not mem_id:
+			return ToolOutput.error("id 不能为空")
+		async with self._lock:
+			await self._load_memories(exec_ctx)
+			deleted = self._service.store.delete_item(mem_id)
+			if deleted:
+				await self.plugin._repository.delete_memories(self.key, [mem_id])
+				self._stats["deleted"] += 1
+				await self._audit_memory(
+					exec_ctx, "deleted", mem_id, capability="memory_delete", risk_level="dangerous"
+				)
+			self._sync_metadata(exec_ctx)
+		return ToolOutput.json_output(
+			{"deleted": deleted, "id": mem_id}, summary="记忆已删除" if deleted else "记忆不存在"
+		)
+
+	async def export(self, args: dict, context: dict):
+		from axc_agent_engine.tools.tool_output import ToolOutput
+
+		exec_ctx = context.get("exec_ctx")
+		layer = args.get("layer")
+		async with self._lock:
+			await self._load_memories(exec_ctx)
+			memories = [
+				_public_memory(item) for item in self._service.dump() if not layer or item.get("layer") == str(layer)
+			]
+			self._sync_metadata(exec_ctx)
+		return ToolOutput.json_output(
+			{"memories": memories, "count": len(memories)}, summary=f"导出 {len(memories)} 条记忆"
+		)
+
+	def snapshot_records(self) -> list[dict]:
+		return self._service.dump()
+
+	async def restore_records(self, records: list[dict]) -> None:
+		async with self._lock:
+			for item in records:
+				item["metadata"]["scope"] = self.key
+				await self.plugin._repository.save_memory(self.key, item)
+			self._service.load(records)
+			self.loaded = True
+
+	async def _load_memories(self, exec_ctx: "ExecutionContext | None" = None) -> None:
+		if not self.loaded:
+			records = await self.plugin._repository.load_scope(self.key)
+			self._service.load(records)
+			self.loaded = True
+			self._stats["loaded"] = len(records)
+		self._sync_metadata(exec_ctx)
+
+	async def on_execution_start(self, exec_ctx: "ExecutionContext") -> None:
+		async with self._lock:
+			await self._load_memories(exec_ctx)
+
+	def inject_context(self, exec_ctx: "ExecutionContext", topic: str) -> str:
+		before = _access_snapshot(self._service.dump())
+		context = self._service.build_context(topic, budget_chars=self.plugin._context_budget)
+		self._pending_access.update(_changed_access_ids(before, self._service.dump()))
+		self._sync_metadata(exec_ctx)
+		return context
+
+	async def on_round_end(
+		self, exec_ctx: "ExecutionContext", user_message: str, assistant_message: str, tool_calls: list[dict]
+	) -> None:
+		"""Extract facts at the end of a conversation round.
+		调 utility_model 从对话中提取事实"""
+		if not self.plugin._auto_extract or (not user_message and not assistant_message):
 			return
 		conversation = ""
 		if user_message:
 			conversation += f"用户: {user_message}\n"
 		if assistant_message:
 			conversation += f"助手: {assistant_message}\n"
-		utility_model = self._plugin_ctx.utility_model if self._plugin_ctx else None
+		utility_model = self.plugin._plugin_ctx.utility_model if self.plugin._plugin_ctx else None
 		async with self._lock:
 			if utility_model:
 				await self._extract_with_llm(conversation, utility_model, exec_ctx)
 			else:
-				if user_message and len(user_message) >= self._min_content_length:
+				if user_message and len(user_message) >= self.plugin._min_content_length:
 					await self._add_memory(user_message, 0.5, exec_ctx=exec_ctx)
 
-	async def on_execution_end(self, exec_ctx: "ExecutionContext", result: str, error: str) -> None:
-		"""English: This documentation describes the related engine component behavior.
-中文：执行结束时做记忆衰减 — 移除过期低分记忆"""
+	async def on_execution_end(self, exec_ctx: "ExecutionContext") -> None:
+		"""Expire stale low-scoring memories at the end of a run. 执行结束时做记忆衰减 — 移除过期低分记忆"""
 		async with self._lock:
 			await self._execution_end_locked(exec_ctx)
-		await self._flush_background_tasks()
+			if self._pending_access:
+				await self._persist_memories(list(self._pending_access))
+				self._pending_access.clear()
 
 	async def _execution_end_locked(self, exec_ctx: "ExecutionContext") -> None:
-		self._sync_service_from_view()
-		if not self._memories:
+
+		if not self._service.dump():
 			return
 		expired_ids = self._service.remove_decayed(threshold=0.05)
-		if self._ttl_days > 0:
+		if self.plugin._ttl_days > 0:
 			expired_ids = list(set(expired_ids) | set(self._ttl_expired_ids()))
 		if expired_ids:
-			self._sync_memories_view()
-			await self._delete_memories(expired_ids, exec_ctx)
+			await self.plugin._repository.delete_memories(self.key, expired_ids)
 			self._stats["deleted"] += len(expired_ids)
 			self._sync_metadata(exec_ctx)
 			logger.info(f"[memory] Decay removed {len(expired_ids)} memories")
 
 	async def _extract_with_llm(self, conversation: str, llm: Any, exec_ctx: "ExecutionContext | None" = None) -> None:
-		"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-调 LLM 提取事实"""
+		"""Ask the model to extract facts.
+		调 LLM 提取事实"""
+
 		async def on_failure(e: Exception) -> None:
 			self._stats["extraction_failures"] += 1
 			self._sync_metadata(exec_ctx)
 			logger.warning(f"[memory] LLM fact extraction failed: {e}")
-		await self._extraction_service.extract_with_llm(
+
+		await self.plugin._extraction_service.extract_with_llm(
 			conversation,
 			llm,
 			exec_ctx,
@@ -556,13 +677,18 @@ class MemoryPlugin(BasePlugin):
 			on_failure,
 		)
 
-	async def _add_memory(self, content: str, importance: float, source: str = "",
-						  fact_type: str = "fact", layer: str = MemoryLayer.SEMANTIC,
-						  exec_ctx: "ExecutionContext | None" = None,
-						  metadata: dict[str, Any] | None = None) -> None:
-		"""English: This documentation describes the related engine component behavior.
-中文：添加一条记忆"""
-		sanitized, privacy = self._privacy_policy.sanitize(content)
+	async def _add_memory(
+		self,
+		content: str,
+		importance: float,
+		source: str = "",
+		fact_type: str = "fact",
+		layer: str = MemoryLayer.SEMANTIC,
+		exec_ctx: "ExecutionContext | None" = None,
+		metadata: dict[str, Any] | None = None,
+	) -> None:
+		"""Add a memory record. 添加一条记忆"""
+		sanitized, privacy = self.plugin._privacy_policy.sanitize(content)
 		if privacy["rejected"]:
 			self._stats["rejected_sensitive"] += 1
 			self._sync_metadata(exec_ctx)
@@ -571,114 +697,52 @@ class MemoryPlugin(BasePlugin):
 			self._stats["redacted"] += 1
 		conflict = self._find_conflict(sanitized, fact_type, str(layer))
 		item_metadata = dict(metadata or {})
-		item_metadata.update({
-			"scope": self._scope_resolver.scope_id(exec_ctx),
-			"privacy": privacy,
-			"conflict_with": conflict["id"] if conflict else "",
-		})
+		item_metadata.update(
+			{
+				"scope": self.key,
+				"privacy": privacy,
+				"conflict_with": conflict["id"] if conflict else "",
+			}
+		)
 		if conflict:
 			self._stats["conflicts"] += 1
-		item = self._service.add(sanitized, layer=layer, fact_type=fact_type, importance=importance, source=source, metadata=item_metadata)
+		item = self._service.add(
+			sanitized, layer=layer, fact_type=fact_type, importance=importance, source=source, metadata=item_metadata
+		)
 		mem = item.to_dict()
-		self._sync_memories_view()
+
 		removed_ids = self._enforce_capacity()
-		evicted = mem["id"] in set(removed_ids)
-		if self._store:
-			if removed_ids:
-				await self._delete_memories(removed_ids, exec_ctx)
-			if not evicted:
-				await self._repository.save_memory(self._scope_resolver.scope_id(exec_ctx), mem)
-		if not evicted:
+		if removed_ids:
+			await self.plugin._repository.delete_memories(self.key, removed_ids)
+		if mem["id"] not in removed_ids:
+			await self.plugin._repository.save_memory(self.key, mem)
 			self._stats["added"] += 1
 			await self._audit_memory(exec_ctx, "added", mem["id"], capability="memory_write", risk_level="moderate")
 		self._sync_metadata(exec_ctx)
 
 	def _is_duplicate(self, content: str) -> bool:
-		"""English: This documentation describes the related engine component behavior.
-中文：简单去重：字符级相似度"""
-		self._sync_service_from_view()
+		"""Deduplicate using character similarity. 简单去重：字符级相似度"""
+
 		return self._service.find_duplicate(content) is not None
-
-	def _compute_score(self, mem: dict, topic: str) -> float:
-		"""English: This documentation describes the related engine component behavior.
-中文：计算记忆得分（相关性 × 衰减后重要性）"""
-		importance = mem.get("importance", 0.5)
-		created_at = mem.get("created_at", "")
-		if created_at:
-			try:
-				created = datetime.fromisoformat(created_at)
-				now = datetime.now(timezone.utc)
-				days = (now - created).total_seconds() / 86400
-				decay = math.pow(0.5, days / self._decay_half_life)
-				importance *= decay
-			except (ValueError, TypeError):
-				pass
-		relevance = 0.5
-		if topic:
-			content = mem.get("content", "").lower()
-			topic_lower = topic.lower()
-			words = topic_lower.split()
-			matched = sum(1 for w in words if w in content)
-			if matched > 0:
-				relevance = min(1.0, 0.5 + matched * 0.2)
-		return importance * relevance
-
-	def _sync_memories_view(self) -> None:
-		self._memories = self._service.dump()
-		if hasattr(self, "_scope_cache"):
-			self._scope_cache[self._active_scope] = list(self._memories)
-
-	def _sync_service_from_view(self) -> None:
-		current = self._service.dump()
-		if self._memories != current:
-			self._service.load(self._memories)
-
-	async def _delete_memories(self, ids: list[str], exec_ctx: "ExecutionContext | None" = None) -> None:
-		"""English: This documentation describes the related engine component behavior.
-中文：批量删除记忆"""
-		await self._repository.delete_memories(self._scope_resolver.scope_id(exec_ctx), ids)
-
-	async def _tool_memory_add(self, args: dict, context: dict):
-		"""memory_add 工具实现"""
-		return await self._tool_handlers.add(args, context)
-
-	async def _tool_memory_add_fact(self, args: dict, context: dict):
-		return await self._tool_handlers.add_fact(args, context)
-
-	async def _tool_memory_add_lesson(self, args: dict, context: dict):
-		return await self._tool_handlers.add_lesson(args, context)
-
-	async def _add_memory_tool_result(self, content: str, importance: float, layer: str, fact_type: str,
-									  exec_ctx: "ExecutionContext | None" = None):
-		return await self._tool_handlers.add_memory_result(content, importance, layer, fact_type, exec_ctx)
-
-	async def _tool_memory_search(self, args: dict, context: dict):
-		return await self._tool_handlers.search(args, context)
-
-	async def _tool_memory_list(self, args: dict, context: dict):
-		return await self._tool_handlers.list(args, context)
-
-	async def _tool_memory_delete(self, args: dict, context: dict):
-		return await self._tool_handlers.delete(args, context)
-
-	async def _tool_memory_export(self, args: dict, context: dict):
-		return await self._tool_handlers.export(args, context)
 
 	def _find_conflict(self, content: str, fact_type: str, layer: str) -> dict | None:
 		if not fact_type:
 			return None
 		negative = _is_negative_fact(content)
-		for item in self._memories:
+		for item in self._service.dump():
 			if item.get("layer") != layer or item.get("fact_type") != fact_type:
 				continue
-			if _is_negative_fact(item.get("content", "")) != negative and char_similarity(_normalize_fact_text(content), _normalize_fact_text(item.get("content", ""))) >= 0.4:
+			if (
+				_is_negative_fact(item.get("content", "")) != negative
+				and char_similarity(_normalize_fact_text(content), _normalize_fact_text(item.get("content", ""))) >= 0.4
+			):
 				return item
 		return None
 
 	def _ttl_expired_ids(self) -> list[str]:
-		if self._ttl_days <= 0:
+		if self.plugin._ttl_days <= 0:
 			return []
-		cutoff = datetime.now(timezone.utc) - timedelta(days=self._ttl_days)
+		cutoff = datetime.now(UTC) - timedelta(days=self.plugin._ttl_days)
 		expired = []
 		for item in self._service.items:
 			if item.layer in (MemoryLayer.IDENTITY, MemoryLayer.LESSON):
@@ -691,58 +755,40 @@ class MemoryPlugin(BasePlugin):
 				expired.append(item.id)
 		if expired:
 			self._service.items = [item for item in self._service.items if item.id not in set(expired)]
-			self._sync_memories_view()
+
 		return expired
 
 	def _enforce_capacity(self) -> list[str]:
-		if self._max_memories <= 0 or len(self._service.items) <= self._max_memories:
+		if self.plugin._max_memories <= 0 or len(self._service.items) <= self.plugin._max_memories:
 			return []
 		items = sorted(self._service.items, key=lambda item: (item.importance, item.decay_score, item.created_at))
-		remove_ids = {item.id for item in items[:len(items) - self._max_memories]}
+		remove_ids = {item.id for item in items[: len(items) - self.plugin._max_memories]}
 		self._service.items = [item for item in self._service.items if item.id not in remove_ids]
-		self._sync_memories_view()
+
 		return list(remove_ids)
 
-	async def _retrieve_memories(self, query: str, layer: str | None, top_k: int,
-								 exec_ctx: "ExecutionContext | None" = None):
-		merged = self._service.retrieve(query, layer=layer, top_k=top_k)
-		self._sync_memories_view()
-		return merged
+	async def _persist_memories(self, ids: list[str]) -> None:
+		await self.plugin._repository.persist_memories(self.key, self._service.dump(), ids)
 
-	async def _persist_memories(self, ids: list[str], exec_ctx: "ExecutionContext | None" = None) -> None:
-		await self._repository.persist_memories(self._scope_resolver.scope_id(exec_ctx), self._service.dump(), ids)
-
-	def _schedule_persist(self, ids: list[str], exec_ctx: "ExecutionContext | None" = None) -> None:
-		try:
-			loop = asyncio.get_running_loop()
-		except RuntimeError:
-			return
-		task = loop.create_task(self._persist_memories(ids, exec_ctx))
-		self._background_tasks.add(task)
-		task.add_done_callback(self._background_tasks.discard)
-
-	async def _flush_background_tasks(self) -> None:
-		if not self._background_tasks:
-			return
-		tasks = list(self._background_tasks)
-		self._background_tasks.clear()
-		await asyncio.gather(*tasks, return_exceptions=True)
-
-	async def _audit_memory(self, exec_ctx: "ExecutionContext | None", action: str, memory_id: str,
-							capability: str, risk_level: str) -> None:
+	async def _audit_memory(
+		self, exec_ctx: "ExecutionContext | None", action: str, memory_id: str, capability: str, risk_level: str
+	) -> None:
 		if not exec_ctx or not exec_ctx.services.audit_sink:
 			return
 		from axc_agent_engine.observability.audit import AuditEvent
+
 		metadata = exec_ctx.state.metadata
-		await exec_ctx.services.audit_sink.record(AuditEvent(
-			type=f"memory_{action}",
-			actor=str(metadata.get("user_id") or metadata.get("agent_name") or ""),
-			session_id=str(metadata.get("session_id") or ""),
-			tool_name="memory",
-			capability=capability,
-			risk_level=risk_level,
-			metadata={"memory_id": memory_id, "scope": self._scope_resolver.scope_id(exec_ctx)},
-		))
+		await exec_ctx.services.audit_sink.record(
+			AuditEvent(
+				type=f"memory_{action}",
+				actor=str(metadata.get("user_id") or metadata.get("agent_name") or ""),
+				session_id=str(metadata.get("session_id") or ""),
+				tool_name="memory",
+				capability=capability,
+				risk_level=risk_level,
+				metadata={"memory_id": memory_id, "scope": self.key},
+			)
+		)
 
 	def _valid_extracted_fact(self, item: dict[str, Any]) -> bool:
 		content = str(item.get("content", "")).strip()
@@ -759,24 +805,11 @@ class MemoryPlugin(BasePlugin):
 		if not exec_ctx:
 			return
 		exec_ctx.state.metadata["memory"] = {
-			"scope": self._scope_resolver.scope_id(exec_ctx),
-			"count": len(self._memories),
+			"scope": self.key,
+			"count": len(self._service.items),
 			"stats": dict(self._stats),
-			"layers": _layer_counts(self._memories),
+			"layers": _layer_counts(self._service.dump()),
 		}
-
-
-def _char_similarity(a: str, b: str) -> float:
-	"""Bigram Jaccard 相似度，比字符级去重更适合语义去重。"""
-	return char_similarity(a, b)
-
-
-def _resource_name(value: Any, default: str) -> str:
-	if value is None or value is True:
-		return default
-	if value is False:
-		return ""
-	return str(value)
 
 
 def _access_snapshot(memories: list[dict]) -> dict[str, tuple[str, int]]:
@@ -842,7 +875,9 @@ def _layer_counts(memories: list[dict]) -> dict[str, int]:
 
 def _is_negative_fact(content: str) -> bool:
 	text = str(content).lower()
-	return any(marker in text for marker in (" not ", " never ", " dislike", " don't ", "doesn't", "不", "没有", "讨厌"))
+	return any(
+		marker in text for marker in (" not ", " never ", " dislike", " don't ", "doesn't", "不", "没有", "讨厌")
+	)
 
 
 def _normalize_fact_text(content: str) -> str:

@@ -1,9 +1,21 @@
 """Tests for error hierarchy."""
+
 import pytest
+
 from axc_agent_engine.core.errors import (
-	AxcError, ConfigError, SchemaError, PluginError, PluginLoadError,
-	PluginInitError, LLMError, ProviderError, LLMTimeoutError,
-	ExecutionError, MaxRoundsError, CancelledError, ErrorEnvelope,
+	AxcError,
+	CancelledError,
+	ConfigError,
+	ErrorEnvelope,
+	ExecutionError,
+	LLMError,
+	LLMTimeoutError,
+	MaxRoundsError,
+	PluginError,
+	PluginInitError,
+	PluginLoadError,
+	ProviderError,
+	SchemaError,
 )
 
 

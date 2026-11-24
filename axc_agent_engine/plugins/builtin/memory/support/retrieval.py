@@ -1,18 +1,17 @@
-"""Retrieval helpers private to the memory plugin.
-中文：此文档说明相关引擎组件的行为。"""
+"""Retrieval helpers private to the memory plugin. 记忆插件内部的检索函数。"""
+
 from __future__ import annotations
 
-import math
-import re
-from collections import Counter
 from dataclasses import dataclass, field
 from typing import Any
+
+from axc_agent_engine.plugins.builtin.bm25 import BM25Corpus, tokenize
 
 
 @dataclass(frozen=True)
 class MemoryDocument:
-	"""A searchable memory document.
-中文：此文档说明相关引擎组件的行为。"""
+	"""A searchable memory document. 可供检索的记忆文档。"""
+
 	id: str
 	text: str
 	metadata: dict[str, Any] = field(default_factory=dict)
@@ -20,8 +19,8 @@ class MemoryDocument:
 
 @dataclass(frozen=True)
 class RetrievalResult:
-	"""One memory retrieval hit.
-中文：此文档说明相关引擎组件的行为。"""
+	"""One memory retrieval hit. 一条记忆检索命中记录。"""
+
 	id: str
 	text: str
 	score: float
@@ -30,68 +29,25 @@ class RetrievalResult:
 	metadata: dict[str, Any] = field(default_factory=dict)
 
 
-class BM25Index:
-	"""Small dependency-free BM25 index for memory content.
-中文：此文档说明相关引擎组件的行为。"""
-
-	def __init__(self, documents: list[MemoryDocument] | None = None) -> None:
-		self.documents: list[MemoryDocument] = []
-		self._doc_terms: list[Counter] = []
-		self._doc_freq: Counter = Counter()
-		self._avg_dl = 1.0
-		if documents:
-			self.build(documents)
-
-	def build(self, documents: list[MemoryDocument]) -> None:
-		self.documents = list(documents)
-		self._doc_terms = []
-		self._doc_freq = Counter()
-		total_dl = 0
-		for doc in self.documents:
-			terms = tokenize(doc.text)
-			counter = Counter(terms)
-			self._doc_terms.append(counter)
-			total_dl += len(terms)
-			for term in set(terms):
-				self._doc_freq[term] += 1
-		self._avg_dl = total_dl / len(self.documents) if self.documents else 1.0
+class BM25Index(BM25Corpus[MemoryDocument]):
+	"""Small dependency-free BM25 index for memory content. 为记忆文本建立无外部依赖的 BM25 索引。"""
 
 	def search(self, query: str, top_k: int = 30) -> list[RetrievalResult]:
-		query_terms = tokenize(query)
-		if not query_terms or not self.documents:
-			return []
-		n_docs = len(self.documents)
-		k1, b = 1.5, 0.75
-		scored: list[tuple[float, int]] = []
-		for idx, counter in enumerate(self._doc_terms):
-			score = 0.0
-			dl = sum(counter.values()) or 1
-			for term in query_terms:
-				df = self._doc_freq.get(term, 0)
-				if not df:
-					continue
-				idf = math.log((n_docs - df + 0.5) / (df + 0.5) + 1.0)
-				tf = counter.get(term, 0)
-				score += idf * ((tf * (k1 + 1)) / (tf + k1 * (1 - b + b * dl / self._avg_dl)))
-			if score > 0:
-				scored.append((score, idx))
-		scored.sort(key=lambda item: item[0], reverse=True)
 		return [
 			RetrievalResult(
-				id=self.documents[idx].id,
-				text=self.documents[idx].text,
+				id=doc.id,
+				text=doc.text,
 				score=score,
 				retrieval="bm25",
-				source=str(self.documents[idx].metadata.get("source", "")),
-				metadata=self.documents[idx].metadata,
+				source=str(doc.metadata.get("source", "")),
+				metadata=doc.metadata,
 			)
-			for score, idx in scored[:top_k]
+			for score, doc in self.rank(tokenize(query), top_k)
 		]
 
 
 def rrf_merge(*ranked_lists: list[RetrievalResult], top_k: int = 10, k: int = 60) -> list[RetrievalResult]:
-	"""Reciprocal rank fusion.
-中文：此文档说明相关引擎组件的行为。"""
+	"""Reciprocal rank fusion. 倒数排名融合。"""
 	scores: dict[str, float] = {}
 	items: dict[str, RetrievalResult] = {}
 	retrievals: dict[str, set[str]] = {}
@@ -105,25 +61,14 @@ def rrf_merge(*ranked_lists: list[RetrievalResult], top_k: int = 10, k: int = 60
 		item = items[item_id]
 		labels = retrievals.get(item_id, set())
 		retrieval = "hybrid" if len(labels) > 1 or "vector" in labels else item.retrieval
-		results.append(RetrievalResult(
-			id=item.id,
-			text=item.text,
-			score=score,
-			retrieval=retrieval,
-			source=item.source,
-			metadata=item.metadata,
-		))
+		results.append(
+			RetrievalResult(
+				id=item.id,
+				text=item.text,
+				score=score,
+				retrieval=retrieval,
+				source=item.source,
+				metadata=item.metadata,
+			)
+		)
 	return results
-
-
-def tokenize(text: str) -> list[str]:
-	"""Tokenize Chinese, English, numbers, and identifiers.
-中文：此文档说明相关引擎组件的行为。"""
-	text = text.lower()
-	tokens: list[str] = []
-	tokens.extend(re.findall(r"[a-z_][a-z0-9_]*", text))
-	tokens.extend(re.findall(r"\d+", text))
-	for word in re.findall(r"[\u4e00-\u9fff]+", text):
-		tokens.extend(list(word))
-		tokens.extend(word[i:i + 2] for i in range(len(word) - 1))
-	return [token for token in tokens if token]

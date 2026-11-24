@@ -1,7 +1,8 @@
 """Event 类型定义。"""
+
+from copy import deepcopy
 from dataclasses import dataclass, field
 from enum import Enum
-from copy import deepcopy
 from typing import Any
 
 from axc_agent_engine.core.errors import ErrorEnvelope
@@ -43,8 +44,8 @@ TERMINAL_EVENTS = frozenset({EventType.DONE, EventType.ERROR, EventType.CANCELLE
 
 @dataclass
 class Event:
-	"""English: This documentation describes the related engine component behavior.
-中文：执行事件，并提供常见模式的工厂方法。"""
+	"""Execution event with constructors for common event types. 执行事件，并提供常见模式的工厂方法。"""
+
 	type: EventType
 	content: str = ""
 	tool_name: str = ""
@@ -59,13 +60,12 @@ class Event:
 		self.steps = deepcopy(self.steps)
 		self.metadata = deepcopy(self.metadata)
 
-	#English: Source note. 中文：── 工厂方法 ──
+	# Event constructors ── 工厂方法 ──
 
 	@classmethod
 	def tool_call(cls, name: str, call_id: str, arguments: dict[str, Any]) -> "Event":
-		"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-创建 TOOL_CALL 事件。"""
+		"""Create a tool call event.
+		创建 TOOL_CALL 事件。"""
 		return cls(type=EventType.TOOL_CALL, tool_name=name, tool_call_id=call_id, arguments=deepcopy(arguments))
 
 	@classmethod
@@ -77,9 +77,8 @@ class Event:
 		arguments_preview: str = "",
 		index: int = 0,
 	) -> "Event":
-		"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-创建 TOOL_ARGS_PREVIEW 事件。"""
+		"""Preview partially streamed tool arguments.
+		创建 TOOL_ARGS_PREVIEW 事件。"""
 		return cls(
 			type=EventType.TOOL_ARGS_PREVIEW,
 			tool_name=name,
@@ -97,19 +96,19 @@ class Event:
 		artifact_refs: list[dict[str, Any]] | None = None,
 		metadata: dict[str, Any] | None = None,
 	) -> "Event":
-		"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-创建 TOOL_RESULT 事件。"""
+		"""Create a tool result event.
+		创建 TOOL_RESULT 事件。"""
 		event_metadata = {"artifacts": deepcopy(artifact_refs or [])}
 		if metadata:
 			event_metadata.update(deepcopy(metadata))
-		return cls(type=EventType.TOOL_RESULT, tool_name=name, tool_call_id=call_id, content=content, metadata=event_metadata)
+		return cls(
+			type=EventType.TOOL_RESULT, tool_name=name, tool_call_id=call_id, content=content, metadata=event_metadata
+		)
 
 	@classmethod
 	def error(cls, message: str | ErrorEnvelope, metadata: dict[str, Any] | None = None) -> "Event":
-		"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-创建 ERROR 事件。"""
+		"""Report an execution error.
+		创建 ERROR 事件。"""
 		if isinstance(message, ErrorEnvelope):
 			error_metadata = {"error": message.to_dict()}
 			if metadata:
@@ -119,70 +118,68 @@ class Event:
 
 	@classmethod
 	def done(cls, content: str, metadata: dict[str, Any] | None = None) -> "Event":
-		"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-创建 DONE 事件。"""
+		"""Return the final result.
+		创建 DONE 事件。"""
 		return cls(type=EventType.DONE, content=content, metadata=deepcopy(metadata or {}))
 
 	@classmethod
 	def cancelled(cls, reason: str, metadata: dict[str, Any] | None = None) -> "Event":
 		"""Create CANCELLED event.
-中文：创建取消事件。"""
+		中文：创建取消事件。"""
 		return cls(type=EventType.CANCELLED, content=reason, metadata=deepcopy(metadata or {}))
 
 	@classmethod
 	def step_start(cls, step_id: int, description: str) -> "Event":
-		"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-创建 STEP_START 事件。"""
+		"""Announce the start of a plan step.
+		创建 STEP_START 事件。"""
 		return cls(type=EventType.STEP_START, step_id=step_id, content=description)
 
 	@classmethod
 	def step_completed(cls, step_id: int, content: str) -> "Event":
-		"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-创建 STEP_COMPLETED 事件。"""
+		"""Report a completed step.
+		创建 STEP_COMPLETED 事件。"""
 		return cls(type=EventType.STEP_COMPLETED, step_id=step_id, content=content)
 
 	@classmethod
 	def delta(cls, content: str) -> "Event":
-		"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-创建 STREAM_DELTA 事件。"""
+		"""Publish a streamed text fragment.
+		创建 STREAM_DELTA 事件。"""
 		return cls(type=EventType.STREAM_DELTA, content=content)
 
 	@classmethod
 	def plan_created(cls, goal: str, steps: list[dict[str, Any]]) -> "Event":
-		"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-创建 PLAN_CREATED 事件。"""
+		"""Publish a newly created plan.
+		创建 PLAN_CREATED 事件。"""
 		return cls(type=EventType.PLAN_CREATED, content=goal, steps=deepcopy(steps))
 
 	@classmethod
 	def state_change(cls, content: str, metadata: dict[str, Any] | None = None) -> "Event":
-		"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-创建 STATE_CHANGE 事件。"""
+		"""Report a state change.
+		创建 STATE_CHANGE 事件。"""
 		return cls(type=EventType.STATE_CHANGE, content=content, metadata=deepcopy(metadata or {}))
 
 	@classmethod
 	def cost_update(cls, input_tokens: int, output_tokens: int) -> "Event":
-		"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-创建 COST_UPDATE 事件。"""
+		"""Report a cost update.
+		创建 COST_UPDATE 事件。"""
 		return cls(type=EventType.COST_UPDATE, metadata={"input_tokens": input_tokens, "output_tokens": output_tokens})
 
 	@classmethod
 	def sub_agent_start(cls, agent_name: str, message: str, metadata: dict[str, Any]) -> "Event":
 		"""Create SUB_AGENT_START.
-中文：创建子 Agent 开始事件。"""
-		return cls(type=EventType.SUB_AGENT_START, content=message, metadata={"agent_name": agent_name, **deepcopy(metadata)})
+		中文：创建子 Agent 开始事件。"""
+		return cls(
+			type=EventType.SUB_AGENT_START, content=message, metadata={"agent_name": agent_name, **deepcopy(metadata)}
+		)
 
 	@classmethod
 	def sub_agent_step(cls, agent_name: str, step: dict[str, Any], metadata: dict[str, Any]) -> "Event":
 		"""Create SUB_AGENT_STEP.
-中文：创建子 Agent 明细事件。"""
-		return cls(type=EventType.SUB_AGENT_STEP, metadata={"agent_name": agent_name, "step": deepcopy(step), **deepcopy(metadata)})
+		中文：创建子 Agent 明细事件。"""
+		return cls(
+			type=EventType.SUB_AGENT_STEP,
+			metadata={"agent_name": agent_name, "step": deepcopy(step), **deepcopy(metadata)},
+		)
 
 	@classmethod
 	def sub_agent_complete(
@@ -195,7 +192,7 @@ class Event:
 		metadata: dict[str, Any],
 	) -> "Event":
 		"""Create SUB_AGENT_COMPLETE.
-中文：创建子 Agent 完成事件。"""
+		中文：创建子 Agent 完成事件。"""
 		return cls(
 			type=EventType.SUB_AGENT_COMPLETE,
 			content=result,

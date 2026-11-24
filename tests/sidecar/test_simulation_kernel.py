@@ -1,4 +1,5 @@
 """Tests for the standalone simulation kernel."""
+
 from __future__ import annotations
 
 from axc_agent_engine.sidecar.simulation import (
@@ -6,11 +7,11 @@ from axc_agent_engine.sidecar.simulation import (
 	AgentAction,
 	AgentProfile,
 	DefaultObservationBuilder,
+	LLMSimulationReportGenerator,
 	Scenario,
 	ScriptedPolicy,
 	SimulationEvent,
 	SimulationEventType,
-	LLMSimulationReportGenerator,
 	SimulationRunner,
 	WorldState,
 )
@@ -185,10 +186,15 @@ async def test_runner_passes_run_context_to_policy():
 
 async def test_runner_rejects_conflicting_run_ids():
 	scenario = Scenario(id="bad-run-id", title="Bad run id", agents=[AgentProfile(name="blue")], max_steps=1)
-	runner = SimulationRunner(policies={"blue": ScriptedPolicy("blue", [AgentAction(actor="blue", type=ActionType.WAIT, intent="wait")])})
+	runner = SimulationRunner(
+		policies={"blue": ScriptedPolicy("blue", [AgentAction(actor="blue", type=ActionType.WAIT, intent="wait")])}
+	)
 
 	try:
-		[event async for event in runner.stream(scenario, run_options={"run_id": "run-a"}, metadata={"run_id": "run-b"})]
+		[
+			event
+			async for event in runner.stream(scenario, run_options={"run_id": "run-a"}, metadata={"run_id": "run-b"})
+		]
 	except ValueError as exc:
 		assert "run_options.run_id conflicts with metadata.run_id" in str(exc)
 	else:
@@ -197,7 +203,9 @@ async def test_runner_rejects_conflicting_run_ids():
 
 async def test_runner_rejects_invalid_run_context_inputs():
 	scenario = Scenario(id="bad-ctx", title="Bad context", agents=[AgentProfile(name="blue")], max_steps=1)
-	runner = SimulationRunner(policies={"blue": ScriptedPolicy("blue", [AgentAction(actor="blue", type=ActionType.WAIT, intent="wait")])})
+	runner = SimulationRunner(
+		policies={"blue": ScriptedPolicy("blue", [AgentAction(actor="blue", type=ActionType.WAIT, intent="wait")])}
+	)
 
 	try:
 		[event async for event in runner.stream(scenario, metadata="bad")]
@@ -207,7 +215,9 @@ async def test_runner_rejects_invalid_run_context_inputs():
 		raise AssertionError("expected TypeError")
 
 	try:
-		fresh = SimulationRunner(policies={"blue": ScriptedPolicy("blue", [AgentAction(actor="blue", type=ActionType.WAIT, intent="wait")])})
+		fresh = SimulationRunner(
+			policies={"blue": ScriptedPolicy("blue", [AgentAction(actor="blue", type=ActionType.WAIT, intent="wait")])}
+		)
 		[event async for event in fresh.stream(scenario, actor_run_options=lambda actor, index: "bad")]
 	except TypeError as exc:
 		assert "actor_run_options" in str(exc)

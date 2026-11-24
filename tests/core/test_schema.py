@@ -1,10 +1,20 @@
 """Tests for schema module — data models, enums, configs."""
+
 import pytest
 from pydantic import ValidationError
 
 from axc_agent_engine.core.schema import (
-	StepStatus, RiskLevel, PluginSignal,
-	ToolDefinition, LLMMessage, LLMStreamChunk, LLMUsage, RuntimeConfig, PluginConfig, AgentConfig, ConcurrencyRuntimeConfig,
+	AgentConfig,
+	ConcurrencyRuntimeConfig,
+	LLMMessage,
+	LLMStreamChunk,
+	LLMUsage,
+	PluginConfig,
+	PluginSignal,
+	RiskLevel,
+	RuntimeConfig,
+	StepStatus,
+	ToolDefinition,
 )
 
 
@@ -24,6 +34,7 @@ class TestEnums:
 		assert PluginSignal.WARN == "warn"
 		assert PluginSignal.SKIP == "skip"
 
+
 class TestToolDefinition:
 	def test_basic(self):
 		td = ToolDefinition(name="test", description="desc")
@@ -33,9 +44,11 @@ class TestToolDefinition:
 		assert td.deferred is False
 
 	def test_openai_schema(self):
-		td = ToolDefinition(name="echo", description="Echo text", parameters={
-			"type": "object", "properties": {"text": {"type": "string"}}
-		})
+		td = ToolDefinition(
+			name="echo",
+			description="Echo text",
+			parameters={"type": "object", "properties": {"text": {"type": "string"}}},
+		)
 		schema = td.to_openai_schema()
 		assert schema["type"] == "function"
 		assert schema["function"]["name"] == "echo"

@@ -1,7 +1,9 @@
 """Tests for #1 ToolContext standardization."""
+
 import asyncio
+
+from axc_agent_engine.core.context import ExecutionConfig, ExecutionContext, ExecutionState
 from axc_agent_engine.tools.context import ToolContext
-from axc_agent_engine.core.context import ExecutionContext, ExecutionConfig, ExecutionState
 
 
 class TestToolContext:
@@ -57,8 +59,16 @@ class TestToolContext:
 		ctx = ToolContext()
 		d = ctx.to_dict()
 		expected_keys = {
-			"workspace", "exec_ctx", "session_id", "agent_name", "tool_name", "tool_call_id",
-			"request_queue", "response_queue", "artifact_store", "command_executor",
+			"workspace",
+			"exec_ctx",
+			"session_id",
+			"agent_name",
+			"tool_name",
+			"tool_call_id",
+			"request_queue",
+			"response_queue",
+			"artifact_store",
+			"command_executor",
 		}
 		assert set(d.keys()) == expected_keys
 
@@ -70,9 +80,14 @@ class TestToolContext:
 			state=ExecutionState(),
 		)
 		ctx = ToolContext(
-			workspace="/project", exec_ctx=exec_ctx,
-			session_id="sess-abc", agent_name="worker", tool_name="search", tool_call_id="tc-1",
-			request_queue=req_q, response_queue=resp_q,
+			workspace="/project",
+			exec_ctx=exec_ctx,
+			session_id="sess-abc",
+			agent_name="worker",
+			tool_name="search",
+			tool_call_id="tc-1",
+			request_queue=req_q,
+			response_queue=resp_q,
 		)
 		assert ctx.workspace == "/project"
 		assert ctx.exec_ctx.config.workspace == "/project"

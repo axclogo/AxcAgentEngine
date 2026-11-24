@@ -3,6 +3,8 @@
 AxcAgentEngine exposes an OpenAI Chat Completions compatible subset for hosts
 that want to call an Agent over HTTP.
 
+The host selects each Agent’s execution strategy when it loads the template. Both HTTP streaming and non-streaming requests use that Agent’s configured loop. See the [execution strategy contract](PLUGIN_DEVELOPMENT.md#execution-strategies).
+
 ## Routes
 
 | Route | Status | Notes |
@@ -11,6 +13,12 @@ that want to call an Agent over HTTP.
 | `GET /v1/agents` | Supported | Lists loaded and discoverable Agent YAML files. |
 | `GET /v1/capabilities` | Supported | Machine-readable compatibility declaration. |
 | `/v1/responses` | Not supported | Use the Python SDK for richer agent workflows. |
+
+## Choosing an agent
+
+Pass a name from `GET /v1/agents` as `agent` or `model`. Loaded agents are addressed by their configured names (`agent.registered_name` in the SDK). Changing a display name preserves the lookup key. The host may also allow discovery of top-level `.yaml` and `.yml` templates through `agents_dir`. Request a template by its filename stem, such as `support` for `support.yaml`. The server reuses the engine instance registered under that template’s configured name. Filesystem paths and symbolic links leading outside the configured directory are excluded from discovery.
+
+`axc serve --agent ./agents/support.yaml --host 127.0.0.1 --port 8000` binds the service to loopback. The CLI uses the preloaded template’s parent directory for discovery unless `--agents-dir` selects another directory.
 
 ## Request Parameters
 
@@ -70,7 +78,9 @@ Supported stream option:
 }
 ```
 
-When enabled, a final usage chunk is emitted before `data: [DONE]`.
+When enabled, a final usage chunk reports the cumulative counters from the completed run before `data: [DONE]`. A strategy can deliver its final answer in the terminal event. The API streams that text even if the strategy emitted no earlier text deltas.
+
+A cancelled buffered run returns HTTP 499 with error code `run_cancelled`. When SSE headers have already been sent, cancellation emits a terminal error chunk with `axc_event.type="cancelled"` and the cancellation reason, followed by requested partial usage and the done marker.
 
 ## Error Shape
 

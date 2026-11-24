@@ -1,5 +1,5 @@
-"""Storage-neutral knowledge ingestion primitives.
-中文：此文档说明相关引擎组件的行为。"""
+"""Storage-neutral knowledge ingestion primitives. 与存储后端无关的知识导入接口。"""
+
 from __future__ import annotations
 
 import os
@@ -12,8 +12,7 @@ from axc_agent_engine.plugins.builtin.knowledge.support.retrieval import Knowled
 
 @dataclass(frozen=True)
 class SourceDocument:
-	"""Parsed source document before chunking.
-中文：此文档说明相关引擎组件的行为。"""
+	"""Parsed source document before chunking. 分块前的已解析源文档。"""
 
 	id: str
 	text: str
@@ -23,8 +22,7 @@ class SourceDocument:
 
 @dataclass(frozen=True)
 class IngestionResult:
-	"""Result of one ingestion pass.
-中文：此文档说明相关引擎组件的行为。"""
+	"""Result of one ingestion pass. 一次导入的结果。"""
 
 	documents: list[KnowledgeDocument]
 	sources: list[str] = field(default_factory=list)
@@ -33,18 +31,16 @@ class IngestionResult:
 
 @runtime_checkable
 class DocumentParser(Protocol):
-	"""Parses one source into plain text plus metadata.
-中文：此文档说明相关引擎组件的行为。"""
+	"""Parses one source into plain text plus metadata. 从单个数据源解析文本和元数据。"""
 
 	def supports(self, path: str) -> bool: ...
 	def parse(self, path: str) -> SourceDocument | None: ...
 
 
 class TextDocumentParser:
-	"""Built-in parser for text-like local files.
-中文：此文档说明相关引擎组件的行为。"""
+	"""Built-in parser for text-like local files. 内置本地文本文件解析器。"""
 
-	extensions = {".txt", ".md", ".markdown", ".rst", ".py", ".js", ".ts", ".json", ".yaml", ".yml", ".toml"}
+	extensions = frozenset({".txt", ".md", ".markdown", ".rst", ".py", ".js", ".ts", ".json", ".yaml", ".yml", ".toml"})
 
 	def supports(self, path: str) -> bool:
 		return os.path.splitext(path)[1].lower() in self.extensions
@@ -56,8 +52,7 @@ class TextDocumentParser:
 
 
 class PdfDocumentParser:
-	"""Optional PyMuPDF-backed PDF parser.
-中文：此文档说明相关引擎组件的行为。"""
+	"""Optional PyMuPDF-backed PDF parser. 基于 PyMuPDF 的可选 PDF 解析器。"""
 
 	def supports(self, path: str) -> bool:
 		return path.lower().endswith(".pdf")
@@ -76,8 +71,7 @@ class PdfDocumentParser:
 
 
 class LocalFileIngestionPipeline:
-	"""Ingests local files/directories into KnowledgeDocument chunks.
-中文：此文档说明相关引擎组件的行为。"""
+	"""Ingests local files/directories into KnowledgeDocument chunks. 将本地文件或目录导入知识文档分块。"""
 
 	def __init__(
 		self,
@@ -104,7 +98,7 @@ class LocalFileIngestionPipeline:
 					continue
 				try:
 					parsed = parser.parse(path)
-				except Exception as exc:
+				except (OSError, ValueError, RuntimeError) as exc:
 					errors.append(f"{path}: {exc}")
 					continue
 				if not parsed or not parsed.text.strip():
@@ -114,7 +108,9 @@ class LocalFileIngestionPipeline:
 		return IngestionResult(documents=documents, sources=loaded_sources, errors=errors)
 
 	def _chunk(self, source_doc: SourceDocument) -> list[KnowledgeDocument]:
-		chunks = self.chunker.chunk_document(source_doc.text, source=source_doc.source, title=str(source_doc.metadata.get("title", "")))
+		chunks = self.chunker.chunk_document(
+			source_doc.text, source=source_doc.source, title=str(source_doc.metadata.get("title", ""))
+		)
 		documents: list[KnowledgeDocument] = []
 		for chunk in chunks:
 			metadata = {
@@ -128,12 +124,14 @@ class LocalFileIngestionPipeline:
 				"heading_path": chunk.heading_path,
 			}
 			doc_id = f"{source_doc.id}:{chunk.chunk_index}:{chunk.content_hash[:12]}"
-			documents.append(KnowledgeDocument(
-				id=doc_id,
-				text=chunk.content_with_context,
-				source=source_doc.source,
-				metadata=metadata,
-			))
+			documents.append(
+				KnowledgeDocument(
+					id=doc_id,
+					text=chunk.content_with_context,
+					source=source_doc.source,
+					metadata=metadata,
+				)
+			)
 		return documents
 
 	def _iter_paths(self, source: str, errors: list[str]):

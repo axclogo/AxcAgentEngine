@@ -6,15 +6,17 @@
 - consumer 接收 envelope 后使用目标 Agent 自己的 runtime 执行，再发到 _reply:{correlation_id}
 - consumer 外部不允许直接跨 Agent 调 agent.stream()
 """
+
 from __future__ import annotations
 
 import asyncio
 import logging
 import time
 import uuid
+from collections.abc import Awaitable, Callable
 from copy import deepcopy
 from dataclasses import dataclass, field
-from typing import Any, Awaitable, Callable, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from axc_agent_engine.core.run_context import copy_run_options, dict_or_empty
 from axc_agent_engine.runtime.tasks import cancel_and_wait
@@ -32,6 +34,7 @@ AgentEventCallback = Callable[["AgentEnvelope"], Awaitable[None] | None]
 @dataclass
 class AgentEnvelope:
 	"""Agent 间通信使用的强类型消息信封。"""
+
 	message_id: str = field(default_factory=lambda: uuid.uuid4().hex[:12])
 	conversation_id: str = ""
 	correlation_id: str = ""
@@ -64,7 +67,7 @@ class AgentEnvelope:
 		}
 
 	@classmethod
-	def from_dict(cls, d: dict[str, Any]) -> "AgentEnvelope":
+	def from_dict(cls, d: dict[str, Any]) -> AgentEnvelope:
 		if not isinstance(d, dict):
 			raise TypeError("AgentEnvelope data must be a dict")
 		return cls(
@@ -83,49 +86,43 @@ class AgentEnvelope:
 
 
 class AgentMessageDispatcher:
-	"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-通过 MessageBus pub/sub 在 Agent 之间路由消息。
+	"""Route agent messages over the host message bus.
+	通过 MessageBus pub/sub 在 Agent 之间路由消息。
 
-	生命周期：
-	1. Engine 使用 MessageBus 创建 dispatcher
-	2. 每个已加载 Agent 调用 run_agent_consumer(agent) 启动 consumer
-	3. 调用方使用 request(envelope) 发送并等待回复
-	4. consumer 收到消息后通过目标 agent.stream() 执行，转发子事件，并用 AgentEnvelope 回复
-	"""
+	        生命周期：
+	        1. Engine 使用 MessageBus 创建 dispatcher
+	        2. 每个已加载 Agent 调用 run_agent_consumer(agent) 启动 consumer
+	        3. 调用方使用 request(envelope) 发送并等待回复
+	        4. consumer 收到消息后通过目标 agent.stream() 执行，转发子事件，并用 AgentEnvelope 回复"""
 
-	def __init__(self, message_bus: "MessageBus") -> None:
+	def __init__(self, message_bus: MessageBus) -> None:
 		self._bus = message_bus
 		self._consumers: dict[str, asyncio.Task] = {}
 		self._pending: dict[str, asyncio.Future[AgentEnvelope]] = {}
 		self._event_callbacks: dict[str, AgentEventCallback] = {}
 
-	def run_agent_consumer(self, agent: "Agent") -> asyncio.Task:
-		"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-为 Agent 启动 consumer task，订阅 agent.{agent.name}.inbox。
+	def run_agent_consumer(self, agent: Agent) -> asyncio.Task:
+		"""Subscribe the agent to its request channel.
+		为 Agent 启动 consumer task，订阅 agent.{agent.name}.inbox。
 
-		consumer 会：
-		- 从总线接收 AgentEnvelope
-		- 通过 agent.stream() 执行，使用目标 Agent 自己的 runtime/LLM
-		- 把回复 envelope 发布到 _reply:{correlation_id}
-		- 出错时发布 error envelope
-		"""
+		                consumer 会：
+		                - 从总线接收 AgentEnvelope
+		                - 通过 agent.stream() 执行，使用目标 Agent 自己的 runtime/LLM
+		                - 把回复 envelope 发布到 _reply:{correlation_id}
+		                - 出错时发布 error envelope"""
 		task = asyncio.create_task(self._consumer_loop(agent))
 		self._consumers[agent.name] = task
 		return task
 
 	async def stop_consumer(self, agent_name: str) -> None:
-		"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-停止指定 Agent 的 consumer task。"""
+		"""Stop one agent consumer.
+		停止指定 Agent 的 consumer task。"""
 		task = self._consumers.pop(agent_name, None)
 		await cancel_and_wait(task)
 
 	async def stop_all(self) -> None:
-		"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-停止所有 consumer task。"""
+		"""Stop all agent consumers.
+		停止所有 consumer task。"""
 		for name in list(self._consumers.keys()):
 			await self.stop_consumer(name)
 
@@ -135,13 +132,11 @@ class AgentMessageDispatcher:
 		timeout: float = 60.0,
 		event_callback: AgentEventCallback | None = None,
 	) -> AgentEnvelope:
-		"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-向目标 Agent 发送消息，并等待 correlation_id 匹配的回复。
+		"""Send a request and await its correlated reply.
+		向目标 Agent 发送消息，并等待 correlation_id 匹配的回复。
 
-		消息会发布到 agent.{recipient}.inbox。超时和执行失败都作为 error envelope
-		返回，而不是抛出带外异常。
-		"""
+		                消息会发布到 agent.{recipient}.inbox。超时和执行失败都作为 error envelope
+		                返回，而不是抛出带外异常。"""
 		correlation_id = uuid.uuid4().hex[:12]
 		envelope.correlation_id = correlation_id
 		envelope.type = "request"
@@ -154,14 +149,12 @@ class AgentMessageDispatcher:
 		if event_callback:
 			self._event_callbacks[correlation_id] = event_callback
 		listen_task = asyncio.create_task(self._listen_reply(reply_channel, correlation_id))
-		event_task = (
-			asyncio.create_task(self._listen_events(event_channel, correlation_id))
-			if event_callback else None
-		)
+		event_task = asyncio.create_task(self._listen_events(event_channel, correlation_id)) if event_callback else None
 		try:
 			await self._bus.publish(self._agent_channel(envelope.recipient), envelope.to_dict())
-			return await asyncio.wait_for(future, timeout=timeout)
-		except asyncio.TimeoutError:
+			async with asyncio.timeout(timeout):
+				return await future
+		except TimeoutError:
 			if event_callback:
 				timeout_event = _sub_agent_complete_envelope(
 					envelope.recipient,
@@ -190,13 +183,12 @@ class AgentMessageDispatcher:
 			await cancel_and_wait(event_task)
 
 	async def publish(self, envelope: AgentEnvelope) -> None:
-		"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-向目标 Agent channel 发布不等待回复的广播消息。"""
+		"""Broadcast a message without awaiting replies.
+		向目标 Agent channel 发布不等待回复的广播消息。"""
 		envelope.type = "broadcast"
 		await self._bus.publish(self._agent_channel(envelope.recipient), envelope.to_dict())
 
-	async def _consumer_loop(self, agent: "Agent") -> None:
+	async def _consumer_loop(self, agent: Agent) -> None:
 		"""consumer 循环：订阅 agent.{name}.inbox 并处理 envelope。"""
 		channel = self._agent_channel(agent.name)
 		try:
@@ -206,13 +198,12 @@ class AgentMessageDispatcher:
 					await self._handle_envelope(agent, envelope)
 		except asyncio.CancelledError:
 			pass
-		except Exception as e:
-			logger.error(f"[dispatcher] Consumer for '{agent.name}' crashed: {e}")
+		except Exception:
+			logger.exception(f"[dispatcher] Consumer for '{agent.name}' crashed")
 
-	async def _handle_envelope(self, agent: "Agent", envelope: AgentEnvelope) -> None:
-		"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-处理收到的 envelope：通过目标 Agent runtime 执行并回复。"""
+	async def _handle_envelope(self, agent: Agent, envelope: AgentEnvelope) -> None:
+		"""Run the target agent and publish its reply.
+		处理收到的 envelope：通过目标 Agent runtime 执行并回复。"""
 		started = time.time()
 		try:
 			await self._publish_child_event(
@@ -252,7 +243,7 @@ class AgentMessageDispatcher:
 					metadata=envelope.metadata,
 				)
 		except Exception as e:
-			logger.warning(f"[dispatcher] Agent '{agent.name}' execution failed: {e}")
+			logger.warning(f"[dispatcher] Agent '{agent.name}' execution failed: {e}", exc_info=True)
 			await self._publish_child_event(
 				envelope,
 				_sub_agent_complete_envelope(agent.name, envelope, False, started, "", str(e)),
@@ -275,14 +266,16 @@ class AgentMessageDispatcher:
 			return
 		await self._bus.publish(f"_events:{request.correlation_id}", event.to_dict())
 
-	async def _run_agent_stream(self, agent: "Agent", envelope: AgentEnvelope) -> list["Event"]:
-		events: list["Event"] = []
+	async def _run_agent_stream(self, agent: Agent, envelope: AgentEnvelope) -> list[Event]:
+		events: list[Event] = []
 		metadata = deepcopy(envelope.metadata)
-		metadata.setdefault("sub_run_id", metadata.get("sub_run_id") or f"{metadata.get('run_id', envelope.trace_id)}:{agent.name}:{envelope.correlation_id}")
+		parent_id = metadata.get("run_id") or envelope.run_options.get("run_id", "")
+		child_id = _sub_run_id(agent.name, envelope)
+		metadata.update(run_id=child_id, parent_run_id=parent_id)
 		async for event in agent.stream(
 			envelope.content,
 			session_id=envelope.conversation_id,
-			run_options=envelope.run_options,
+			run_options={**envelope.run_options, "run_id": child_id},
 			metadata=metadata,
 		):
 			events.append(event)
@@ -291,9 +284,8 @@ class AgentMessageDispatcher:
 		return events
 
 	async def _listen_reply(self, channel: str, correlation_id: str) -> None:
-		"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-监听回复 channel，并完成等待中的 future。"""
+		"""Resolve the pending future for a correlated reply.
+		监听回复 channel，并完成等待中的 future。"""
 		try:
 			async for msg in self._bus.subscribe(channel):
 				if msg.get("correlation_id") == correlation_id:
@@ -337,7 +329,7 @@ def _sub_agent_start_envelope(agent_name: str, envelope: AgentEnvelope) -> Agent
 	)
 
 
-def _sub_agent_step_envelope(agent_name: str, envelope: AgentEnvelope, event: "Event") -> AgentEnvelope:
+def _sub_agent_step_envelope(agent_name: str, envelope: AgentEnvelope, event: Event) -> AgentEnvelope:
 	return _event_envelope(
 		envelope,
 		"sub_agent_step",
@@ -398,7 +390,7 @@ def _parent_metadata(envelope: AgentEnvelope) -> dict[str, Any]:
 	}
 
 
-def _event_step(event: "Event") -> dict[str, Any]:
+def _event_step(event: Event) -> dict[str, Any]:
 	return {
 		"type": event.type.value,
 		"tool": event.tool_name,
@@ -413,12 +405,10 @@ def _event_step(event: "Event") -> dict[str, Any]:
 
 
 def _sub_run_id(agent_name: str, envelope: AgentEnvelope) -> str:
-	raw = envelope.metadata.get("sub_run_id")
-	if raw:
-		return str(raw)
-	parent = str(envelope.metadata.get("run_id") or envelope.trace_id or envelope.conversation_id or "")
-	return f"{parent}:{agent_name}:{envelope.correlation_id}" if parent else f"{agent_name}:{envelope.correlation_id}"
+	parent = envelope.metadata.get("run_id") or envelope.trace_id or envelope.conversation_id
+	suffix = f"{agent_name}:{envelope.correlation_id or envelope.message_id}"
+	return f"{parent}:{suffix}" if parent else suffix
 
 
-def _last_event(events: list["Event"], event_type: str) -> "Event | None":
+def _last_event(events: list[Event], event_type: str) -> Event | None:
 	return next((event for event in reversed(events) if event.type.value == event_type), None)

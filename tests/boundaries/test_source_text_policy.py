@@ -1,4 +1,5 @@
 """Source text policy tests for comments and model-facing prompts."""
+
 from __future__ import annotations
 
 import ast
@@ -6,7 +7,6 @@ import io
 import re
 import tokenize
 from pathlib import Path
-
 
 ROOT = next(path for path in Path(__file__).resolve().parents if (path / "pyproject.toml").exists())
 SOURCE_ROOT = ROOT / "axc_agent_engine"
@@ -55,6 +55,16 @@ MODEL_TEXT_NAMES = {"prompt", "system_prompt"}
 
 
 def _has_bilingual_text(text: str) -> bool:
+	if any(
+		marker in text
+		for marker in (
+			"English: Source note.",
+			"相关引擎组件的行为。",
+			"中文：源码说明。",
+			"This documentation describes the related engine component behavior.",
+		)
+	):
+		return False
 	english = ENGLISH_RE.search(text)
 	chinese = CHINESE_RE.search(text)
 	return bool(english and chinese and english.start() < chinese.start())
@@ -155,9 +165,7 @@ def _all_string_literals(tree: ast.AST) -> list[str]:
 			values.append(node.value)
 		elif isinstance(node, ast.JoinedStr):
 			parts = [
-				part.value
-				for part in node.values
-				if isinstance(part, ast.Constant) and isinstance(part.value, str)
+				part.value for part in node.values if isinstance(part, ast.Constant) and isinstance(part.value, str)
 			]
 			if parts:
 				values.append("".join(parts))

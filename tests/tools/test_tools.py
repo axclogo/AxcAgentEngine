@@ -1,17 +1,19 @@
 """Tests for tools module — utils, registry, executor, orchestrator, decorator."""
+
 import asyncio
+
 import pytest
 
-from axc_agent_engine.tools.utils import parse_tool_calls, parse_arguments
-from axc_agent_engine.tools.registry import ToolRegistry
-from axc_agent_engine.tools.name_mapping import ToolNameMapper, ToolNameMappingConfig, sanitize_tool_name
-from axc_agent_engine.tools.executor import execute_tool, is_retryable_error
-from axc_agent_engine.tools.orchestrator import partition_tool_calls, execute_tool_calls
-from axc_agent_engine.tools.decorator import tool
-from axc_agent_engine.tools.tool_output import ToolOutput
+from axc_agent_engine.core.context import ExecutionConfig, ExecutionContext
 from axc_agent_engine.core.schema import ToolDefinition
-from axc_agent_engine.core.context import ExecutionContext, ExecutionConfig
 from axc_agent_engine.plugins.base import BasePlugin
+from axc_agent_engine.tools.decorator import tool
+from axc_agent_engine.tools.executor import execute_tool, is_retryable_error
+from axc_agent_engine.tools.name_mapping import ToolNameMapper, ToolNameMappingConfig, sanitize_tool_name
+from axc_agent_engine.tools.orchestrator import execute_tool_calls, partition_tool_calls
+from axc_agent_engine.tools.registry import ToolRegistry
+from axc_agent_engine.tools.tool_output import ToolOutput
+from axc_agent_engine.tools.utils import parse_arguments, parse_tool_calls
 
 
 class TestParseToolCalls:
@@ -79,9 +81,12 @@ class TestToolRegistry:
 
 	def test_register_many(self):
 		reg = ToolRegistry()
-		reg.register_many([
-			ToolDefinition(name="a"), ToolDefinition(name="b"),
-		])
+		reg.register_many(
+			[
+				ToolDefinition(name="a"),
+				ToolDefinition(name="b"),
+			]
+		)
 		assert reg.count == 2
 
 	def test_get_nonexistent(self):
@@ -190,6 +195,7 @@ class TestToolExecutor:
 	async def test_execute_success(self):
 		async def fn(args, ctx):
 			return ToolOutput.text(f"got {args['x']}")
+
 		td = ToolDefinition(name="test", execute=fn)
 		result = await execute_tool(td, {"x": "hello"}, "id1")
 		assert result.success is True
@@ -208,6 +214,7 @@ class TestToolExecutor:
 		async def slow(args, ctx):
 			await asyncio.sleep(10)
 			return ToolOutput.text("done")
+
 		td = ToolDefinition(name="slow", execute=slow, timeout=0.1)
 		result = await execute_tool(td, {}, "id1")
 		assert result.success is False
@@ -218,6 +225,7 @@ class TestToolExecutor:
 		async def slow(args, ctx):
 			await asyncio.sleep(0.02)
 			return ToolOutput.text("done")
+
 		td = ToolDefinition(name="slow", execute=slow, timeout=0)
 		result = await asyncio.wait_for(execute_tool(td, {}, "id1"), timeout=0.2)
 		assert result.success is True
@@ -228,6 +236,7 @@ class TestToolExecutor:
 		async def slow(args, ctx):
 			await asyncio.sleep(0.02)
 			return ToolOutput.text("done")
+
 		td = ToolDefinition(name="slow", execute=slow, timeout=None)
 		result = await asyncio.wait_for(execute_tool(td, {}, "id1"), timeout=0.2)
 		assert result.success is True
@@ -237,6 +246,7 @@ class TestToolExecutor:
 	async def test_execute_exception(self):
 		async def bad(args, ctx):
 			raise ValueError("oops")
+
 		td = ToolDefinition(name="bad", execute=bad)
 		result = await execute_tool(td, {}, "id1")
 		assert result.success is False
@@ -246,6 +256,7 @@ class TestToolExecutor:
 	async def test_execute_result_arguments_are_copied(self):
 		async def fn(args, ctx):
 			return ToolOutput.text("ok")
+
 		arguments = {"nested": {"value": "original"}}
 		td = ToolDefinition(name="test", execute=fn)
 		result = await execute_tool(td, arguments, "id1")
@@ -257,8 +268,10 @@ class TestToolExecutor:
 	@pytest.mark.asyncio
 	async def test_non_tooloutput_rejected(self):
 		"""Tools returning non-ToolOutput are rejected."""
+
 		async def invalid_tool(args, ctx):
 			return "plain string"
+
 		td = ToolDefinition(name="invalid_tool", execute=invalid_tool)
 		with pytest.raises(TypeError, match="必须返回 ToolOutput"):
 			await execute_tool(td, {}, "id1")
@@ -266,12 +279,14 @@ class TestToolExecutor:
 	@pytest.mark.asyncio
 	async def test_retry_on_retryable_error(self):
 		call_count = 0
+
 		async def flaky(args, ctx):
 			nonlocal call_count
 			call_count += 1
 			if call_count < 2:
 				raise ConnectionError("connection refused")
 			return ToolOutput.text("ok")
+
 		td = ToolDefinition(name="flaky", execute=flaky, is_read_only=True)
 		result = await execute_tool(td, {}, "id1")
 		assert result.success is True
@@ -280,10 +295,12 @@ class TestToolExecutor:
 	@pytest.mark.asyncio
 	async def test_no_retry_on_non_retryable(self):
 		call_count = 0
+
 		async def perm_fail(args, ctx):
 			nonlocal call_count
 			call_count += 1
 			raise PermissionError("forbidden")
+
 		td = ToolDefinition(name="perm", execute=perm_fail, is_read_only=True)
 		result = await execute_tool(td, {}, "id1")
 		assert result.success is False
@@ -292,8 +309,10 @@ class TestToolExecutor:
 	@pytest.mark.asyncio
 	async def test_error_tooloutput(self):
 		"""ToolOutput with is_error=True is treated as failure."""
+
 		async def err_tool(args, ctx):
 			return ToolOutput.error("something went wrong")
+
 		td = ToolDefinition(name="err", execute=err_tool)
 		result = await execute_tool(td, {}, "id1")
 		assert result.success is False
@@ -362,10 +381,13 @@ class TestOrchestrator:
 	async def test_plugin_rejection(self, tool_registry):
 		class RejectPlugin(BasePlugin):
 			name = "reject"
+
 			async def pre_tool_call(self, ctx, name, args):
 				return False, args
+
 			async def post_tool_call(self, ctx, name, args, result, dur):
 				return result
+
 		calls = [{"name": "echo", "arguments": {"text": "hi"}, "id": "1"}]
 		ctx = ExecutionContext(config=ExecutionConfig(stream=True))
 		results = await execute_tool_calls(calls, tool_registry, [RejectPlugin()], ctx)
@@ -414,6 +436,7 @@ class TestToolDecorator:
 	def test_decorator_rejects_non_tooloutput_annotation(self):
 		"""@tool rejects functions annotated with non-ToolOutput return type."""
 		with pytest.raises(TypeError, match="必须返回 ToolOutput"):
+
 			@tool(name="bad")
 			async def bad_tool(x: str) -> str:
 				return x

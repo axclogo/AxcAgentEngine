@@ -1,2 +1,1 @@
-"""Runtime infrastructure primitives.
-中文：此文档说明相关引擎组件的行为。"""
+"""Runtime infrastructure primitives. 运行时基础设施接口。"""

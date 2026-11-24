@@ -1,12 +1,15 @@
 """Tests for CompressPlugin with ToolOutput (no longer truncates tool results)."""
+
+from unittest.mock import AsyncMock
+
 import pytest
-from axc_agent_engine.plugins.builtin.compress.plugin import CompressPlugin
+
 from axc_agent_engine.core.context import ExecutionContext
-from axc_agent_engine.tools.tool_output import ToolOutput
 from axc_agent_engine.plugins import PluginContext
+from axc_agent_engine.plugins.builtin.compress.plugin import CompressPlugin
 from axc_agent_engine.runtime.resources import ResourceRegistry
 from axc_agent_engine.storage.artifact_store import InMemoryArtifactStore
-from unittest.mock import AsyncMock
+from axc_agent_engine.tools.tool_output import ToolOutput
 
 
 class TestCompressPluginPostToolCall:
@@ -93,7 +96,7 @@ class TestCompressPluginPostToolCall:
 		await p.post_tool_call(ctx, "external_query", {}, output, 100)
 		result = p.transform_messages([{"role": "user", "content": "next"}], ctx, "next")
 
-		assert any("durable analysis report" in item for item in p._conversation_buffer)
+		assert any("durable analysis report" in item for item in p._run(ctx)._conversation_buffer)
 		assert any("durable analysis report" in msg.get("content", "") for msg in result)
 
 
@@ -109,7 +112,7 @@ class TestCompressPluginTransformMessages:
 			{"role": "tool", "tool_call_id": "1", "content": "x" * 2000},
 		]
 		result = p.transform_messages(messages, ctx)
-		tool_msg = [m for m in result if m["role"] == "tool"][0]
+		tool_msg = next(m for m in result if m["role"] == "tool")
 		assert tool_msg["content"] == "x" * 2000
 
 	def test_micro_compact_still_works(self):
@@ -121,7 +124,13 @@ class TestCompressPluginTransformMessages:
 		# Add 5 rounds of user+assistant+tool
 		for i in range(5):
 			messages.append({"role": "user", "content": f"q{i}"})
-			messages.append({"role": "assistant", "content": f"a{i}", "tool_calls": [{"id": f"tc{i}", "function": {"name": "t", "arguments": "{}"}}]})
+			messages.append(
+				{
+					"role": "assistant",
+					"content": f"a{i}",
+					"tool_calls": [{"id": f"tc{i}", "function": {"name": "t", "arguments": "{}"}}],
+				}
+			)
 			messages.append({"role": "tool", "tool_call_id": f"tc{i}", "content": "x" * 500})
 		result = p.transform_messages(messages, ctx)
 		users = [m["content"] for m in result if m["role"] == "user"]
@@ -129,19 +138,24 @@ class TestCompressPluginTransformMessages:
 
 	def test_pinned_tool_result_survives_small_context_budget(self):
 		p = CompressPlugin()
-		p.initialize({
-			"context_window": {"max_input_tokens": 120, "reserve_output_tokens": 20},
-			"recent_window": {"rounds": 1},
-		}, PluginContext())
+		p.initialize(
+			{
+				"context_window": {"max_input_tokens": 120, "reserve_output_tokens": 20},
+				"recent_window": {"rounds": 1},
+			},
+			PluginContext(),
+		)
 		ctx = ExecutionContext()
 		messages = [{"role": "system", "content": "sys"}]
 		for i in range(10):
 			messages.append({"role": "user", "content": f"q{i}"})
-			messages.append({
-				"role": "assistant",
-				"content": "",
-				"tool_calls": [{"id": f"tc{i}", "function": {"name": "agent_call", "arguments": "{}"}}],
-			})
+			messages.append(
+				{
+					"role": "assistant",
+					"content": "",
+					"tool_calls": [{"id": f"tc{i}", "function": {"name": "agent_call", "arguments": "{}"}}],
+				}
+			)
 			metadata = {"durable": True, "durable_summary": "关键阶段报告"} if i == 0 else {}
 			messages.append({"role": "tool", "tool_call_id": f"tc{i}", "content": f"result{i}", "metadata": metadata})
 
@@ -187,14 +201,14 @@ class TestCompressPluginSummary:
 		# Simulate rounds
 		await p.on_round_end(ctx, "user msg 1", "assistant msg 1", [])
 		await p.on_round_end(ctx, "user msg 2", "assistant msg 2", [])
-		assert p._summary == "This is a summary"
+		assert p._run(ctx)._summary == "This is a summary"
 
 	@pytest.mark.asyncio
 	async def test_summary_applied_to_messages(self):
 		p = CompressPlugin()
 		p.initialize({}, PluginContext())
-		p._summary = "Previous conversation summary"
 		ctx = ExecutionContext()
+		p._run(ctx)._summary = "Previous conversation summary"
 		messages = [
 			{"role": "system", "content": "sys"},
 			{"role": "user", "content": "old"},
@@ -213,7 +227,7 @@ class TestCompressPluginSummary:
 		p.initialize({"summary": {"after_rounds": 1}}, PluginContext())
 		ctx = ExecutionContext()
 		await p.on_round_end(ctx, "msg", "reply", [])
-		assert p._summary == ""
+		assert p._run(ctx)._summary == ""
 
 	@pytest.mark.asyncio
 	async def test_circuit_breaker(self):
@@ -224,12 +238,9 @@ class TestCompressPluginSummary:
 		p.initialize({"summary": {"after_rounds": 1, "max_failures": 2}}, plugin_ctx)
 		ctx = ExecutionContext()
 		await p.on_round_end(ctx, "msg1", "reply1", [])
-		assert p._compact_failures == 1
-		# Reset round count to trigger again
-		p._round_count = 0
-		p._summary = ""
+		assert p.capture_session(ctx)["summarizer"]["failures"] == 1
 		await p.on_round_end(ctx, "msg2", "reply2", [])
-		assert p._compact_broken is True
+		assert p.capture_session(ctx)["summarizer"]["broken"] is True
 
 
 class TestCompressPluginRecall:
@@ -252,23 +263,38 @@ class TestCompressPluginRecall:
 	def test_reads_sync_recall_resource(self):
 		class RecallResource:
 			def search(self, query, top_k=12):
-				return [{"text": f"found {query}", "score": 1.0}]
+				return [
+					{"text": f"found {query}", "score": 1.0, "metadata": {"scope": {"agent": "", "session": "test"}}},
+					{"text": "other-person", "score": 1.0, "metadata": {"scope": {"agent": "", "session": "other"}}},
+					{"text": "legacy-unscoped", "score": 1.0, "metadata": {}},
+				]
 
 		ctx = PluginContext(resources=ResourceRegistry({"context_recall": RecallResource()}))
 		p = CompressPlugin()
 		p.initialize({"recall": {"resource": "context_recall"}}, ctx)
-		result = p.transform_messages([{"role": "user", "content": "python"}], ExecutionContext(), "python")
+		context = ExecutionContext()
+		context.state.metadata["session_id"] = "test"
+		result = p.transform_messages([{"role": "user", "content": "python"}], context, "python")
 		assert any("found python" in m.get("content", "") for m in result)
+		assert "other-person" not in str(result) and "legacy-unscoped" not in str(result)
 
 	def test_reads_async_recall_resource(self):
 		class RecallResource:
 			async def search(self, query, top_k=12):
-				return [{"text": f"async found {query}", "score": 1.0}]
+				return [
+					{
+						"text": f"async found {query}",
+						"score": 1.0,
+						"metadata": {"scope": {"agent": "", "session": "test"}},
+					}
+				]
 
 		ctx = PluginContext(resources=ResourceRegistry({"context_recall": RecallResource()}))
 		p = CompressPlugin()
 		p.initialize({"recall": {"resource": "context_recall"}}, ctx)
-		result = p.transform_messages([{"role": "user", "content": "python"}], ExecutionContext(), "python")
+		context = ExecutionContext()
+		context.state.metadata["session_id"] = "test"
+		result = p.transform_messages([{"role": "user", "content": "python"}], context, "python")
 		assert any("async found python" in m.get("content", "") for m in result)
 
 
@@ -276,6 +302,7 @@ class TestSafetyPluginWithToolOutput:
 	@pytest.mark.asyncio
 	async def test_pii_masking_on_tooloutput_text(self):
 		from axc_agent_engine.plugins.builtin.safety.plugin import SafetyPlugin
+
 		p = SafetyPlugin()
 		p.initialize({"pii_masking": True}, None)
 		output = ToolOutput.text("Contact: 13912345678")
@@ -286,6 +313,7 @@ class TestSafetyPluginWithToolOutput:
 	@pytest.mark.asyncio
 	async def test_pii_masking_on_summary(self):
 		from axc_agent_engine.plugins.builtin.safety.plugin import SafetyPlugin
+
 		p = SafetyPlugin()
 		p.initialize({"pii_masking": True}, None)
 		output = ToolOutput(content="data", content_type="text", summary="Phone: 13812345678")
@@ -295,6 +323,7 @@ class TestSafetyPluginWithToolOutput:
 	@pytest.mark.asyncio
 	async def test_no_masking_when_disabled(self):
 		from axc_agent_engine.plugins.builtin.safety.plugin import SafetyPlugin
+
 		p = SafetyPlugin()
 		p.initialize({"pii_masking": False}, None)
 		output = ToolOutput.text("13912345678")
@@ -305,6 +334,7 @@ class TestSafetyPluginWithToolOutput:
 	async def test_json_content_not_masked(self):
 		"""PII masking only applies to str content."""
 		from axc_agent_engine.plugins.builtin.safety.plugin import SafetyPlugin
+
 		p = SafetyPlugin()
 		p.initialize({"pii_masking": True}, None)
 		output = ToolOutput.json_output({"phone": "13912345678"})

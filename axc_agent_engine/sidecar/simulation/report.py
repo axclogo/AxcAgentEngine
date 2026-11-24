@@ -1,7 +1,6 @@
-"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-仿真报告生成辅助。
-Simulation report generation helpers."""
+"""Simulation report generation helpers.
+仿真报告生成辅助。"""
+
 from __future__ import annotations
 
 import json
@@ -9,6 +8,7 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any, Protocol, runtime_checkable
 
+from axc_agent_engine.core.errors import LLMError
 from axc_agent_engine.sidecar.simulation.models import SimulationReport
 
 logger = logging.getLogger(__name__)
@@ -16,11 +16,8 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class GeneratedSimulationReport:
-	"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-附加到结构化仿真报告上的 LLM 叙述内容。
-	LLM-generated narrative attached to a structured simulation report.
-	"""
+	"""LLM-generated narrative attached to a structured simulation report.
+	附加到结构化仿真报告上的 LLM 叙述内容。"""
 
 	summary: str = ""
 	key_findings: list[str] = field(default_factory=list)
@@ -30,21 +27,15 @@ class GeneratedSimulationReport:
 
 @runtime_checkable
 class SimulationReportGenerator(Protocol):
-	"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-仿真报告生成器协议。
-	Simulation report generator protocol.
-	"""
+	"""Simulation report generator protocol.
+	仿真报告生成器协议。"""
 
 	async def generate(self, report: SimulationReport) -> GeneratedSimulationReport: ...
 
 
 class LLMSimulationReportGenerator:
-	"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-使用 utility LLM 生成结构化叙述报告字段。
-	Generate structured narrative report fields with a utility LLM.
-	"""
+	"""Generate structured narrative report fields with a utility LLM.
+	使用 utility LLM 生成结构化叙述报告字段。"""
 
 	def __init__(self, utility_model: Any, max_timeline_steps: int = 20) -> None:
 		self.utility_model = utility_model
@@ -57,17 +48,14 @@ class LLMSimulationReportGenerator:
 		try:
 			content = await self.utility_model.ask(prompt)
 			return _parse_generated_report(content, fallback=report.summary)
-		except Exception as exc:
+		except (LLMError, OSError, RuntimeError, ValueError) as exc:
 			logger.warning("[simulation] report generation failed: %s", exc)
 			return GeneratedSimulationReport(summary=report.summary)
 
 
 def apply_generated_report(report: SimulationReport, generated: GeneratedSimulationReport) -> SimulationReport:
-	"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-把生成的叙述字段附加到现有结构化报告。
-	Attach generated narrative fields to the existing structured report.
-	"""
+	"""Attach generated narrative fields to the existing structured report.
+	把生成的叙述字段附加到现有结构化报告。"""
 	if generated.summary:
 		report.summary = generated.summary
 	report.metrics = {
@@ -82,16 +70,18 @@ def apply_generated_report(report: SimulationReport, generated: GeneratedSimulat
 def _build_prompt(report: SimulationReport, max_steps: int) -> str:
 	steps = []
 	for step in report.timeline[:max_steps]:
-		steps.append({
-			"step_id": step.step_id,
-			"actor": step.actor,
-			"action": step.action.intent,
-			"action_type": str(step.action.type),
-			"delta": step.delta.notes,
-			"goal_progress": step.scorecard.goal_progress,
-			"confidence": step.scorecard.confidence,
-			"notes": step.scorecard.notes,
-		})
+		steps.append(
+			{
+				"step_id": step.step_id,
+				"actor": step.actor,
+				"action": step.action.intent,
+				"action_type": str(step.action.type),
+				"delta": step.delta.notes,
+				"goal_progress": step.scorecard.goal_progress,
+				"confidence": step.scorecard.confidence,
+				"notes": step.scorecard.notes,
+			}
+		)
 	payload = {
 		"title": report.title,
 		"scenario_id": report.scenario_id,
@@ -119,7 +109,7 @@ def _parse_generated_report(content: str, fallback: str = "") -> GeneratedSimula
 	start = text.find("{")
 	end = text.rfind("}")
 	if start >= 0 and end > start:
-		text = text[start:end + 1]
+		text = text[start : end + 1]
 	try:
 		raw = json.loads(text)
 	except (json.JSONDecodeError, TypeError):

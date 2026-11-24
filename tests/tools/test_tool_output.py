@@ -1,8 +1,9 @@
 """Tests for ToolOutput, ArtifactRef, and ArtifactStore protocol."""
+
 import pytest
-from axc_agent_engine.tools.tool_output import ToolOutput, ArtifactRef, generate_artifact_id
-from axc_agent_engine.storage.artifact_store import ArtifactStore
-from axc_agent_engine.storage.artifact_store import InMemoryArtifactStore
+
+from axc_agent_engine.storage.artifact_store import ArtifactStore, InMemoryArtifactStore
+from axc_agent_engine.tools.tool_output import ArtifactRef, ToolOutput, generate_artifact_id
 
 
 class TestArtifactRef:
@@ -251,9 +252,14 @@ class TestToolOutput:
 		assert out.artifacts[0].metadata == {"source": "s1"}
 
 	def test_roundtrip(self):
-		out = ToolOutput(content="test", content_type="text", summary="s",
-						 artifacts=[ArtifactRef(id="x", kind="text", size=4)],
-						 metadata={"m": True}, is_error=False)
+		out = ToolOutput(
+			content="test",
+			content_type="text",
+			summary="s",
+			artifacts=[ArtifactRef(id="x", kind="text", size=4)],
+			metadata={"m": True},
+			is_error=False,
+		)
 		assert ToolOutput.from_dict(out.to_dict()).content == "test"
 
 	def test_content_as_str_dict(self):

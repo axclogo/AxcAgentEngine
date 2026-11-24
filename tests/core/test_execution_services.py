@@ -1,16 +1,21 @@
 """Tests for ExecutionServices and typed service injection."""
+
 import pytest
+
 from axc_agent_engine.core.context import (
-	ExecutionConfig, ExecutionState, ExecutionContext, ExecutionServices,
+	ExecutionConfig,
+	ExecutionContext,
+	ExecutionServices,
+	ExecutionState,
 )
+from axc_agent_engine.core.plugin_manager import PluginManager
+from axc_agent_engine.core.schema import ToolDefinition
 from axc_agent_engine.storage.artifact_store import InMemoryArtifactStore
 from axc_agent_engine.tools.context import ToolContext
-from axc_agent_engine.tools.tool_output import ToolOutput
 from axc_agent_engine.tools.executor import execute_tool
 from axc_agent_engine.tools.orchestrator import execute_tool_calls
 from axc_agent_engine.tools.registry import ToolRegistry
-from axc_agent_engine.core.schema import ToolDefinition
-from axc_agent_engine.core.plugin_manager import PluginManager
+from axc_agent_engine.tools.tool_output import ToolOutput
 
 
 class TestExecutionServices:
@@ -100,14 +105,12 @@ class TestOrchestratorServiceInjection:
 			return ToolOutput.text("ok")
 
 		reg = ToolRegistry()
-		reg.register(ToolDefinition(name="t", execute=capture,
-			parameters={"type": "object", "properties": {}}))
+		reg.register(ToolDefinition(name="t", execute=capture, parameters={"type": "object", "properties": {}}))
 		store = InMemoryArtifactStore()
 		services = ExecutionServices(artifact_store=store)
 		ctx = ExecutionContext(config=ExecutionConfig(), state=ExecutionState(), services=services)
 		pm = PluginManager([])
-		results = await execute_tool_calls(
-			[{"name": "t", "arguments": {}, "id": "x"}], reg, pm.plugins, ctx)
+		results = await execute_tool_calls([{"name": "t", "arguments": {}, "id": "x"}], reg, pm.plugins, ctx)
 		assert results[0].success
 		assert received["artifact_store"] is store
 
@@ -120,12 +123,10 @@ class TestOrchestratorServiceInjection:
 			return ToolOutput.text("ok")
 
 		reg = ToolRegistry()
-		reg.register(ToolDefinition(name="t", execute=capture,
-			parameters={"type": "object", "properties": {}}))
+		reg.register(ToolDefinition(name="t", execute=capture, parameters={"type": "object", "properties": {}}))
 		ctx = ExecutionContext(config=ExecutionConfig(), state=ExecutionState())
 		pm = PluginManager([])
-		results = await execute_tool_calls(
-			[{"name": "t", "arguments": {}, "id": "x"}], reg, pm.plugins, ctx)
+		results = await execute_tool_calls([{"name": "t", "arguments": {}, "id": "x"}], reg, pm.plugins, ctx)
 		assert results[0].success
 		assert received["artifact_store"] is None
 
@@ -135,6 +136,7 @@ class TestExecutorToolOutputEnforcement:
 	async def test_str_return_rejected(self):
 		async def bad(args, ctx):
 			return "plain string"
+
 		td = ToolDefinition(name="bad", execute=bad)
 		with pytest.raises(TypeError, match="必须返回 ToolOutput"):
 			await execute_tool(td, {}, "id1")
@@ -143,6 +145,7 @@ class TestExecutorToolOutputEnforcement:
 	async def test_dict_return_rejected(self):
 		async def bad(args, ctx):
 			return {"key": "value"}
+
 		td = ToolDefinition(name="bad", execute=bad)
 		with pytest.raises(TypeError, match="必须返回 ToolOutput"):
 			await execute_tool(td, {}, "id1")
@@ -151,6 +154,7 @@ class TestExecutorToolOutputEnforcement:
 	async def test_list_return_rejected(self):
 		async def bad(args, ctx):
 			return [1, 2, 3]
+
 		td = ToolDefinition(name="bad", execute=bad)
 		with pytest.raises(TypeError, match="必须返回 ToolOutput"):
 			await execute_tool(td, {}, "id1")
@@ -159,6 +163,7 @@ class TestExecutorToolOutputEnforcement:
 	async def test_none_return_rejected(self):
 		async def bad(args, ctx):
 			return None
+
 		td = ToolDefinition(name="bad", execute=bad)
 		with pytest.raises(TypeError, match="必须返回 ToolOutput"):
 			await execute_tool(td, {}, "id1")
@@ -167,6 +172,7 @@ class TestExecutorToolOutputEnforcement:
 	async def test_int_return_rejected(self):
 		async def bad(args, ctx):
 			return 42
+
 		td = ToolDefinition(name="bad", execute=bad)
 		with pytest.raises(TypeError, match="必须返回 ToolOutput"):
 			await execute_tool(td, {}, "id1")
@@ -175,6 +181,7 @@ class TestExecutorToolOutputEnforcement:
 	async def test_tooloutput_accepted(self):
 		async def good(args, ctx):
 			return ToolOutput.text("ok")
+
 		td = ToolDefinition(name="good", execute=good)
 		result = await execute_tool(td, {}, "id1")
 		assert result.success
@@ -184,6 +191,7 @@ class TestExecutorToolOutputEnforcement:
 	async def test_tooloutput_error_treated_as_failure(self):
 		async def err(args, ctx):
 			return ToolOutput.error("something broke")
+
 		td = ToolDefinition(name="err", execute=err)
 		result = await execute_tool(td, {}, "id1")
 		assert not result.success
@@ -195,6 +203,7 @@ class TestExecutorToolOutputEnforcement:
 	async def test_tooloutput_json(self):
 		async def json_tool(args, ctx):
 			return ToolOutput.json_output({"status": "ok", "count": 5})
+
 		td = ToolDefinition(name="json_tool", execute=json_tool)
 		result = await execute_tool(td, {}, "id1")
 		assert result.success
@@ -205,17 +214,20 @@ class TestExecutorToolOutputEnforcement:
 class TestToolResultContextView:
 	def test_result_property_returns_context_view(self):
 		from axc_agent_engine.tools.executor import ToolResult
+
 		output = ToolOutput.text("hello world")
 		tr = ToolResult(tool_call_id="1", tool_name="t", arguments={}, output=output, success=True)
 		assert tr.context_view() == "hello world"
 
 	def test_result_property_none_output(self):
 		from axc_agent_engine.tools.executor import ToolResult
+
 		tr = ToolResult(tool_call_id="1", tool_name="t", arguments={}, success=False, error="err")
 		assert tr.context_view() == ""
 
 	def test_context_view_long_content(self):
 		from axc_agent_engine.tools.executor import ToolResult
+
 		output = ToolOutput.text("x" * 5000)
 		tr = ToolResult(tool_call_id="1", tool_name="t", arguments={}, output=output, success=True)
 		view = tr.context_view()

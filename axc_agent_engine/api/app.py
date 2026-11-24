@@ -1,4 +1,5 @@
 """FastAPI 应用工厂。"""
+
 from __future__ import annotations
 
 import logging
@@ -6,27 +7,34 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
 	from fastapi import FastAPI
-	from axc_agent_engine.engine import Engine
+
+from axc_agent_engine._version import __version__
+from axc_agent_engine.engine import Engine
 
 logger = logging.getLogger(__name__)
 
 
 def create_app(engine: Engine, models: object, agents_dir: str = "") -> FastAPI:
-	"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-创建 FastAPI 应用"""
+	"""Create the FastAPI application.
+	创建 FastAPI 应用"""
 	from fastapi import FastAPI
 	from fastapi.responses import JSONResponse
 	from starlette.requests import Request
+
+	from axc_agent_engine.api.deps import EngineState
 	from axc_agent_engine.api.routes.chat import create_chat_router
 	from axc_agent_engine.api.routes.health import router as health_router
-	from axc_agent_engine.api.deps import EngineState
 	from axc_agent_engine.core.errors import (
-		AxcError, ProviderError, TimeoutError, ConfigError,
-		CancelledError, SchemaError, ToolError,
+		AxcError,
+		CancelledError,
+		ConfigError,
+		ProviderError,
+		SchemaError,
+		TimeoutError,
+		ToolError,
 	)
 
-	app = FastAPI(title="AxcAgentEngine", version="3.0.0")
+	app = FastAPI(title="AxcAgentEngine", version=__version__)
 	state = EngineState(engine=engine, agents_dir=agents_dir, models=models)
 	app.state.engine_state = state
 

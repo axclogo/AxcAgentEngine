@@ -1,9 +1,9 @@
-"""Graph service layer independent of plugin lifecycle.
-中文：此文档说明相关引擎组件的行为。"""
+"""Graph service layer independent of plugin lifecycle. 独立于插件生命周期的图服务。"""
+
 import json
 from typing import Any
 
-from axc_agent_engine.plugins.builtin.common import bounded_int
+from axc_agent_engine.plugins.builtin.common import bounded_int, string_array
 from axc_agent_engine.plugins.builtin.graph.config import GraphConfig
 from axc_agent_engine.plugins.builtin.graph.policy import GraphPolicy
 from axc_agent_engine.plugins.builtin.graph.source_loader import GraphSourceLoader
@@ -28,7 +28,7 @@ class GraphService:
 		self.load_sources()
 
 	def inject_context(self, topic: str) -> str:
-		if not self.config.enabled or not topic:
+		if not topic:
 			return ""
 		relevant = self.store.search(topic, depth=1, limit=5)
 		if not relevant:
@@ -46,17 +46,24 @@ class GraphService:
 		depth = bounded_int(depth_value, 0, self.config.max_depth)
 		limit = self.limit(limit_value)
 		rows = self.store.search(query, depth=depth, limit=limit)
-		results = [{
-			"entity": filter_metadata(row.entity, self.config.include_metadata),
-			"relations": [filter_metadata(r, self.config.include_metadata) for r in row.relations],
-		} for row in rows]
+		results = [
+			{
+				"entity": filter_metadata(row.entity, self.config.include_metadata),
+				"relations": [filter_metadata(r, self.config.include_metadata) for r in row.relations],
+			}
+			for row in rows
+		]
 		return {"results": results, "count": len(results), "depth": depth}, limit
 
 	def upsert_entity(self, args: dict[str, Any]) -> dict[str, Any]:
 		name = clean_text(args.get("name", ""), self.config.max_name_length).strip()
 		entity_type = clean_text(args.get("entity_type", "concept"), self.config.max_name_length) or "concept"
 		description = clean_text(args.get("description", ""), self.config.max_description_length)
-		aliases = [clean_text(alias, self.config.max_name_length) for alias in args.get("aliases", []) if str(alias).strip()]
+		aliases = [
+			clean_text(alias, self.config.max_name_length)
+			for alias in string_array(args.get("aliases", []), "aliases")
+			if alias.strip()
+		]
 		meta = metadata(args.get("metadata", {}), self.config.namespace)
 		entity = self.store.upsert_entity(name, entity_type, aliases, description=description, **meta)
 		return {"entity": entity, "name": name, "type": entity_type}
@@ -80,13 +87,19 @@ class GraphService:
 
 	def list_entities(self, args: dict[str, Any]) -> tuple[list[dict[str, Any]], int, int]:
 		limit, offset = self.page(args)
-		entities = [filter_metadata(entity, self.config.include_metadata) for entity in self.store.list_entities(limit=limit, offset=offset)]
+		entities = [
+			filter_metadata(entity, self.config.include_metadata)
+			for entity in self.store.list_entities(limit=limit, offset=offset)
+		]
 		return entities, limit, offset
 
 	def list_relations(self, args: dict[str, Any]) -> tuple[list[dict[str, Any]], int, int]:
 		limit, offset = self.page(args)
 		entity_id = args.get("entity_id") or None
-		relations = [filter_metadata(relation, self.config.include_metadata) for relation in self.store.list_relations(entity_id=entity_id, limit=limit, offset=offset)]
+		relations = [
+			filter_metadata(relation, self.config.include_metadata)
+			for relation in self.store.list_relations(entity_id=entity_id, limit=limit, offset=offset)
+		]
 		return relations, limit, offset
 
 	def delete_entity(self, entity_id: str) -> bool:
@@ -102,6 +115,7 @@ class GraphService:
 
 	def export_payload(self) -> dict[str, Any]:
 		import time
+
 		return {
 			"namespace": self.config.namespace,
 			"entities": self.store.list_entities(limit=self.config.max_entities, offset=0),
@@ -111,7 +125,7 @@ class GraphService:
 
 	def status_payload(self) -> dict[str, Any]:
 		return {
-			"enabled": self.config.enabled,
+			"enabled": True,
 			"namespace": self.config.namespace,
 			"entities": self.entity_count(),
 			"relations": self.relation_count(),
@@ -150,9 +164,14 @@ class GraphService:
 					error = {"source": source, "line": line_no, "error": str(exc)}
 					self.load_errors.append(error)
 					raise ValueError(str(error)) from exc
-				if "source_id" in item and "target_id" in item and "relation_type" in item:
-					relations.append(item)
-				elif "source" in item and "target" in item and "relation_type" in item:
+				if (
+					"source_id" in item
+					and "target_id" in item
+					and "relation_type" in item
+					or "source" in item
+					and "target" in item
+					and "relation_type" in item
+				):
 					relations.append(item)
 				elif "id" in item and "name" in item:
 					entities.append(item)
@@ -172,7 +191,9 @@ class GraphService:
 		return bounded_int(value, 1, self.config.max_limit)
 
 	def page(self, args: dict[str, Any]) -> tuple[int, int]:
-		return self.limit(args.get("limit", self.config.default_limit)), bounded_int(args.get("offset", 0), 0, 10_000_000)
+		return self.limit(args.get("limit", self.config.default_limit)), bounded_int(
+			args.get("offset", 0), 0, 10_000_000
+		)
 
 	def entity_count(self) -> int:
 		return len(getattr(self.store, "entities", {}))

@@ -1,7 +1,8 @@
-"""Presentation helpers for builtin command results.
-中文：此文档说明相关引擎组件的行为。"""
+"""Presentation helpers for builtin command results. 组织内置命令的展示结果。"""
+
 from typing import Any
 
+from axc_agent_engine.plugins.builtin.common import command_log_artifact
 from axc_agent_engine.runtime.sandbox_models import CommandResult
 
 from .artifact_store import ArtifactStoreReader
@@ -18,25 +19,22 @@ class BuiltinCommandPresenter:
 	):
 		artifacts = []
 		artifact_store = self._artifact_reader.store(context)
-		stdout_artifact_id = ""
-		stderr_artifact_id = ""
-		if artifact_store and result.stdout:
-			ref = await artifact_store.put_text(result.stdout, {"stream": "stdout"}, kind="text")
-			artifacts.append(ref)
-			stdout_artifact_id = ref.id
-		if artifact_store and result.stderr:
-			ref = await artifact_store.put_text(result.stderr, {"stream": "stderr"}, kind="text")
-			artifacts.append(ref)
-			stderr_artifact_id = ref.id
 		content_data: dict[str, Any] = {
 			"exit_code": result.exit_code,
-			"stdout": result.stdout,
-			"stderr": result.stderr,
 			"duration_ms": result.duration_ms,
 			"timed_out": result.timed_out,
 		}
-		if stdout_artifact_id:
-			content_data["stdout_artifact_id"] = stdout_artifact_id
-		if stderr_artifact_id:
-			content_data["stderr_artifact_id"] = stderr_artifact_id
+		for name, text, path in (
+			("stdout", result.stdout, result.stdout_path),
+			("stderr", result.stderr, result.stderr_path),
+		):
+			content_data[name] = text
+			if path:
+				content_data[name], ref = await command_log_artifact(path, artifact_store, {"stream": name})
+			elif artifact_store and text:
+				ref = await artifact_store.put_text(text, {"stream": name}, kind="text")
+			else:
+				continue
+			artifacts.append(ref)
+			content_data[f"{name}_artifact_id"] = ref.id
 		return content_data, artifacts

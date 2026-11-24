@@ -1,9 +1,9 @@
-"""Graph ToolOutput presentation.
-中文：此文档说明相关引擎组件的行为。"""
+"""Graph ToolOutput presentation. 图工具结果的展示格式。"""
+
 import json
 import logging
 
-from axc_agent_engine.plugins.builtin.common import externalize_text, artifact_store_from_context
+from axc_agent_engine.plugins.builtin.common import artifact_store_from_context, externalize_text
 
 from .config import GraphConfig
 
@@ -17,6 +17,7 @@ class GraphPresenter:
 
 	async def json_output(self, payload: dict, context: dict, summary: str, kind: str):
 		from axc_agent_engine.tools.tool_output import ToolOutput
+
 		encoded = json.dumps(payload, ensure_ascii=False, default=str)
 		store = artifact_store_from_context(context, self._plugin_ctx)
 		content, ref = await externalize_text(

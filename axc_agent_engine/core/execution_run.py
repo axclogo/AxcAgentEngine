@@ -1,27 +1,29 @@
-"""Executor run helpers kept outside the public Executor facade.
-中文：此文档说明相关引擎组件的行为。"""
+"""Run lifecycle, checkpoint recording and model streaming. 运行生命周期、检查点记录和模型流输出。"""
+
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 
 from axc_agent_engine.core.context import ExecutionContext
-from axc_agent_engine.core.errors import ProviderError
 from axc_agent_engine.core.events import Event
 from axc_agent_engine.core.llm_caller import LLMCaller
 from axc_agent_engine.core.message_store import MessageStore
 from axc_agent_engine.core.plugin_manager import PluginManager
+from axc_agent_engine.core.run_context import checkpoint_owner
 from axc_agent_engine.core.stream_sink import QueueStreamSink
 from axc_agent_engine.runtime.checkpoint import Checkpoint, CheckpointStatus
 from axc_agent_engine.runtime.tasks import cancel_and_wait
 
+
 class CheckpointRecorder:
-	"""Execution checkpoint persistence.
-中文：此文档说明相关引擎组件的行为。"""
+	"""Maintain checkpoint sequence numbers for one run. 管理单次运行的检查点序号。"""
 
 	def __init__(self, ctx: ExecutionContext, messages: MessageStore) -> None:
 		self._ctx = ctx
 		self._messages = messages
+		self.sequence = 0
+		self.forked_from: dict | None = None
 
 	async def save(
 		self,
@@ -34,13 +36,17 @@ class CheckpointRecorder:
 		if not store:
 			return
 		state = execution_checkpoint_state(self._ctx, self._messages, run_id, extra_state)
-		await store.save(Checkpoint(
-			run_id=run_id,
-			sequence=len(self._messages.get_all()) + self._ctx.state.current_round,
-			status=status,
-			kind=kind,
-			state=state,
-		))
+		self.sequence += 1
+		await store.save(
+			Checkpoint(
+				run_id=run_id,
+				sequence=self.sequence,
+				status=status,
+				kind=kind,
+				state=state,
+				metadata={"forked_from": self.forked_from} if self.forked_from else {},
+			)
+		)
 
 
 def execution_checkpoint_state(
@@ -68,18 +74,32 @@ def execution_checkpoint_state(
 		"payload": {},
 		"metadata": metadata,
 	}
+	if identity := checkpoint_owner(ctx.state.metadata):
+		state["owner"] = identity
+	if ctx.runtime.plugin_scopes:
+		state["plugin_scopes"] = dict(ctx.runtime.plugin_scopes)
 	if extra_state:
-		payload = dict(extra_state)
-		payload.pop("phase", None)
-		payload.pop("kind", None)
-		state["payload"] = payload
+		state["payload"] = {
+			key: value
+			for key, value in extra_state.items()
+			if key
+			not in {
+				"phase",
+				"kind",
+				"strategy",
+				"state_version",
+				"strategy_state",
+				"inbox",
+				"unsettled_writes",
+				"fork_state",
+			}
+		}
 		state.update(extra_state)
 	return state
 
 
 class ExecutionRunLifecycle:
-	"""Plugin-facing lifecycle hooks for an executor run.
-中文：此文档说明相关引擎组件的行为。"""
+	"""Dispatch run lifecycle hooks. 分发运行生命周期钩子。"""
 
 	def __init__(self, plugin_manager: PluginManager, ctx: ExecutionContext) -> None:
 		self._pm = plugin_manager
@@ -104,8 +124,7 @@ class ExecutionRunLifecycle:
 
 
 class StreamLLMBridge:
-	"""Runs an LLM call in a task and yields realtime stream events explicitly.
-中文：此文档说明相关引擎组件的行为。"""
+	"""Forward model events and join the producer when the consumer closes. 转发模型事件并在消费端关闭时回收任务。"""
 
 	def __init__(self, llm_caller: LLMCaller, ctx: ExecutionContext) -> None:
 		self._llm = llm_caller
@@ -115,20 +134,18 @@ class StreamLLMBridge:
 		self,
 		messages: list[dict],
 		tools_schema: list[dict] | None,
-	) -> AsyncIterator[Event | tuple[dict, list[Event]]]:
+	) -> AsyncGenerator[Event | tuple[dict, list[Event]], None]:
 		queue: asyncio.Queue[Event | None] = asyncio.Queue(maxsize=1000)
 		sink = QueueStreamSink(queue)
 		done_marker = None
-		llm_result: list = []
+		consumer_closed = False
 
-		async def _run_llm() -> None:
+		async def _run_llm() -> tuple[dict, list[Event]]:
 			try:
-				msg, evts = await self._llm.call(self._ctx, messages, tools_schema, stream_sink=sink)
-				llm_result.append((msg, evts))
-			except Exception as e:
-				llm_result.append(e)
+				return await self._llm.call(self._ctx, messages, tools_schema, stream_sink=sink)
 			finally:
-				await queue.put(done_marker)
+				if not consumer_closed:
+					await queue.put(done_marker)
 
 		task = asyncio.create_task(_run_llm())
 		try:
@@ -137,15 +154,8 @@ class StreamLLMBridge:
 				if event is done_marker:
 					break
 				yield event
-		except asyncio.CancelledError:
-			task.cancel()
-			raise
 		finally:
+			consumer_closed = True
 			self._ctx.runtime.stream_delta_emitted = False
 			await cancel_and_wait(task)
-		if not llm_result:
-			raise ProviderError("LLM call produced no result")
-		result = llm_result[0]
-		if isinstance(result, Exception):
-			raise result
-		yield result
+		yield task.result()

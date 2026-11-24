@@ -1,27 +1,30 @@
 """Tests for command sandbox abstractions."""
+
 from __future__ import annotations
 
 import sys
 
 import pytest
 
+from axc_agent_engine.core.schema import RiskLevel
 from axc_agent_engine.runtime.sandbox_code import PowerShellSandboxExecutor, PythonSandboxExecutor
 from axc_agent_engine.runtime.sandbox_local import LocalSubprocessExecutor
 from axc_agent_engine.runtime.sandbox_models import CommandExecutor, CommandResult, CommandSpec
 from axc_agent_engine.runtime.sandbox_policy import DefaultCommandPolicy, PolicyCommandExecutor
 from axc_agent_engine.runtime.sandbox_provider import LocalSandboxProvider
-from axc_agent_engine.runtime.sandbox_workspace import WorkspaceCommandExecutor
 from axc_agent_engine.runtime.sandbox_utils import build_env, decode_output, subprocess_preexec_fn, write_text
-from axc_agent_engine.core.schema import RiskLevel
+from axc_agent_engine.runtime.sandbox_workspace import WorkspaceCommandExecutor
 
 
 async def test_local_subprocess_exec_runs_argv(tmp_path):
 	executor = LocalSubprocessExecutor()
-	result = await executor.run(CommandSpec(
-		argv=[sys.executable, "-c", "print('hello')"],
-		cwd=str(tmp_path),
-		timeout=10,
-	))
+	result = await executor.run(
+		CommandSpec(
+			argv=[sys.executable, "-c", "print('hello')"],
+			cwd=str(tmp_path),
+			timeout=10,
+		)
+	)
 	assert result.exit_code == 0
 	assert result.stdout.strip() == "hello"
 	assert result.stderr == ""
@@ -37,11 +40,13 @@ async def test_local_subprocess_shell_runs_command(tmp_path):
 
 async def test_local_subprocess_timeout(tmp_path):
 	executor = LocalSubprocessExecutor()
-	result = await executor.run(CommandSpec(
-		argv=[sys.executable, "-c", "import time; time.sleep(2)"],
-		cwd=str(tmp_path),
-		timeout=1,
-	))
+	result = await executor.run(
+		CommandSpec(
+			argv=[sys.executable, "-c", "import time; time.sleep(2)"],
+			cwd=str(tmp_path),
+			timeout=1,
+		)
+	)
 	assert result.timed_out is True
 	assert result.exit_code == -1
 	assert "timeout" in result.stderr.lower()
@@ -49,56 +54,58 @@ async def test_local_subprocess_timeout(tmp_path):
 
 async def test_local_subprocess_returns_full_output(tmp_path):
 	executor = LocalSubprocessExecutor()
-	result = await executor.run(CommandSpec(
-		argv=[sys.executable, "-c", "print('x' * 100)"],
-		cwd=str(tmp_path),
-		timeout=10,
-	))
+	result = await executor.run(
+		CommandSpec(
+			argv=[sys.executable, "-c", "print('x' * 100)"],
+			cwd=str(tmp_path),
+			timeout=10,
+		)
+	)
 	assert result.stdout == "x" * 100 + "\n"
 
 
 def test_command_executor_protocol():
-    assert isinstance(LocalSubprocessExecutor(), CommandExecutor)
+	assert isinstance(LocalSubprocessExecutor(), CommandExecutor)
 
 
 async def test_workspace_executor_rejects_cwd_outside_workspace(tmp_path):
-    workspace = tmp_path / "workspace"
-    outside = tmp_path / "outside"
-    workspace.mkdir()
-    outside.mkdir()
-    executor = WorkspaceCommandExecutor(str(workspace))
+	workspace = tmp_path / "workspace"
+	outside = tmp_path / "outside"
+	workspace.mkdir()
+	outside.mkdir()
+	executor = WorkspaceCommandExecutor(str(workspace))
 
-    with pytest.raises(ValueError, match="outside workspace"):
-        await executor.run(CommandSpec(argv=[sys.executable, "-c", "print('x')"], cwd=str(outside)))
+	with pytest.raises(ValueError, match="outside workspace"):
+		await executor.run(CommandSpec(argv=[sys.executable, "-c", "print('x')"], cwd=str(outside)))
 
 
 async def test_workspace_executor_writes_execution_log(tmp_path):
-    executor = WorkspaceCommandExecutor(str(tmp_path))
-    result = await executor.run(CommandSpec(argv=[sys.executable, "-c", "print('logged')"], timeout=10))
+	executor = WorkspaceCommandExecutor(str(tmp_path))
+	result = await executor.run(CommandSpec(argv=[sys.executable, "-c", "print('logged')"], timeout=10))
 
-    assert result.exit_code == 0
-    logs = list((tmp_path / ".axc" / "logs").glob("exec_*.log"))
-    assert len(logs) == 1
-    assert "logged" in logs[0].read_text(encoding="utf-8")
+	assert result.exit_code == 0
+	logs = list((tmp_path / ".axc" / "logs").glob("exec_*.log"))
+	assert len(logs) == 1
+	assert "logged" in logs[0].read_text(encoding="utf-8")
 
 
 async def test_python_sandbox_runs_script_and_removes_temp_file(tmp_path):
-    executor = PythonSandboxExecutor(str(tmp_path), python=sys.executable)
-    result = await executor.run_code("print('sandbox-ok')", timeout=10)
+	executor = PythonSandboxExecutor(str(tmp_path), python=sys.executable)
+	result = await executor.run_code("print('sandbox-ok')", timeout=10)
 
-    assert result.exit_code == 0
-    assert result.stdout.strip() == "sandbox-ok"
-    temp_dir = tmp_path / ".axc" / "tmp"
-    assert list(temp_dir.glob("python_*.py")) == []
+	assert result.exit_code == 0
+	assert result.stdout.strip() == "sandbox-ok"
+	temp_dir = tmp_path / ".axc" / "tmp"
+	assert list(temp_dir.glob("python_*.py")) == []
 
 
 class RecordingExecutor:
-    def __init__(self) -> None:
-        self.specs: list[CommandSpec] = []
+	def __init__(self) -> None:
+		self.specs: list[CommandSpec] = []
 
-    async def run(self, spec: CommandSpec) -> CommandResult:
-        self.specs.append(spec)
-        return CommandResult(exit_code=0, stdout="ok")
+	async def run(self, spec: CommandSpec) -> CommandResult:
+		self.specs.append(spec)
+		return CommandResult(exit_code=0, stdout="ok")
 
 
 class RemovingExecutor(RecordingExecutor):
@@ -106,18 +113,19 @@ class RemovingExecutor(RecordingExecutor):
 		self.specs.append(spec)
 		if spec.argv:
 			from pathlib import Path
+
 			Path(spec.argv[-1]).unlink()
 		return CommandResult(exit_code=0, stdout="removed")
 
 
 async def test_python_sandbox_uses_configured_command_executor(tmp_path):
-    inner = RecordingExecutor()
-    executor = PythonSandboxExecutor(str(tmp_path), command_executor=inner, python=sys.executable)
-    result = await executor.run_code("print('x')")
+	inner = RecordingExecutor()
+	executor = PythonSandboxExecutor(str(tmp_path), command_executor=inner, python=sys.executable)
+	result = await executor.run_code("print('x')")
 
-    assert result.stdout == "ok"
-    assert len(inner.specs) == 1
-    assert inner.specs[0].argv[0] == sys.executable
+	assert result.stdout == "ok"
+	assert len(inner.specs) == 1
+	assert inner.specs[0].argv[0] == sys.executable
 
 
 async def test_python_and_powershell_sandbox_ignore_missing_temp_on_cleanup(tmp_path):
@@ -131,17 +139,17 @@ async def test_python_and_powershell_sandbox_ignore_missing_temp_on_cleanup(tmp_
 
 
 async def test_policy_command_executor_blocks_disallowed_shell(tmp_path):
-    executor = PolicyCommandExecutor(LocalSubprocessExecutor(), DefaultCommandPolicy(max_risk=RiskLevel.MODERATE))
-    result = await executor.run(CommandSpec(command="sudo rm -rf /tmp/x", use_shell=True, cwd=str(tmp_path)))
-    assert result.exit_code == 126
-    assert "blocked" in result.stderr.lower()
+	executor = PolicyCommandExecutor(LocalSubprocessExecutor(), DefaultCommandPolicy(max_risk=RiskLevel.MODERATE))
+	result = await executor.run(CommandSpec(command="sudo rm -rf /tmp/x", use_shell=True, cwd=str(tmp_path)))
+	assert result.exit_code == 126
+	assert "blocked" in result.stderr.lower()
 
 
 async def test_local_sandbox_provider_runs_python(tmp_path):
-    provider = LocalSandboxProvider(str(tmp_path))
-    result = await provider.python().run_code("print('provider-ok')", timeout=10)
-    assert result.exit_code == 0
-    assert result.stdout.strip() == "provider-ok"
+	provider = LocalSandboxProvider(str(tmp_path))
+	result = await provider.python().run_code("print('provider-ok')", timeout=10)
+	assert result.exit_code == 0
+	assert result.stdout.strip() == "provider-ok"
 
 
 async def test_powershell_sandbox_uses_configured_executor_and_removes_temp(tmp_path):
@@ -160,9 +168,9 @@ def test_sandbox_utils_env_decode_write_and_preexec(tmp_path, monkeypatch):
 	assert env["PATH"] == "/custom"
 	assert env["HOME"] == "/home/test"
 	assert "SECRET" not in env
-	text = decode_output("abcdef".encode())
+	text = decode_output(b"abcdef")
 	assert text == "abcdef"
-	text = decode_output("abc".encode())
+	text = decode_output(b"abc")
 	assert text == "abc"
 	path = tmp_path / "x.txt"
 	write_text(str(path), "hello")
@@ -192,7 +200,7 @@ def test_sandbox_preexec_returns_none_on_windows(monkeypatch):
 
 
 def test_sandbox_set_limits_ignores_resource_errors(monkeypatch):
-	import axc_agent_engine.runtime.sandbox_utils as sandbox_utils
+	from axc_agent_engine.runtime import sandbox_utils
 
 	if sandbox_utils._set_limits is None:
 		return
@@ -207,3 +215,63 @@ def test_sandbox_set_limits_ignores_resource_errors(monkeypatch):
 	monkeypatch.setattr(sandbox_utils.resource, "setrlimit", fail_setrlimit)
 	sandbox_utils._set_limits()
 	assert len(calls) == 3
+
+
+@pytest.mark.parametrize("stop", ["cancel", "timeout", "exit"])
+async def test_foreground_stop_reclaims_child_that_inherits_the_command(tmp_path, stop):
+	import asyncio
+	import os
+
+	if os.name != "posix":
+		pytest.skip("POSIX process-group lifecycle")
+	import fcntl
+
+	child = "import fcntl,time,pathlib; f=open('lock','w'); fcntl.flock(f,fcntl.LOCK_EX); pathlib.Path('ready').touch(); time.sleep(10)"
+	parent = """
+import pathlib, subprocess, sys, time
+subprocess.Popen([sys.executable, "-c", sys.argv[1]])
+while not pathlib.Path("ready").exists():
+    time.sleep(0.01)
+if sys.argv[2] != "exit":
+    time.sleep(10)
+"""
+	spec = CommandSpec(
+		argv=[sys.executable, "-c", parent, child, stop], cwd=str(tmp_path), timeout=1 if stop == "timeout" else 5
+	)
+	task = asyncio.create_task(LocalSubprocessExecutor().run(spec))
+	try:
+		async with asyncio.timeout(3):
+			while not (tmp_path / "ready").exists():
+				await asyncio.sleep(0.01)
+		if stop == "cancel":
+			task.cancel()
+			with pytest.raises(asyncio.CancelledError):
+				await task
+		else:
+			result = await task
+			assert result.timed_out == (stop == "timeout")
+			assert result.exit_code == (-1 if stop == "timeout" else 0)
+		with (tmp_path / "lock").open() as lock:
+			async with asyncio.timeout(1):
+				while True:
+					try:
+						fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+						break
+					except BlockingIOError:
+						await asyncio.sleep(0.01)
+	finally:
+		if not task.done():
+			task.cancel()
+			await asyncio.gather(task, return_exceptions=True)
+
+
+async def test_local_large_streams_are_complete_files(tmp_path, monkeypatch):
+	from pathlib import Path
+
+	monkeypatch.setattr("axc_agent_engine.runtime.sandbox_local.INLINE_OUTPUT_BYTES", 32)
+	code = "import sys; sys.stdout.write('x'*33); sys.stderr.write('y'*32)"
+	result = await LocalSubprocessExecutor().run(CommandSpec(argv=[sys.executable, "-c", code], cwd=str(tmp_path)))
+	assert result.exit_code == 0 and result.stdout == ""
+	assert Path(result.stdout_path).read_bytes() == b"x" * 33
+	assert Path(result.stdout_path).parent == tmp_path / ".axc/logs"
+	assert result.stderr == "y" * 32 and not result.stderr_path

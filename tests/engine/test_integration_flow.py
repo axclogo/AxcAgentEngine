@@ -1,17 +1,20 @@
 """Integration tests for #31 — full execution flow."""
+
 import asyncio
 from copy import deepcopy
-import pytest
 from unittest.mock import MagicMock
+
+import pytest
+
+from axc_agent_engine.core.context import ExecutionConfig, ExecutionContext, ExecutionState
+from axc_agent_engine.core.errors import ProviderError
+from axc_agent_engine.core.events import Event, EventType
 from axc_agent_engine.core.executor import Executor
 from axc_agent_engine.core.llm_caller import LLMCaller
-from axc_agent_engine.core.context import ExecutionContext, ExecutionConfig, ExecutionState
 from axc_agent_engine.core.plugin_manager import PluginManager
-from axc_agent_engine.tools.registry import ToolRegistry
-from axc_agent_engine.core.events import Event, EventType
-from axc_agent_engine.core.errors import ProviderError
 from axc_agent_engine.core.schema import ToolDefinition
 from axc_agent_engine.plugins.base import BasePlugin
+from axc_agent_engine.tools.registry import ToolRegistry
 from axc_agent_engine.tools.tool_output import ToolOutput
 
 
@@ -29,6 +32,7 @@ class EventSinkToolPlugin(BasePlugin):
 			event_sink(Event(type=EventType.SUB_AGENT_STEP, metadata={"step": {"type": "tool_call"}}))
 			event_sink(Event(type=EventType.SUB_AGENT_COMPLETE, metadata={"success": True}))
 			return ToolOutput.text("child done")
+
 		return [ToolDefinition(name="call_child", execute=call_child, timeout=0)]
 
 
@@ -45,13 +49,16 @@ async def _run_executor(executor, message: str) -> str:
 
 def _mock_llm_provider(responses):
 	"""Create a mock LLM provider that returns predefined LLMResponse."""
-	from axc_agent_engine.core.schema import LLMResponse, LLMMessage, LLMUsage
+	from axc_agent_engine.core.schema import LLMMessage, LLMResponse, LLMUsage
+
 	provider = MagicMock()
 	call_count = [0]
 	provider.requests = []
 
 	async def mock_chat(messages, tools=None, **kwargs):
-		provider.requests.append({"messages": deepcopy(messages), "tools": deepcopy(tools), "options": deepcopy(kwargs)})
+		provider.requests.append(
+			{"messages": deepcopy(messages), "tools": deepcopy(tools), "options": deepcopy(kwargs)}
+		)
 		idx = min(call_count[0], len(responses) - 1)
 		call_count[0] += 1
 		resp = responses[idx]
@@ -115,7 +122,8 @@ class TestToolCallFlow:
 	async def test_single_tool_call_and_response(self):
 		"""LLM calls a tool, gets result, then responds."""
 		tool_call_msg = {
-			"role": "assistant", "content": "",
+			"role": "assistant",
+			"content": "",
 			"tool_calls": [{"id": "tc-1", "function": {"name": "echo", "arguments": '{"msg":"hi"}'}}],
 		}
 		final_msg = {"role": "assistant", "content": "Tool said: hi"}
@@ -129,10 +137,13 @@ class TestToolCallFlow:
 			seen_arguments.append(deepcopy(args))
 			return ToolOutput.json_output({"echo": args.get("msg", "")})
 
-		reg.register(ToolDefinition(
-			name="echo", execute=echo_tool,
-			parameters={"type": "object", "properties": {"msg": {"type": "string"}}, "required": ["msg"]},
-		))
+		reg.register(
+			ToolDefinition(
+				name="echo",
+				execute=echo_tool,
+				parameters={"type": "object", "properties": {"msg": {"type": "string"}}, "required": ["msg"]},
+			)
+		)
 		ctx = ExecutionContext(config=ExecutionConfig(stream=False), state=ExecutionState())
 		executor = Executor(llm_caller=llm_caller, registry=reg, plugin_manager=pm, ctx=ctx)
 		events = []
@@ -158,7 +169,8 @@ class TestToolCallFlow:
 	@pytest.mark.asyncio
 	async def test_tool_runtime_events_are_streamed_before_tool_result(self):
 		tool_call_msg = {
-			"role": "assistant", "content": "",
+			"role": "assistant",
+			"content": "",
 			"tool_calls": [{"id": "tc-1", "function": {"name": "call_child", "arguments": "{}"}}],
 		}
 		final_msg = {"role": "assistant", "content": "done"}
@@ -179,7 +191,8 @@ class TestToolCallFlow:
 	@pytest.mark.asyncio
 	async def test_tool_result_event_uses_display_view_and_metadata_context(self):
 		tool_call_msg = {
-			"role": "assistant", "content": "",
+			"role": "assistant",
+			"content": "",
 			"tool_calls": [{"id": "tc-1", "function": {"name": "big_result", "arguments": "{}"}}],
 		}
 		final_msg = {"role": "assistant", "content": "done"}
@@ -203,8 +216,9 @@ class TestToolCallFlow:
 	async def test_tool_validation_failure_in_flow(self):
 		"""LLM sends invalid args, tool returns validation error."""
 		tool_call_msg = {
-			"role": "assistant", "content": "",
-			"tool_calls": [{"id": "tc-1", "function": {"name": "strict", "arguments": '{}'}}],
+			"role": "assistant",
+			"content": "",
+			"tool_calls": [{"id": "tc-1", "function": {"name": "strict", "arguments": "{}"}}],
 		}
 		final_msg = {"role": "assistant", "content": "Missing param"}
 		provider = _mock_llm_provider([tool_call_msg, final_msg])
@@ -215,10 +229,17 @@ class TestToolCallFlow:
 		async def strict_tool(args, ctx):
 			return "ok"
 
-		reg.register(ToolDefinition(
-			name="strict", execute=strict_tool,
-			parameters={"type": "object", "properties": {"required_field": {"type": "string"}}, "required": ["required_field"]},
-		))
+		reg.register(
+			ToolDefinition(
+				name="strict",
+				execute=strict_tool,
+				parameters={
+					"type": "object",
+					"properties": {"required_field": {"type": "string"}},
+					"required": ["required_field"],
+				},
+			)
+		)
 		ctx = ExecutionContext(config=ExecutionConfig(stream=False), state=ExecutionState())
 		executor = Executor(llm_caller=llm_caller, registry=reg, plugin_manager=pm, ctx=ctx)
 		events = []
@@ -231,7 +252,8 @@ class TestToolCallFlow:
 	@pytest.mark.asyncio
 	async def test_model_safe_tool_alias_resolves_to_real_name(self):
 		tool_call_msg = {
-			"role": "assistant", "content": "",
+			"role": "assistant",
+			"content": "",
 			"tool_calls": [{"id": "tc-1", "function": {"name": "mcp_github_search", "arguments": '{"q":"x"}'}}],
 		}
 		final_msg = {"role": "assistant", "content": "done"}
@@ -260,8 +282,10 @@ class TestPluginHooksInFlow:
 	@pytest.mark.asyncio
 	async def test_plugin_stop_signal(self):
 		"""Plugin can stop execution via should_stop."""
+
 		class StopPlugin(BasePlugin):
 			name = "stopper"
+
 			def should_stop(self, exec_ctx):
 				return True, "Stopped by plugin"
 
@@ -280,8 +304,10 @@ class TestPluginHooksInFlow:
 	@pytest.mark.asyncio
 	async def test_plugin_context_injection(self):
 		"""Plugin inject_context adds to system prompt."""
+
 		class ContextPlugin(BasePlugin):
 			name = "ctx_injector"
+
 			def inject_context(self, exec_ctx, topic=""):
 				return "Extra context here"
 
@@ -304,8 +330,9 @@ class TestPluginHooksInFlow:
 		"""Executor stops after max_rounds."""
 		# Always return tool calls to keep looping
 		tool_call_msg = {
-			"role": "assistant", "content": "",
-			"tool_calls": [{"id": "tc-1", "function": {"name": "noop", "arguments": '{}'}}],
+			"role": "assistant",
+			"content": "",
+			"tool_calls": [{"id": "tc-1", "function": {"name": "noop", "arguments": "{}"}}],
 		}
 		provider = _mock_llm_provider([tool_call_msg] * 10)
 		pm = PluginManager([])
@@ -315,8 +342,7 @@ class TestPluginHooksInFlow:
 		async def noop(args, ctx):
 			return "ok"
 
-		reg.register(ToolDefinition(name="noop", execute=noop,
-			parameters={"type": "object", "properties": {}}))
+		reg.register(ToolDefinition(name="noop", execute=noop, parameters={"type": "object", "properties": {}}))
 		ctx = ExecutionContext(
 			config=ExecutionConfig(max_rounds=3, stream=False),
 			state=ExecutionState(),
@@ -331,11 +357,15 @@ class TestPluginHooksInFlow:
 	@pytest.mark.asyncio
 	async def test_total_timeout(self):
 		"""Executor stops on total timeout."""
+
 		async def slow_chat(messages, tools=None, **kwargs):
-			from axc_agent_engine.core.schema import LLMResponse, LLMMessage, LLMUsage
+			from axc_agent_engine.core.schema import LLMMessage, LLMResponse, LLMUsage
+
 			await asyncio.sleep(0.1)
 			return LLMResponse(
-				message=LLMMessage(content="", tool_calls=[{"id": "tc", "function": {"name": "noop", "arguments": "{}"}}]),
+				message=LLMMessage(
+					content="", tool_calls=[{"id": "tc", "function": {"name": "noop", "arguments": "{}"}}]
+				),
 				usage=LLMUsage(input_tokens=1, output_tokens=1),
 			)
 
@@ -348,8 +378,7 @@ class TestPluginHooksInFlow:
 		async def noop(args, ctx):
 			return "ok"
 
-		reg.register(ToolDefinition(name="noop", execute=noop,
-			parameters={"type": "object", "properties": {}}))
+		reg.register(ToolDefinition(name="noop", execute=noop, parameters={"type": "object", "properties": {}}))
 		ctx = ExecutionContext(
 			config=ExecutionConfig(total_timeout=0.2, max_rounds=100, stream=False),
 			state=ExecutionState(),

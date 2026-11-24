@@ -1,5 +1,5 @@
-"""Workspace-bounded command execution.
-中文：此文档说明相关引擎组件的行为。"""
+"""Workspace-bounded command execution. 限定于工作区的命令执行。"""
+
 from __future__ import annotations
 
 import asyncio
@@ -13,8 +13,7 @@ from axc_agent_engine.runtime.sandbox_utils import write_text
 
 
 class WorkspaceCommandExecutor:
-	"""Command executor that keeps execution and logs inside one workspace.
-中文：此文档说明相关引擎组件的行为。"""
+	"""Command executor that keeps execution and logs inside one workspace. 将执行和日志限制在指定工作区的命令执行器。"""
 
 	def __init__(
 		self,
@@ -34,14 +33,16 @@ class WorkspaceCommandExecutor:
 		if not (cwd == self.workspace or cwd.startswith(self.workspace + os.sep)):
 			raise ValueError("Command cwd outside workspace boundary")
 		os.makedirs(cwd, exist_ok=True)
-		result = await self.inner.run(CommandSpec(
-			argv=list(spec.argv),
-			command=spec.command,
-			cwd=cwd,
-			timeout=spec.timeout,
-			env=dict(spec.env),
-			use_shell=spec.use_shell,
-		))
+		result = await self.inner.run(
+			CommandSpec(
+				argv=list(spec.argv),
+				command=spec.command,
+				cwd=cwd,
+				timeout=spec.timeout,
+				env=dict(spec.env),
+				use_shell=spec.use_shell,
+			)
+		)
 		await asyncio.to_thread(self._write_log, spec, result, cwd)
 		return result
 
@@ -57,8 +58,8 @@ class WorkspaceCommandExecutor:
 			f"duration_ms: {result.duration_ms}\n"
 			f"timed_out: {result.timed_out}\n"
 			"\n[stdout]\n"
-			f"{result.stdout}\n"
+			f"{result.stdout_path or result.stdout}\n"
 			"\n[stderr]\n"
-			f"{result.stderr}\n"
+			f"{result.stderr_path or result.stderr}\n"
 		)
 		write_text(log_path, content)

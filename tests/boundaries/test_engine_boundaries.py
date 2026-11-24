@@ -1,4 +1,5 @@
 """Tests for engine boundary primitives."""
+
 import pytest
 
 from axc_agent_engine import (
@@ -163,17 +164,21 @@ class TestInputProvider:
 
 		class CapturePlugin(BasePlugin):
 			name = "capture"
+
 			async def on_execution_start(self, exec_ctx):
 				captured_ctx.append(exec_ctx)
 
 		req_q = asyncio.Queue()
 		resp_q = asyncio.Queue()
 		agent = Agent("agent-name", "", "", RuntimeConfig(), [CapturePlugin()], CaptureLLM(), None)
-		await agent.chat("raw", run_options={
-			"stream_idle_timeout": 7,
-			"approval_queue": req_q,
-			"response_queue": resp_q,
-		})
+		await agent.chat(
+			"raw",
+			run_options={
+				"stream_idle_timeout": 7,
+				"approval_queue": req_q,
+				"response_queue": resp_q,
+			},
+		)
 		assert captured_ctx[0].config.stream_idle_timeout == 7
 		assert captured_ctx[0].runtime.approval_queue is req_q
 		assert captured_ctx[0].runtime.response_queue is resp_q

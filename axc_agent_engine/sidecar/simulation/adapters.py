@@ -1,7 +1,6 @@
-"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-连接仿真内核和现有 Agent 对象的适配器。
-Adapters that connect the simulation kernel to existing agent objects."""
+"""Adapters that connect the simulation kernel to existing agent objects.
+连接仿真内核和现有 Agent 对象的适配器。"""
+
 from __future__ import annotations
 
 import json
@@ -12,17 +11,14 @@ from axc_agent_engine.sidecar.simulation.models import AgentAction, Observation,
 
 
 class AgentPolicyAdapter:
-	"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-把现有类 Agent 对象作为仿真 AgentPolicy 使用。
-	Use an existing Agent-like object as a simulation AgentPolicy.
+	"""Use an existing Agent-like object as a simulation AgentPolicy.
+	把现有类 Agent 对象作为仿真 AgentPolicy 使用。
 
-	被包装对象只需要提供 async `chat(message, session_id="")` 方法。
-	The wrapped object only needs an async `chat(message, session_id="")` method.
+	        被包装对象只需要提供 async `chat(message, session_id="")` 方法。
+	        The wrapped object only needs an async `chat(message, session_id="")` method.
 
-	这让仿真内核不依赖具体 Agent 类。
-	This keeps the simulation kernel independent from the concrete Agent class.
-	"""
+	        这让仿真内核不依赖具体 Agent 类。
+	        This keeps the simulation kernel independent from the concrete Agent class."""
 
 	def __init__(
 		self,
@@ -47,11 +43,8 @@ class AgentPolicyAdapter:
 
 
 def build_action_prompt(observation: Observation, scenario: Scenario) -> str:
-	"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-构建要求 Agent 返回一个结构化动作的紧凑 prompt。
-	Build the compact prompt that asks an agent for one structured action.
-	"""
+	"""Build the compact prompt that asks an agent for one structured action.
+	构建要求 Agent 返回一个结构化动作的紧凑 prompt。"""
 	payload = {
 		"scenario": {
 			"id": scenario.id,

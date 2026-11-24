@@ -2,21 +2,22 @@
 
 NOTE: InMemoryVectorStore uses linear scan O(n) for search.
 Suitable for up to ~1000 entries. For production use, inject an external VectorStore.
-中文：此文档说明相关引擎组件的行为。"""
+无需外部依赖的内存存储实现。"""
+
 from __future__ import annotations
 
 import asyncio
 import time
 import uuid
 from collections import OrderedDict
-from typing import AsyncIterator
+from collections.abc import AsyncIterator, Iterator
+from contextlib import contextmanager
 
 from axc_agent_engine.utils.math_utils import cosine_similarity
 
 
 class InMemoryKVStore:
-	"""Dict-based in-memory KV store with optional TTL and capacity limit.
-中文：此文档说明相关引擎组件的行为。"""
+	"""Dict-based in-memory KV store with optional TTL and capacity limit. 支持有效期和容量限制的内存键值存储。"""
 
 	def __init__(self, max_size: int = 10000, ttl: int = 0) -> None:
 		self._data: OrderedDict[str, tuple[dict, float]] = OrderedDict()
@@ -62,7 +63,7 @@ class InMemoryKVStore:
 
 class InMemoryMessagePersistence:
 	"""Scope-isolated in-memory message persistence with capacity limit.
-中文：按内部作用域隔离且带容量限制的内存会话持久化。"""
+	中文：按内部作用域隔离且带容量限制的内存会话持久化。"""
 
 	def __init__(self, max_sessions: int = 1000) -> None:
 		self._store: OrderedDict[tuple[str, str], list[dict]] = OrderedDict()
@@ -93,8 +94,7 @@ class InMemoryMessagePersistence:
 
 
 class InMemorySpanStore:
-	"""List-based in-memory span store with capacity limit.
-中文：此文档说明相关引擎组件的行为。"""
+	"""List-based in-memory span store with capacity limit. 有容量限制的内存链路跨度列表。"""
 
 	def __init__(self, max_spans: int = 50000) -> None:
 		self._spans: list[dict] = []
@@ -105,7 +105,7 @@ class InMemorySpanStore:
 		async with self._lock:
 			self._spans.append(span)
 			if len(self._spans) > self._max_spans:
-				self._spans = self._spans[-self._max_spans:]
+				self._spans = self._spans[-self._max_spans :]
 
 	async def query_by_trace(self, trace_id: str) -> list[dict]:
 		async with self._lock:
@@ -120,10 +120,10 @@ class InMemorySpanStore:
 class InMemoryVectorStore:
 	"""Cosine-similarity based in-memory vector store with capacity limit.
 
-	NOTE: Linear scan O(n). Suitable for up to ~1000 entries.
-	For production, inject an external VectorStore implementation.
-	
-中文：此文档说明相关引擎组件的行为。"""
+		NOTE: Linear scan O(n). Suitable for up to ~1000 entries.
+		For production, inject an external VectorStore implementation.
+
+	有容量限制的余弦相似度内存向量存储。"""
 
 	def __init__(self, max_entries: int = 1000) -> None:
 		self._entries: list[dict] = []
@@ -137,9 +137,9 @@ class InMemoryVectorStore:
 				entry_id = uuid.uuid4().hex[:12]
 				self._entries.append({"id": entry_id, "text": text, "embedding": emb, "metadata": meta})
 				ids.append(entry_id)
-			#English: Evict oldest if over capacity 中文：源码说明。
+			# Evict oldest if over capacity 超出容量时移除最早的记录。
 			if len(self._entries) > self._max_entries:
-				self._entries = self._entries[-self._max_entries:]
+				self._entries = self._entries[-self._max_entries :]
 			return ids
 
 	async def search(self, embedding: list[float], top_k: int = 5) -> list[dict]:
@@ -151,7 +151,8 @@ class InMemoryVectorStore:
 			scored.sort(key=lambda x: x[0], reverse=True)
 			return [
 				{"id": e["id"], "text": e["text"], "score": s, "metadata": e["metadata"]}
-				for s, e in scored[:top_k] if s > 0
+				for s, e in scored[:top_k]
+				if s > 0
 			]
 
 	async def delete(self, ids: list[str]) -> None:
@@ -161,55 +162,58 @@ class InMemoryVectorStore:
 
 
 class InMemoryMessageBus:
-	"""asyncio.Queue-based in-memory message bus with graceful shutdown.
-中文：此文档说明相关引擎组件的行为。"""
+	"""asyncio.Queue-based in-memory message bus with graceful shutdown. 基于异步队列并支持有序关闭的内存消息总线。"""
 
-	def __init__(self, max_idle_rounds: int = 30) -> None:
+	def __init__(self, max_idle_rounds: int | None = None) -> None:
 		self._channels: dict[str, list[asyncio.Queue]] = {}
 		self._closed = False
-		self._max_idle_rounds = max_idle_rounds
+		self._idle_timeout = None if max_idle_rounds is None else max(1, max_idle_rounds) * 60
+
+	@contextmanager
+	def _listen(self, channel: str) -> Iterator[asyncio.Queue]:
+		queue: asyncio.Queue = asyncio.Queue()
+		listeners = self._channels.setdefault(channel, [])
+		listeners.append(queue)
+		try:
+			yield queue
+		finally:
+			listeners.remove(queue)
+			if not listeners:
+				del self._channels[channel]
 
 	async def publish(self, channel: str, message: dict) -> None:
-		if channel in self._channels:
-			for queue in self._channels[channel]:
-				await queue.put(message)
+		if not self._closed:
+			for queue in self._channels.get(channel, ()):
+				queue.put_nowait(message)
 
 	async def subscribe(self, channel: str) -> AsyncIterator[dict]:
-		if channel not in self._channels:
-			self._channels[channel] = []
-		queue: asyncio.Queue = asyncio.Queue()
-		self._channels[channel].append(queue)
-		idle_count = 0
-		try:
+		with self._listen(channel) as queue:
 			while not self._closed:
 				try:
-					msg = await asyncio.wait_for(queue.get(), timeout=60)
-					idle_count = 0
-					yield msg
-				except asyncio.TimeoutError:
-					idle_count += 1
-					if idle_count >= self._max_idle_rounds:
-						return
-					continue
-		finally:
-			self._channels[channel].remove(queue)
+					async with asyncio.timeout(self._idle_timeout):
+						message = await queue.get()
+				except TimeoutError:
+					return
+				if message is None:
+					return
+				yield message
 
 	async def close(self) -> None:
-		"""Signal all subscribers to stop.
-中文：此文档说明相关引擎组件的行为。"""
-		self._closed = True
+		"""Wake idle readers and pending requests. 唤醒空闲订阅和等待回复的请求。"""
+		if not self._closed:
+			self._closed = True
+			for listeners in self._channels.values():
+				for queue in listeners:
+					queue.put_nowait(None)
 
 	async def request(self, channel: str, message: dict, timeout: float = 30) -> dict:
-		reply_channel = f"_reply_{uuid.uuid4().hex[:8]}"
-		message["_reply_to"] = reply_channel
-		reply_queue: asyncio.Queue = asyncio.Queue()
-		if reply_channel not in self._channels:
-			self._channels[reply_channel] = []
-		self._channels[reply_channel].append(reply_queue)
-		try:
-			await self.publish(channel, message)
-			return await asyncio.wait_for(reply_queue.get(), timeout=timeout)
-		finally:
-			self._channels[reply_channel].remove(reply_queue)
-			if not self._channels[reply_channel]:
-				del self._channels[reply_channel]
+		if self._closed:
+			raise RuntimeError("Message bus is closed")
+		reply_channel = f"_reply_{uuid.uuid4().hex}"
+		with self._listen(reply_channel) as queue:
+			await self.publish(channel, {**message, "_reply_to": reply_channel})
+			async with asyncio.timeout(timeout):
+				reply = await queue.get()
+			if reply is None:
+				raise RuntimeError("Message bus is closed")
+			return reply

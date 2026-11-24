@@ -1,4 +1,5 @@
 """Skill 插件 — 技能元数据注入 + 按需加载 + 受控脚本执行。"""
+
 from __future__ import annotations
 
 import hashlib
@@ -9,13 +10,17 @@ import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from axc_agent_engine.core.errors import ErrorCategory, ErrorEnvelope
+import yaml
+from pydantic import BaseModel, ConfigDict, Field
+
+from axc_agent_engine.core.errors import ConfigValueError, ErrorCategory, ErrorEnvelope
 from axc_agent_engine.core.schema import ToolDefinition
 from axc_agent_engine.plugins.base import BasePlugin
 from axc_agent_engine.plugins.builtin.common import (
+	artifact_store_from_context,
+	command_log_artifact,
 	exec_ctx_from_tool_context,
 	externalize_text,
-	artifact_store_from_context,
 	strict_bounded_int,
 )
 from axc_agent_engine.plugins.builtin.config_schemas import SKILL_CONFIG_SCHEMA
@@ -34,6 +39,24 @@ _SCRIPT_RUNNERS = {
 	".py": "python3",
 	".sh": "bash",
 }
+
+
+class _SkillMetadata(BaseModel):
+	model_config = ConfigDict(strict=True)
+	name: str = ""
+	description: str = ""
+	when_to_use: str = ""
+	trigger_keywords: list[str] = Field(default_factory=list)
+	version: str = ""
+	author: str = ""
+	source: str = ""
+	trusted: bool = False
+	content: str = ""
+	body: str = ""
+	content_hash: str = ""
+	skill_dir: str = ""
+	skill_md: str = ""
+	scripts_path: str = ""
 
 
 @dataclass(frozen=True)
@@ -105,11 +128,13 @@ class SkillScriptRunner:
 			inner=context.get("command_executor") or LocalSubprocessExecutor(),
 		)
 		extra_args = shlex.split(request.script_args) if request.script_args else []
-		return await executor.run(CommandSpec(
-			argv=[resolved.runner, resolved.script_path, *extra_args],
-			cwd=resolved.scripts_path,
-			timeout=self.timeout,
-		))
+		return await executor.run(
+			CommandSpec(
+				argv=[resolved.runner, resolved.script_path, *extra_args],
+				cwd=resolved.scripts_path,
+				timeout=self.timeout,
+			)
+		)
 
 
 class SkillScriptPresenter:
@@ -124,30 +149,29 @@ class SkillScriptPresenter:
 		context: dict,
 		started: float,
 	) -> tuple[dict[str, Any], list[Any]]:
-		stdout, stdout_ref = await _maybe_externalize_text(
-			result.stdout,
-			artifact_store_from_context(context, self.plugin_ctx),
-			self.max_result_bytes,
-			"skill_stdout",
-			{"skill_name": request.skill_name, "script_name": request.script_name},
-		)
-		stderr, stderr_ref = await _maybe_externalize_text(
-			result.stderr,
-			artifact_store_from_context(context, self.plugin_ctx),
-			self.max_result_bytes,
-			"skill_stderr",
-			{"skill_name": request.skill_name, "script_name": request.script_name},
-		)
 		payload = {
 			"skill_name": request.skill_name,
 			"script_name": request.script_name,
-			"stdout": stdout,
-			"stderr": stderr,
 			"returncode": result.exit_code,
 			"timed_out": result.timed_out,
 			"duration_ms": int((time.time() - started) * 1000),
 		}
-		return payload, [ref for ref in (stdout_ref, stderr_ref) if ref]
+		store = artifact_store_from_context(context, self.plugin_ctx)
+		metadata = {"skill_name": request.skill_name, "script_name": request.script_name}
+		artifacts = []
+		for name, text, path in (
+			("stdout", result.stdout, result.stdout_path),
+			("stderr", result.stderr, result.stderr_path),
+		):
+			if path:
+				payload[name], ref = await command_log_artifact(path, store, {**metadata, "stream": name})
+			else:
+				payload[name], ref = await _maybe_externalize_text(
+					text, store, self.max_result_bytes, f"skill_{name}", metadata
+				)
+			if ref:
+				artifacts.append(ref)
+		return payload, artifacts
 
 
 class SkillAuditRecorder:
@@ -167,20 +191,28 @@ class SkillAuditRecorder:
 		if not audit_sink:
 			return
 		from axc_agent_engine.observability.audit import AuditEvent
+
 		state_metadata = getattr(getattr(exec_ctx, "state", None), "metadata", {}) or {}
 		agent_info = getattr(getattr(exec_ctx, "runtime", None), "agent_info", None)
-		await audit_sink.record(AuditEvent(
-			type=event_type,
-			actor=str(state_metadata.get("user_id") or state_metadata.get("agent_name") or getattr(agent_info, "name", "") or ""),
-			session_id=str(state_metadata.get("session_id") or getattr(agent_info, "session_id", "") or ""),
-			tool_name=tool_name,
-			capability=capability,
-			risk_level=risk_level,
-			allowed=allowed,
-			duration_ms=duration_ms,
-			error=error.to_dict() if error else {},
-			metadata=metadata,
-		))
+		await audit_sink.record(
+			AuditEvent(
+				type=event_type,
+				actor=str(
+					state_metadata.get("user_id")
+					or state_metadata.get("agent_name")
+					or getattr(agent_info, "name", "")
+					or ""
+				),
+				session_id=str(state_metadata.get("session_id") or getattr(agent_info, "session_id", "") or ""),
+				tool_name=tool_name,
+				capability=capability,
+				risk_level=risk_level,
+				allowed=allowed,
+				duration_ms=duration_ms,
+				error=error.to_dict() if error else {},
+				metadata=metadata,
+			)
+		)
 
 
 class SkillPlugin(BasePlugin):
@@ -190,16 +222,16 @@ class SkillPlugin(BasePlugin):
 	version = "2.0.0"
 	config_schema = SKILL_CONFIG_SCHEMA
 
-	def initialize(self, config: dict, plugin_ctx: "PluginContext") -> None:
+	def initialize(self, config: dict, plugin_ctx: PluginContext) -> None:
 		self._plugin_ctx = plugin_ctx
-		self._paths = [str(path) for path in config.get("paths", [])]
+		self._paths = config.get("paths", [])
 		self._catalog_resource = "skill.catalog"
-		self._allowed_skills = {str(name) for name in config.get("allowed_skills", [])}
-		self._denied_skills = {str(name) for name in config.get("denied_skills", [])}
-		self._allow_scripts = bool(config.get("allow_scripts", True))
+		self._allowed_skills = set(config.get("allowed_skills", []))
+		self._denied_skills = set(config.get("denied_skills", []))
+		self._allow_scripts = config.get("allow_scripts", True)
 		self._allowed_script_names = {_normalize_relpath(name) for name in config.get("allowed_script_names", [])}
 		self._allowed_extensions = _normalize_extensions(config.get("allowed_extensions", list(_SCRIPT_RUNNERS)))
-		self._duplicate_policy = str(config.get("duplicate_policy", "error")).lower()
+		self._duplicate_policy = config.get("duplicate_policy", "error").lower()
 		if self._duplicate_policy not in {"skip", "replace", "error"}:
 			raise ValueError("skill.duplicate_policy must be one of skip, replace, error")
 		self._timeout = strict_bounded_int(config.get("timeout", 60), 1, 3600, "skill.timeout")
@@ -216,15 +248,12 @@ class SkillPlugin(BasePlugin):
 			"skill.max_result_bytes",
 		)
 		self._skills: dict[str, dict] = {}
-		self._load_errors: list[dict[str, str]] = []
 		self._script_command_runner = SkillScriptRunner(self._timeout)
 		self._script_presenter = SkillScriptPresenter(self._plugin_ctx, self._max_result_bytes)
 		self._audit_recorder = SkillAuditRecorder()
 		self._load_skills()
 
-	def inject_context(self, exec_ctx: "ExecutionContext", topic: str = "") -> str:
-		if not self._skills:
-			return ""
+	def inject_context(self, exec_ctx: ExecutionContext, topic: str = "") -> str:
 		lines = ["## 可用技能", "以下技能可通过 load_skill 工具加载详细指令："]
 		for name, skill in self._skills.items():
 			desc = skill.get("description", "")
@@ -234,9 +263,8 @@ class SkillPlugin(BasePlugin):
 		return "\n".join(lines)
 
 	def get_tools(self) -> list[ToolDefinition]:
-		"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-提供 skill 查询、加载、状态、重载和脚本执行工具。"""
+		"""Expose skill discovery, reload and execution tools.
+		提供 skill 查询、加载、状态、重载和脚本执行工具。"""
 		return [
 			ToolDefinition(
 				name="list_skills",
@@ -305,13 +333,18 @@ class SkillPlugin(BasePlugin):
 		]
 
 	def _load_skills(self) -> None:
-		"""English: This documentation describes the related engine component behavior.
-中文：扫描技能目录"""
-		self._skills.clear()
-		self._load_errors.clear()
-		if not self._paths and not self._has_catalog_resource():
+		"""Discover skills in a directory. 扫描技能目录"""
+		skills: dict[str, dict] = {}
+		catalog = self._plugin_ctx.resources.get(self._catalog_resource)
+		if not self._paths and catalog is None:
 			raise ValueError("skill plugin requires paths or mounted skill.catalog")
-		self._load_catalog_skills()
+		if catalog is not None:
+			for raw in _catalog_skills(catalog):
+				if not isinstance(raw, dict):
+					raise ConfigValueError("skill.catalog item must be an object")
+				item = _SkillMetadata.model_validate(raw)
+				item.source = item.source or self._catalog_resource
+				self._register_skill(skills, item, item.content or item.body)
 		for path in self._paths:
 			real_path = os.path.realpath(path)
 			if not os.path.isdir(real_path):
@@ -323,141 +356,94 @@ class SkillPlugin(BasePlugin):
 				skill_md = _find_skill_markdown(skill_dir)
 				if not skill_md:
 					continue
-				self._load_skill_dir(skill_dir, skill_md)
-		if not self._skills:
-			raise ValueError("skill plugin loaded no skills; check paths, skill.catalog, allowed_skills, and denied_skills")
-		logger.info(f"[skill] Loaded {len(self._skills)} skills")
+				self._load_skill_dir(skill_dir, skill_md, skills)
+		if not skills:
+			raise ValueError(
+				"skill plugin loaded no skills; check paths, skill.catalog, allowed_skills, and denied_skills"
+			)
+		self._skills = skills
+		logger.info(f"[skill] Loaded {len(skills)} skills")
 
-	def _load_catalog_skills(self) -> None:
-		if not self._plugin_ctx or not self._catalog_resource:
-			return
-		catalog = self._plugin_ctx.resources.get(self._catalog_resource)
-		if not catalog:
-			return
-		raw_skills = _catalog_skills(catalog)
-		for raw_skill in raw_skills:
-			self._load_catalog_skill(raw_skill)
+	def _load_skill_dir(self, skill_dir: str, skill_md: str, skills: dict) -> None:
+		with open(skill_md, encoding="utf-8") as file:
+			meta, body = _parse_frontmatter(file.read())
+		meta.setdefault("name", os.path.basename(skill_dir))
+		item = _SkillMetadata.model_validate(meta)
+		item.skill_dir = os.path.realpath(skill_dir)
+		item.skill_md = os.path.realpath(skill_md)
+		item.scripts_path = os.path.join(skill_dir, "scripts")
+		item.content_hash = ""
+		self._register_skill(skills, item, body)
 
-	def _load_catalog_skill(self, raw_skill: Any) -> None:
-		if not isinstance(raw_skill, dict):
-			raise ValueError("skill.catalog item must be an object")
-		name = str(raw_skill.get("name", "")).strip()
+	def _register_skill(self, skills: dict, item: _SkillMetadata, content: str) -> None:
+		name = item.name.strip()
 		if not name:
-			raise ValueError("skill.catalog item name cannot be empty")
-		if self._allowed_skills and name not in self._allowed_skills:
+			raise ValueError("Skill name cannot be empty")
+		if (self._allowed_skills and name not in self._allowed_skills) or name in self._denied_skills:
 			return
-		if name in self._denied_skills:
-			return
-		if name in self._skills:
+		if name in skills:
 			if self._duplicate_policy == "error":
 				raise ValueError(f"Duplicate skill: {name}")
 			if self._duplicate_policy == "skip":
 				return
-		trigger_keywords = raw_skill.get("trigger_keywords", [])
-		if isinstance(trigger_keywords, str):
-			trigger_keywords = [trigger_keywords]
-		elif not isinstance(trigger_keywords, list):
-			trigger_keywords = []
-		content = str(raw_skill.get("content") or raw_skill.get("body") or "")
-		scripts_path = str(raw_skill.get("scripts_path") or "")
-		self._skills[name] = {
+		path = item.scripts_path if os.path.isdir(item.scripts_path) else None
+		skills[name] = {
+			**item.model_dump(exclude={"body"}),
 			"name": name,
-			"description": str(raw_skill.get("description", "")),
-			"when_to_use": str(raw_skill.get("when_to_use", "")),
-			"trigger_keywords": [str(item) for item in trigger_keywords],
 			"content": content,
 			"content_length": len(content),
-			"content_hash": str(raw_skill.get("content_hash") or hashlib.sha256(content.encode("utf-8")).hexdigest()),
-			"version": str(raw_skill.get("version", "")),
-			"author": str(raw_skill.get("author", "")),
-			"source": str(raw_skill.get("source") or self._catalog_resource),
-			"trusted": bool(raw_skill.get("trusted", False)),
-			"skill_dir": str(raw_skill.get("skill_dir", "")),
-			"skill_md": str(raw_skill.get("skill_md", "")),
-			"scripts_path": scripts_path if scripts_path and os.path.isdir(scripts_path) else None,
-			"scripts": _list_scripts(scripts_path, self._allowed_extensions) if scripts_path and os.path.isdir(scripts_path) else [],
-		}
-
-	def _load_skill_dir(self, skill_dir: str, skill_md: str) -> None:
-		"""English: This documentation describes the related engine component behavior.
-中文：加载单个技能目录"""
-		with open(skill_md, "r", encoding="utf-8") as f:
-			content = f.read()
-		meta, body = _parse_frontmatter(content)
-		name = str(meta.get("name", os.path.basename(skill_dir))).strip()
-		if not name:
-			raise ValueError(f"Skill name cannot be empty: {skill_dir}")
-		if self._allowed_skills and name not in self._allowed_skills:
-			return
-		if name in self._denied_skills:
-			return
-		if name in self._skills:
-			if self._duplicate_policy == "error":
-				raise ValueError(f"Duplicate skill: {name}")
-			if self._duplicate_policy == "skip":
-				return
-		scripts_path = os.path.join(skill_dir, "scripts")
-		trigger_keywords = meta.get("trigger_keywords", [])
-		if isinstance(trigger_keywords, str):
-			trigger_keywords = [trigger_keywords]
-		elif not isinstance(trigger_keywords, list):
-			trigger_keywords = []
-		self._skills[name] = {
-			"name": name,
-			"description": str(meta.get("description", "")),
-			"when_to_use": str(meta.get("when_to_use", "")),
-			"trigger_keywords": [str(item) for item in trigger_keywords],
-			"content": body,
-			"content_length": len(body),
-			"content_hash": hashlib.sha256(body.encode("utf-8")).hexdigest(),
-			"version": str(meta.get("version", "")),
-			"author": str(meta.get("author", "")),
-			"source": str(meta.get("source", "")),
-			"trusted": bool(meta.get("trusted", False)),
-			"skill_dir": os.path.realpath(skill_dir),
-			"skill_md": os.path.realpath(skill_md),
-			"scripts_path": scripts_path if os.path.isdir(scripts_path) else None,
-			"scripts": _list_scripts(scripts_path, self._allowed_extensions) if os.path.isdir(scripts_path) else [],
+			"content_hash": item.content_hash or hashlib.sha256(content.encode("utf-8")).hexdigest(),
+			"scripts_path": path,
+			"scripts": _list_scripts(path, self._allowed_extensions) if path else [],
 		}
 
 	async def _tool_list_skills(self, args: dict, context: dict):
 		"""list_skills 工具实现"""
 		from axc_agent_engine.tools.tool_output import ToolOutput
+
 		exec_ctx = exec_ctx_from_tool_context(context)
 		self._sync_metadata(exec_ctx, "list")
 		query = str(args.get("query", "")).strip().lower()
 		skills = []
 		for skill in self._skills.values():
 			keywords = skill.get("trigger_keywords", [])
-			haystack = " ".join([
-				skill.get("name", ""),
-				skill.get("description", ""),
-				skill.get("when_to_use", ""),
-				" ".join(keywords) if isinstance(keywords, list) else str(keywords),
-			]).lower()
+			haystack = " ".join(
+				[
+					skill.get("name", ""),
+					skill.get("description", ""),
+					skill.get("when_to_use", ""),
+					" ".join(keywords),
+				]
+			).lower()
 			if query and query not in haystack:
 				continue
-			skills.append({
-				"name": skill["name"],
-				"description": skill["description"],
-				"when_to_use": skill["when_to_use"],
-				"trigger_keywords": keywords,
-				"has_scripts": bool(skill.get("scripts_path")),
-				"scripts": skill.get("scripts", []),
-				"version": skill.get("version", ""),
-				"source": skill.get("source", ""),
-				"trusted": skill.get("trusted", False),
-				"content_hash": skill.get("content_hash", ""),
-			})
-		return ToolOutput.json_output({
-			"skills": skills,
-			"total": len(skills),
-			"errors": list(self._load_errors),
-		}, summary=f"找到 {len(skills)} 个 skill")
+			skills.append(
+				{
+					"name": skill["name"],
+					"description": skill["description"],
+					"when_to_use": skill["when_to_use"],
+					"trigger_keywords": keywords,
+					"has_scripts": bool(skill.get("scripts_path")),
+					"scripts": skill.get("scripts", []),
+					"version": skill.get("version", ""),
+					"source": skill.get("source", ""),
+					"trusted": skill.get("trusted", False),
+					"content_hash": skill.get("content_hash", ""),
+				}
+			)
+		return ToolOutput.json_output(
+			{
+				"skills": skills,
+				"total": len(skills),
+				"errors": [],
+			},
+			summary=f"找到 {len(skills)} 个 skill",
+		)
 
 	async def _tool_load_skill(self, args: dict, context: dict):
 		"""load_skill 工具实现"""
 		from axc_agent_engine.tools.tool_output import ToolOutput
+
 		started = time.time()
 		exec_ctx = exec_ctx_from_tool_context(context)
 		skill_name = args.get("skill_name", "")
@@ -519,6 +505,7 @@ class SkillPlugin(BasePlugin):
 	async def _tool_skill_status(self, args: dict, context: dict):
 		"""skill_status 工具实现"""
 		from axc_agent_engine.tools.tool_output import ToolOutput
+
 		exec_ctx = exec_ctx_from_tool_context(context)
 		self._sync_metadata(exec_ctx, "status")
 		return ToolOutput.json_output(self._status_payload(), summary=f"已加载 {len(self._skills)} 个 skill")
@@ -526,6 +513,7 @@ class SkillPlugin(BasePlugin):
 	async def _tool_reload_skills(self, args: dict, context: dict):
 		"""reload_skills 工具实现"""
 		from axc_agent_engine.tools.tool_output import ToolOutput
+
 		started = time.time()
 		exec_ctx = exec_ctx_from_tool_context(context)
 		self._load_skills()
@@ -539,13 +527,14 @@ class SkillPlugin(BasePlugin):
 			"moderate",
 			int((time.time() - started) * 1000),
 			True,
-			{"loaded": len(self._skills), "errors": len(self._load_errors)},
+			{"loaded": len(self._skills), "errors": 0},
 		)
 		return ToolOutput.json_output(payload, summary=f"已重新加载 {len(self._skills)} 个 skill")
 
 	async def _tool_run_script(self, args: dict, context: dict):
 		"""run_skill_script 工具实现"""
 		from axc_agent_engine.tools.tool_output import ToolOutput
+
 		started = time.time()
 		exec_ctx = exec_ctx_from_tool_context(context)
 		request = self._script_request(args)
@@ -586,7 +575,12 @@ class SkillPlugin(BasePlugin):
 				content_type="json",
 				summary=f"脚本 {request.script_name}：exit_code={result.exit_code}",
 				artifacts=artifacts,
-				metadata={"skill_name": request.skill_name, "script_name": request.script_name, "capability": "shell", "risk_level": "dangerous"},
+				metadata={
+					"skill_name": request.skill_name,
+					"script_name": request.script_name,
+					"capability": "shell",
+					"risk_level": "dangerous",
+				},
 			)
 		except ValueError as e:
 			return await self._script_error(
@@ -598,7 +592,7 @@ class SkillPlugin(BasePlugin):
 				"skill.bad_args",
 				allowed=False,
 			)
-		except Exception as e:
+		except (OSError, RuntimeError) as e:
 			return await self._script_error(
 				str(e),
 				exec_ctx,
@@ -641,11 +635,15 @@ class SkillPlugin(BasePlugin):
 		if isinstance(resolved, ResolvedSkillScript):
 			return resolved
 		message, code, allowed = resolved
-		return await self._script_error(message, exec_ctx, started, request.skill_name, request.script_name, code, allowed=allowed)
+		return await self._script_error(
+			message, exec_ctx, started, request.skill_name, request.script_name, code, allowed=allowed
+		)
 
-	async def _script_error(self, message: str, exec_ctx: Any, started: float, skill_name: str,
-							script_name: str, code: str, allowed: bool) -> Any:
+	async def _script_error(
+		self, message: str, exec_ctx: Any, started: float, skill_name: str, script_name: str, code: str, allowed: bool
+	) -> Any:
 		from axc_agent_engine.tools.tool_output import ToolOutput
+
 		await self._audit(
 			exec_ctx,
 			"skill_script_rejected" if not allowed else "skill_script_failed",
@@ -659,9 +657,18 @@ class SkillPlugin(BasePlugin):
 		)
 		return ToolOutput.error(message)
 
-	async def _audit(self, exec_ctx: Any, event_type: str, tool_name: str, capability: str,
-					 risk_level: str, duration_ms: int, allowed: bool, metadata: dict[str, Any],
-					 error: ErrorEnvelope | None = None) -> None:
+	async def _audit(
+		self,
+		exec_ctx: Any,
+		event_type: str,
+		tool_name: str,
+		capability: str,
+		risk_level: str,
+		duration_ms: int,
+		allowed: bool,
+		metadata: dict[str, Any],
+		error: ErrorEnvelope | None = None,
+	) -> None:
 		await self._audit_recorder.record(
 			exec_ctx,
 			event_type,
@@ -681,7 +688,7 @@ class SkillPlugin(BasePlugin):
 			"last_action": action,
 			"last_skill": skill_name,
 			"loaded": len(self._skills),
-			"errors": len(self._load_errors),
+			"errors": 0,
 			"allow_scripts": self._allow_scripts,
 		}
 
@@ -689,7 +696,7 @@ class SkillPlugin(BasePlugin):
 		return {
 			"loaded": len(self._skills),
 			"paths": list(self._paths),
-			"errors": list(self._load_errors),
+			"errors": [],
 			"config": {
 				"allow_scripts": self._allow_scripts,
 				"allowed_skills": sorted(self._allowed_skills),
@@ -704,9 +711,6 @@ class SkillPlugin(BasePlugin):
 			"skills": [_skill_public_metadata(skill) for skill in self._skills.values()],
 		}
 
-	def _has_catalog_resource(self) -> bool:
-		return bool(self._plugin_ctx and self._plugin_ctx.resources.get(self._catalog_resource))
-
 
 def _find_skill_markdown(skill_dir: str) -> str:
 	for filename in _SKILL_FILENAMES:
@@ -717,21 +721,19 @@ def _find_skill_markdown(skill_dir: str) -> str:
 
 
 def _parse_frontmatter(content: str) -> tuple[dict, str]:
-	"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-解析 Markdown frontmatter（YAML 格式）"""
+	"""Read YAML front matter from Markdown.
+	解析 Markdown frontmatter（YAML 格式）"""
 	if not content.startswith("---"):
 		return {}, content
 	parts = content.split("---", 2)
 	if len(parts) < 3:
 		return {}, content
 	try:
-		import yaml
-		meta = yaml.safe_load(parts[1]) or {}
-	except Exception as exc:
+		meta = yaml.safe_load(parts[1]) if parts[1].strip() else {}
+	except yaml.YAMLError as exc:
 		raise ValueError("Skill frontmatter YAML is invalid") from exc
 	if not isinstance(meta, dict):
-		raise ValueError("Skill frontmatter must be an object")
+		raise ConfigValueError("Skill frontmatter must be an object")
 	body = parts[2].strip()
 	return meta, body
 
@@ -758,18 +760,19 @@ def _skill_public_metadata(skill: dict[str, Any]) -> dict[str, Any]:
 def _catalog_skills(catalog: Any) -> list[Any]:
 	if isinstance(catalog, dict):
 		skills = catalog.get("skills", catalog)
-		return list(skills.values()) if isinstance(skills, dict) else list(skills or [])
-	if isinstance(catalog, (list, tuple)):
-		return list(catalog)
-	list_skills = getattr(catalog, "list_skills", None)
-	if callable(list_skills):
-		return list(list_skills())
-	skills = getattr(catalog, "skills", None)
+	elif isinstance(catalog, (list, tuple)):
+		skills = catalog
+	elif callable(provider := getattr(catalog, "list_skills", None)):
+		skills = provider()
+		if not isinstance(skills, (dict, str, bytes)):
+			return list(skills)
+	else:
+		skills = getattr(catalog, "skills", None)
 	if isinstance(skills, dict):
 		return list(skills.values())
 	if isinstance(skills, (list, tuple)):
 		return list(skills)
-	raise TypeError("skill.catalog must be a dict, sequence, list_skills() provider, or expose skills")
+	raise TypeError("skill.catalog must provide a skill collection")
 
 
 def _list_scripts(scripts_path: str, allowed_extensions: set[str]) -> list[dict[str, Any]]:
@@ -779,14 +782,16 @@ def _list_scripts(scripts_path: str, allowed_extensions: set[str]) -> list[dict[
 			path = os.path.join(root, filename)
 			relpath = os.path.relpath(path, scripts_path)
 			ext = os.path.splitext(filename)[1].lower()
-			scripts.append({
-				"name": relpath,
-				"extension": ext,
-				"supported": ext in _SCRIPT_RUNNERS,
-				"allowed": ext in allowed_extensions and ext in _SCRIPT_RUNNERS,
-				"size": os.path.getsize(path),
-				"sha256": _file_sha256(path),
-			})
+			scripts.append(
+				{
+					"name": relpath,
+					"extension": ext,
+					"supported": ext in _SCRIPT_RUNNERS,
+					"allowed": ext in allowed_extensions and ext in _SCRIPT_RUNNERS,
+					"size": os.path.getsize(path),
+					"sha256": _file_sha256(path),
+				}
+			)
 	return scripts
 
 
@@ -798,9 +803,12 @@ def _file_sha256(path: str) -> str:
 	return hasher.hexdigest()
 
 
-async def _maybe_externalize_text(content: str, artifact_store: Any, threshold: int, kind: str,
-								  metadata: dict[str, Any]) -> tuple[Any, Any]:
-	return await externalize_text(content, artifact_store, threshold, {**metadata, "kind": kind}, logger, "skill", threshold)
+async def _maybe_externalize_text(
+	content: str, artifact_store: Any, threshold: int, kind: str, metadata: dict[str, Any]
+) -> tuple[Any, Any]:
+	return await externalize_text(
+		content, artifact_store, threshold, {**metadata, "kind": kind}, logger, "skill", threshold
+	)
 
 
 def _normalize_relpath(value: Any) -> str:
@@ -810,19 +818,14 @@ def _normalize_relpath(value: Any) -> str:
 	return path.lstrip("/")
 
 
-def _normalize_extensions(values: Any) -> set[str]:
-	if not isinstance(values, (list, tuple, set)):
-		values = list(_SCRIPT_RUNNERS)
+def _normalize_extensions(values: list[str]) -> set[str]:
 	extensions = set()
 	for value in values:
-		ext = str(value or "").strip().lower()
-		if not ext:
-			continue
-		if not ext.startswith("."):
-			ext = f".{ext}"
-		if ext in _SCRIPT_RUNNERS:
-			extensions.add(ext)
-	return extensions or set(_SCRIPT_RUNNERS)
+		ext = "." + value.strip().lower().lstrip(".")
+		if ext not in _SCRIPT_RUNNERS:
+			raise ConfigValueError(f"Unsupported skill script extension: {value!r}")
+		extensions.add(ext)
+	return extensions
 
 
 def _error_envelope(code: str, message: str, details: dict[str, Any] | None = None) -> ErrorEnvelope:

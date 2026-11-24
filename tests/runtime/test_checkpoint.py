@@ -1,4 +1,5 @@
 """Tests for durable execution checkpoint primitives."""
+
 from __future__ import annotations
 
 import pytest
@@ -111,3 +112,14 @@ def test_checkpoint_copies_state_and_metadata_on_create():
 
 	assert checkpoint.state == {"k": {"nested": 1}}
 	assert checkpoint.metadata == {"m": {"nested": 1}}
+
+
+async def test_store_owns_saved_history_and_returns_detached_cuts():
+	store = InMemoryCheckpointStore()
+	cut = Checkpoint(run_id="original", state={"fork_state": {"plugin": ["original"]}})
+	await store.save(cut)
+	history = await store.list("original")
+	latest = await store.latest("original")
+	for caller_copy in (cut, latest, history[0]):
+		caller_copy.state["fork_state"]["plugin"].clear()
+	assert (await store.latest("original")).state["fork_state"] == {"plugin": ["original"]}

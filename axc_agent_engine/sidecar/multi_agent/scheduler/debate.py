@@ -1,6 +1,7 @@
 """DebateScheduler — 正反方交替发言。
 DebateScheduler — alternates pro and con speakers.
 """
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
@@ -10,11 +11,8 @@ if TYPE_CHECKING:
 
 
 class DebateScheduler:
-	"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-正方和反方交替发言。
-	Alternates pro and con speakers.
-	"""
+	"""Alternates pro and con speakers.
+	正方和反方交替发言。"""
 
 	def __init__(self, agents: list, judge: object | None = None) -> None:
 		"""agents 列表中，偶数索引为正方，奇数索引为反方。
@@ -27,17 +25,12 @@ class DebateScheduler:
 		self._judge = judge
 
 	def steps_per_round(self, agents: list) -> int:
-		"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-正方 + 反方 = 2 步 = 1 轮。
-		Pro plus con equals two steps per round.
-		"""
+		"""Pro plus con equals two steps per round.
+		正方 + 反方 = 2 步 = 1 轮。"""
 		return 2
 
-	def select_speakers(self, ctx: SharedContext, agents: list,
-						step: int) -> list:
-		#English: Source note. 中文：偶数步正方，奇数步反方。
-		#English: Even steps use pro speakers; odd steps use con speakers. 中文：源码说明。
+	def select_speakers(self, ctx: SharedContext, agents: list, step: int) -> list:
+		# Even steps use pro speakers; odd steps use con speakers. 偶数步正方发言，奇数步反方发言。
 		if step % 2 == 0:
 			team = self._pro
 		else:

@@ -1,20 +1,21 @@
 """Tests for Engine — agent loading, lifecycle, configuration."""
+
 import pytest
 
-from axc_agent_engine.engine import AgentModels, Engine
-from axc_agent_engine.llm.config import LLMConfig
+from axc_agent_engine.agent import Agent
 from axc_agent_engine.core.errors import ConfigError, PluginInitError, SchemaError
 from axc_agent_engine.core.run_request import RunRequest
-from axc_agent_engine.agent import Agent
+from axc_agent_engine.engine import AgentModels, Engine
+from axc_agent_engine.llm.config import LLMConfig
+from axc_agent_engine.observability.audit import InMemoryAuditSink
 from axc_agent_engine.plugins import PluginContext
 from axc_agent_engine.plugins.base import BasePlugin
-from axc_agent_engine.observability.audit import InMemoryAuditSink
 from axc_agent_engine.plugins.builtin.compress.plugin import CompressPlugin
 from axc_agent_engine.plugins.config_schema import config_field, config_schema
 from axc_agent_engine.plugins.registry import PluginRegistry
-from axc_agent_engine.runtime.resources import ResourceRegistry
 from axc_agent_engine.runtime.checkpoint import InMemoryCheckpointStore
 from axc_agent_engine.runtime.input import InputProviderResult
+from axc_agent_engine.runtime.resources import ResourceRegistry
 from axc_agent_engine.runtime.sandbox_local import LocalSubprocessExecutor
 from axc_agent_engine.storage.in_memory import InMemoryMessagePersistence
 from axc_agent_engine.workflow import WorkflowResumePlan, WorkflowStatus
@@ -53,9 +54,14 @@ def compress_registry():
 class CapturePlugin(BasePlugin):
 	name = "capture"
 	display_name = "Capture"
-	config_schema = config_schema("capture", "Capture", "Test plugin.", [
-		config_field("value", "Value", "string", "Captured test value."),
-	])
+	config_schema = config_schema(
+		"capture",
+		"Capture",
+		"Test plugin.",
+		[
+			config_field("value", "Value", "string", "Captured test value."),
+		],
+	)
 	last_config = None
 	last_ctx = None
 
@@ -77,6 +83,7 @@ class CloseTimeoutPlugin(BasePlugin):
 
 	async def close(self):
 		import asyncio
+
 		await asyncio.sleep(10)
 
 
@@ -124,7 +131,7 @@ class TestEngine:
 		assert engine._agents == {}
 
 	def test_init_with_provider(self, mock_llm):
-		engine = Engine()
+		Engine()
 		agent_models = AgentModels(default=mock_llm)
 		assert agent_models.default is mock_llm
 
@@ -165,7 +172,9 @@ class TestEngine:
 
 	def test_instantiate_with_prompt_file(self, mock_llm, agent_yaml_with_prompt_file):
 		engine = Engine()
-		agent = engine.load_agent_template(agent_yaml_with_prompt_file).instantiate(models=AgentModels(default=mock_llm))
+		agent = engine.load_agent_template(agent_yaml_with_prompt_file).instantiate(
+			models=AgentModels(default=mock_llm)
+		)
 		assert agent._system_prompt == "You are a specialized agent"
 
 	def test_get_agent(self, mock_llm, agent_yaml, compress_registry):
@@ -196,16 +205,16 @@ class TestEngine:
 			plugin_registry=compress_registry,
 		)
 		agent = engine.load_agent_template(agent_yaml).instantiate(models=AgentModels(default=mock_llm))
-		executor = agent._create_executor("session-1")
-		assert executor._ctx.services.audit_sink is audit
-		assert executor._ctx.services.checkpoint_store is checkpoints
-		assert executor._ctx.services.command_executor is command_executor
-		assert executor._ctx.state.metadata["agent_name"] == "test_agent"
-		assert executor._ctx.state.metadata["session_id"] == "session-1"
-		assert executor._ctx.runtime.agent_info.name == "test_agent"
-		assert executor._ctx.runtime.agent_info.session_id == "session-1"
-		assert executor._ctx.state.metadata["agent"]["name"] == "test_agent"
-		assert executor._ctx.state.metadata["agent"]["session_id"] == "session-1"
+		ctx = agent._execution_context(RunRequest.create("", session_id="session-1"))
+		assert ctx.services.audit_sink is audit
+		assert ctx.services.checkpoint_store is checkpoints
+		assert ctx.services.command_executor is command_executor
+		assert ctx.state.metadata["agent_name"] == "test_agent"
+		assert ctx.state.metadata["session_id"] == "session-1"
+		assert ctx.runtime.agent_info.name == "test_agent"
+		assert ctx.runtime.agent_info.session_id == "session-1"
+		assert ctx.state.metadata["agent"]["name"] == "test_agent"
+		assert ctx.state.metadata["agent"]["session_id"] == "session-1"
 
 	def test_instantiate_binds_models_mounts_metadata_and_overrides(self, mock_llm, tmp_path):
 		CapturePlugin.last_config = None
@@ -246,9 +255,9 @@ plugins:
 		assert CapturePlugin.last_ctx.utility_model is mock_llm
 		assert CapturePlugin.last_ctx.resources.require("shared") == "mount"
 		assert CapturePlugin.last_ctx.resources.require("knowledge.index") is mounts.require("knowledge.index")
-		executor = agent._create_executor("session-1", metadata={"tenant_id": "request"})
-		assert executor._ctx.state.metadata["tenant_id"] == "request"
-		assert executor._ctx.state.metadata["agent_name"] == "template_agent"
+		ctx = agent._execution_context(RunRequest.create("", session_id="session-1", metadata={"tenant_id": "request"}))
+		assert ctx.state.metadata["tenant_id"] == "request"
+		assert ctx.state.metadata["agent_name"] == "template_agent"
 
 	def test_run_request_merges_run_id_from_run_options(self):
 		request = RunRequest.create(
@@ -337,7 +346,8 @@ plugins:
 		agent._execute_stream = execute_stream
 		metadata = {"external_trace_id": "trace-1001", "conversation_id": 123, "agent_profile_id": 9}
 		events = [
-			event async for event in agent.stream_with_messages(
+			event
+			async for event in agent.stream_with_messages(
 				[{"role": "user", "content": "hello"}],
 				session_id="session-1",
 				run_options={"run_id": "run-1"},
@@ -350,28 +360,26 @@ plugins:
 		assert seen["metadata"] == metadata
 
 	@pytest.mark.asyncio
-	async def test_chat_with_messages_extracts_text_and_invalid_agent_call_depth_becomes_zero(self, mock_llm, tmp_path):
+	async def test_chat_with_messages_extracts_text_and_checks_agent_call_depth(self, mock_llm, tmp_path):
 		path = tmp_path / "agent.yaml"
 		path.write_text("name: messages_agent\nsystem_prompt: base\n", encoding="utf-8")
 		agent = Engine().load_agent_template(str(path)).instantiate(models=AgentModels(default=mock_llm))
-		seen = {}
+		from unittest.mock import patch
 
-		async def execute(**kwargs):
-			seen.update(kwargs)
-			return "ok"
+		with patch.object(agent, "_execute_stream", wraps=agent._execute_stream) as stream:
+			result = await agent.chat_with_messages(
+				[{"role": "user", "content": [{"type": "text", "text": "first"}, {"type": "text", "text": "second"}]}],
+				metadata={"agent_call_depth": 2},
+			)
+		assert result == "hello"
+		assert stream.call_args.kwargs["user_message"] == "first\nsecond"
+		mock_llm.chat.assert_awaited_once()
 
-		agent._execute = execute
-		result = await agent.chat_with_messages(
-			[{"role": "user", "content": [{"type": "text", "text": "first"}, {"type": "text", "text": "second"}]}],
-			metadata={"agent_call_depth": "bad"},
-		)
-		assert result == "ok"
-		assert seen["user_message"] == "first\nsecond"
-
-		request = RunRequest.create(user_message="hi", metadata={"agent_call_depth": "bad"})
-		ctx = agent._executor_factory.context_factory.create(request)
-		assert ctx.runtime.agent_call_depth == 0
-		ctx = agent._executor_factory.context_factory.create(RunRequest.create(user_message="hi", llm_options={"temperature": 0}))
+		for invalid in ("2", False, -1, None):
+			with pytest.raises(ValueError, match="agent_call_depth"):
+				await agent.chat("hi", metadata={"agent_call_depth": invalid})
+		mock_llm.chat.assert_awaited_once()
+		ctx = agent._execution_context(RunRequest.create(user_message="hi", llm_options={"temperature": 0}))
 		assert ctx.runtime.llm_options == {"temperature": 0}
 
 	def test_run_request_metadata_reaches_execution_context(self, mock_llm, tmp_path):
@@ -386,8 +394,8 @@ plugins:
 			run_options={"run_id": "run-1"},
 			metadata={"external_trace_id": "trace-1001", "conversation_id": 123, "agent_profile_id": 9},
 		)
-		executor = agent._create_executor(request)
-		metadata = executor._ctx.state.metadata
+		ctx = agent._execution_context(request)
+		metadata = ctx.state.metadata
 		assert metadata["external_trace_id"] == "trace-1001"
 		assert metadata["conversation_id"] == 123
 		assert metadata["agent_profile_id"] == 9
@@ -409,17 +417,22 @@ plugins:
 	@pytest.mark.asyncio
 	async def test_engine_cancel_run_emits_cancelled(self, tmp_path):
 		import asyncio
+
 		from axc_agent_engine.core.schema import LLMMessage, LLMResponse
 
 		class SlowLLM:
 			model = "slow"
+
 			async def chat(self, messages, tools=None, **kwargs):
 				await asyncio.sleep(10)
 				return LLMResponse(message=LLMMessage(content="late"))
+
 			async def stream(self, messages, tools=None, **kwargs):
 				raise AssertionError("chat expected")
+
 			async def ask(self, prompt, **kwargs):
 				return ""
+
 			async def close(self):
 				pass
 
@@ -429,7 +442,9 @@ plugins:
 		agent = engine.load_agent_template(str(path)).instantiate(models=AgentModels(default=SlowLLM()))
 
 		async def collect():
-			return [event async for event in agent.stream("hello", run_options={"run_id": "cancel-run", "stream": False})]
+			return [
+				event async for event in agent.stream("hello", run_options={"run_id": "cancel-run", "stream": False})
+			]
 
 		task = asyncio.create_task(collect())
 		for _ in range(100):
@@ -479,16 +494,19 @@ plugins:
 
 		path = tmp_path / "agent.yaml"
 		path.write_text("name: input_agent\nsystem_prompt: base\n", encoding="utf-8")
-		agent = Engine(input_provider=MetadataInputProvider()).load_agent_template(str(path)).instantiate(
-			models=AgentModels(default=mock_llm),
+		agent = (
+			Engine(input_provider=MetadataInputProvider())
+			.load_agent_template(str(path))
+			.instantiate(
+				models=AgentModels(default=mock_llm),
+			)
 		)
 		executor_ctx = []
 		original_create = agent._create_executor
 
-		def capture_create(*args, **kwargs):
-			executor = original_create(*args, **kwargs)
-			executor_ctx.append(executor._ctx)
-			return executor
+		def capture_create(ctx):
+			executor_ctx.append(ctx)
+			return original_create(ctx)
 
 		agent._create_executor = capture_create
 		assert await agent.chat("raw", session_id="s1") == "hello"
@@ -505,6 +523,7 @@ plugins:
 
 		async def error_stream(**kwargs):
 			from axc_agent_engine.core.events import Event
+
 			yield Event.error("llm down")
 
 		agent._execute_stream = error_stream
@@ -589,6 +608,7 @@ plugins:
 			async def chat(*args, **kwargs):
 				await barrier.wait()
 				return model.chat.return_value
+
 			return chat
 
 		alpha_model.chat.side_effect = wait_for_peer(alpha_model)
@@ -635,6 +655,7 @@ plugins:
 	@pytest.mark.asyncio
 	async def test_agent_resume_missing_error_and_close_failures(self, mock_llm, tmp_path, monkeypatch):
 		import asyncio
+
 		from axc_agent_engine.core.errors import ProviderError
 
 		path = tmp_path / "agent.yaml"
@@ -650,7 +671,7 @@ plugins:
 
 		async def immediate_wait_for(awaitable, timeout):
 			awaitable.close()
-			raise asyncio.TimeoutError()
+			raise TimeoutError()
 
 		async def selective_wait_for(awaitable, timeout):
 			qualname = getattr(getattr(awaitable, "cr_code", None), "co_qualname", "")
@@ -658,6 +679,6 @@ plugins:
 				return await immediate_wait_for(awaitable, timeout)
 			return await real_wait_for(awaitable, timeout)
 
-		monkeypatch.setattr("axc_agent_engine.agent.asyncio.wait_for", selective_wait_for)
-		agent._plugins = [CloseErrorPlugin(), CloseTimeoutPlugin()]
+		monkeypatch.setattr("axc_agent_engine.plugins.loader.asyncio.wait_for", selective_wait_for)
+		agent._plugin_manager.plugins[:] = [CloseErrorPlugin(), CloseTimeoutPlugin()]
 		await agent.close()

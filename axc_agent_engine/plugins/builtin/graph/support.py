@@ -1,5 +1,5 @@
-"""General entity relationship graph store.
-中文：此文档说明相关引擎组件的行为。"""
+"""General entity relationship graph store. 通用实体关系图存储。"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -14,29 +14,41 @@ class GraphSearchResult:
 
 @runtime_checkable
 class GraphStore(Protocol):
-	"""Storage-neutral entity/relation graph API.
-中文：此文档说明相关引擎组件的行为。"""
-	def upsert_entity(self, name: str, entity_type: str = "concept", aliases: list[str] | None = None, **metadata: Any) -> dict[str, Any]: ...
+	"""Storage-neutral entity/relation graph API. 与存储后端无关的实体关系接口。"""
+
+	def upsert_entity(
+		self, name: str, entity_type: str = "concept", aliases: list[str] | None = None, **metadata: Any
+	) -> dict[str, Any]: ...
 	def get_entity(self, entity_id: str) -> dict[str, Any] | None: ...
 	def list_entities(self, limit: int = 100, offset: int = 0) -> list[dict[str, Any]]: ...
 	def delete_entity(self, entity_id: str) -> bool: ...
-	def upsert_relation(self, source: str, target: str, relation_type: str = "RELATED_TO", description: str = "", source_memory_id: str = "", **metadata: Any) -> dict[str, Any]: ...
+	def upsert_relation(
+		self,
+		source: str,
+		target: str,
+		relation_type: str = "RELATED_TO",
+		description: str = "",
+		source_memory_id: str = "",
+		**metadata: Any,
+	) -> dict[str, Any]: ...
 	def get_relation(self, relation_id: str) -> dict[str, Any] | None: ...
-	def list_relations(self, entity_id: str | None = None, limit: int = 100, offset: int = 0) -> list[dict[str, Any]]: ...
+	def list_relations(
+		self, entity_id: str | None = None, limit: int = 100, offset: int = 0
+	) -> list[dict[str, Any]]: ...
 	def delete_relation(self, relation_id: str) -> bool: ...
 	def search(self, query: str, depth: int = 1, limit: int = 5) -> list[GraphSearchResult]: ...
 
 
 class InMemoryGraphStore:
-	"""Dependency-free graph store for engine default usage.
-中文：此文档说明相关引擎组件的行为。"""
+	"""Dependency-free graph store for engine default usage. 无外部依赖的默认图存储。"""
 
 	def __init__(self) -> None:
 		self.entities: dict[str, dict[str, Any]] = {}
 		self.relations: dict[str, dict[str, Any]] = {}
 
-	def upsert_entity(self, name: str, entity_type: str = "concept",
-					  aliases: list[str] | None = None, **metadata: Any) -> dict[str, Any]:
+	def upsert_entity(
+		self, name: str, entity_type: str = "concept", aliases: list[str] | None = None, **metadata: Any
+	) -> dict[str, Any]:
 		name = name.strip()
 		if not name:
 			raise ValueError("entity name cannot be empty")
@@ -59,14 +71,23 @@ class InMemoryGraphStore:
 		}
 		return self._entity_dict(entity_id)
 
-	def upsert_relation(self, source: str, target: str, relation_type: str = "RELATED_TO",
-						description: str = "", source_memory_id: str = "", **metadata: Any) -> dict[str, Any]:
+	def upsert_relation(
+		self,
+		source: str,
+		target: str,
+		relation_type: str = "RELATED_TO",
+		description: str = "",
+		source_memory_id: str = "",
+		**metadata: Any,
+	) -> dict[str, Any]:
 		source_entity = self.upsert_entity(source)
 		target_entity = self.upsert_entity(target)
 		for relation in self.relations.values():
-			if (relation["source_id"] == source_entity["id"]
-					and relation["target_id"] == target_entity["id"]
-					and relation["relation_type"] == relation_type):
+			if (
+				relation["source_id"] == source_entity["id"]
+				and relation["target_id"] == target_entity["id"]
+				and relation["relation_type"] == relation_type
+			):
 				if len(description) > len(relation.get("description", "")):
 					relation["description"] = description
 				relation["confidence"] = min(float(relation.get("confidence", 0.8)) + 0.05, 1.0)
@@ -92,7 +113,7 @@ class InMemoryGraphStore:
 
 	def list_entities(self, limit: int = 100, offset: int = 0) -> list[dict[str, Any]]:
 		ids = list(self.entities.keys())
-		return [self._entity_dict(entity_id) for entity_id in ids[offset:offset + limit]]
+		return [self._entity_dict(entity_id) for entity_id in ids[offset : offset + limit]]
 
 	def delete_entity(self, entity_id: str) -> bool:
 		if entity_id not in self.entities:
@@ -114,7 +135,7 @@ class InMemoryGraphStore:
 			if entity_id and relation["source_id"] != entity_id and relation["target_id"] != entity_id:
 				continue
 			relations.append(self._relation_dict(relation_id))
-		return relations[offset:offset + limit]
+		return relations[offset : offset + limit]
 
 	def delete_relation(self, relation_id: str) -> bool:
 		return self.relations.pop(relation_id, None) is not None

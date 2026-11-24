@@ -1,7 +1,7 @@
 <h1 align="center">AxcAgentEngine</h1>
 
 <p align="center">
-  <b>Agent execution engine with Plan-Observe-Replan, tool calling, and a plugin system</b>
+  <b>Headless agent execution engine with pluggable ReAct and POR loops</b>
 </p>
 
 <p align="center">
@@ -25,22 +25,16 @@
 
 ---
 
-Most agent frameworks rely on a ReAct loop: think, call a tool, observe, repeat. As tasks grow more complex, plain ReAct tends to drift.
-
-AxcAgentEngine adds **POR (Plan-Observe-Replan)** on top of ReAct: the agent produces a structured plan, schedules steps by dependency, observes outcomes, and replans when needed.
+AxcAgentEngine is a headless agent execution engine. Strategy plugins supply the loop. The bundled **ReAct** strategy runs model and tool rounds. **POR** plans, schedules steps by dependency, observes results, and replans. Hosts can supply their own loop. The engine manages live input, cancellation, and checkpoints.
 
 ## 🚀 Quick Start
 
 ```bash
-pip install axc-agent-engine
+# Run from this checkout to use the examples below
+pip install .
 
-# Pin the current 3.0 release
-pip install axc-agent-engine==3.0.0
-
-# Optional extras
-pip install "axc-agent-engine[api]"
-pip install "axc-agent-engine[workflow]"
-pip install "axc-agent-engine[api,knowledge,workflow]"
+# Optional dependencies for the HTTP API, MCP, and Burr workflows
+pip install ".[api,mcp,workflow]"
 ```
 
 Requires Python 3.11 or newer.
@@ -48,10 +42,10 @@ Requires Python 3.11 or newer.
 ```python
 from axc_agent_engine import AgentModels, Engine, LLMConfig, PluginRegistry
 from axc_agent_engine.llm.client import OpenAIClient
-from axc_agent_engine.plugins.builtin import BuiltinToolsPlugin
+from axc_agent_engine.plugins.builtin import BuiltinToolsPlugin, PORPlugin
 
 registry = PluginRegistry()
-registry.register(BuiltinToolsPlugin)
+registry.register_many([PORPlugin, BuiltinToolsPlugin])
 
 engine = Engine(plugin_registry=registry)
 models = AgentModels(default=OpenAIClient(LLMConfig(
@@ -59,7 +53,7 @@ models = AgentModels(default=OpenAIClient(LLMConfig(
     api_key="sk-xxx",
     model="gpt-4o",
 )))
-agent = engine.load_agent_template("./agents/my_agent.yaml").instantiate(models=models)
+agent = engine.load_agent_template("./examples/01_basic_chat/agent.yaml").instantiate(models=models)
 
 # Non-streaming
 result = await agent.chat("Analyze last month's sales data")
@@ -72,13 +66,17 @@ async for event in agent.stream("Build a REST API for user management"):
         print(f"\n[Tool: {event.tool_name}]")
     elif event.type == "plan_created":
         print(f"\n[Plan: {event.content}, {len(event.steps)} steps]")
+
+await engine.close()
 ```
+
+Examples 01–07 register `PORPlugin`, enable `plugins.por`, and set `runtime.strategy: por` and `plugins.por.mode: auto`. For pure ReAct, register `ReActPlugin`, enable `plugins.react.enabled: true`, and select `runtime.strategy: react`. A sole enabled strategy is selected automatically. With several enabled, name one explicitly. Custom loops follow the same contract. [Custom loop example](examples/08_custom_loop) · [Strategy contract](docs/PLUGIN_DEVELOPMENT.md#execution-strategies)
 
 ## ✨ Features
 
-- **POR planning** - structured plans, dependency scheduling, replanning; routes via `auto` / `react_only` / `por_first`
-- **ReAct executor** - standard think / call / observe loop
-- **Plugin system** - built-in spec registry, YAML-driven loading; optional capabilities live in plugins
+- **POR strategy plugin** — choose `por_first` (default) to plan immediately or `auto` to start in ReAct and switch when the model produces a plan
+- **ReAct strategy plugin** - standard think / call / observe loop
+- **Plugin system** - explicit class registration and YAML-driven loading
 - **Tool protocol** - every tool returns `ToolOutput`; read-only runs concurrent, write serial; safe function-name mapping
 - **Durable workflow** - `WorkflowRuntime` + `CheckpointStore` + Agent resume API; Burr is optional via `axc-agent-engine[workflow]`
 - **OpenAI compatible** - provider protocol + OpenAI-compatible HTTP client and API subset
@@ -93,10 +91,10 @@ async for event in agent.stream("Build a REST API for user management"):
 
 | Capability | Implementation |
 | --- | --- |
-| ReAct loop | `Executor` |
-| POR planning | `auto` / `react_only` / `por_first` |
+| ReAct loop | `ReActPlugin` |
+| POR planning | `PORPlugin` with `auto` / `por_first` |
 | Durable workflow | `MemoryWorkflowRuntime` by default; optional `BurrWorkflowRuntime` via `axc-agent-engine[workflow]` |
-| Plugin system | spec registry + YAML-driven loading |
+| Plugin system | Host registry + YAML-driven loading |
 | LLM provider | provider protocol + OpenAI-compatible HTTP |
 | Parallel tools | read concurrent, write serial |
 | Tool output | enforced `ToolOutput` |
@@ -129,6 +127,7 @@ name: "data-analyst"
 description: "Data analysis assistant"
 
 runtime:
+  strategy: por
   max_rounds: 50
   thinking: "auto"
   workspace: "/tmp/agent-workspace"
@@ -141,6 +140,7 @@ system_prompt: |
   You are a data analysis assistant...
 
 plugins:
+  por: {enabled: true, mode: auto}
   builtin_tools:
     enabled: true
     load: ["get_time", "file_read", "file_write", "http_request", "artifact_read"]
@@ -183,8 +183,9 @@ Notes:
 `AgentModels` accepts model provider objects. `OpenAIClient(LLMConfig(...))` is the built-in OpenAI-compatible provider; custom providers implement `LLMProvider` (`model`, `tool_name_mapping`, `chat`, `stream`, `ask`, `close`).
 
 ```python
-from axc_agent_engine import AgentModels, ConcurrencyConfig, Engine, LLMConfig
+from axc_agent_engine import AgentModels, ConcurrencyConfig, Engine, LLMConfig, PluginRegistry
 from axc_agent_engine.llm.client import OpenAIClient
+from axc_agent_engine.plugins.builtin import BuiltinToolsPlugin, PORPlugin
 from axc_agent_engine.tools.name_mapping import ToolNameMappingConfig
 
 main_model_config = LLMConfig(
@@ -198,13 +199,16 @@ main_model_config = LLMConfig(
     tool_name_mapping=ToolNameMappingConfig(),
 )
 
+registry = PluginRegistry()
+registry.register_many([PORPlugin, BuiltinToolsPlugin])
 engine = Engine(
+    plugin_registry=registry,
     concurrency=ConcurrencyConfig(
         max_engine_concurrent_runs=128,
         queue_timeout=30,
     ),
 )
-agent = engine.load_agent_template("./agents/my_agent.yaml").instantiate(
+agent = engine.load_agent_template("./examples/01_basic_chat/agent.yaml").instantiate(
     models=AgentModels(default=OpenAIClient(main_model_config)),
 )
 ```
@@ -362,21 +366,24 @@ Capabilities not required by a basic agent live in plugins. The default `Engine.
 
 ```python
 from axc_agent_engine import AgentModels, Engine, PluginRegistry
-from axc_agent_engine.plugins.builtin import BuiltinToolsPlugin, MemoryPlugin
+from axc_agent_engine.plugins.builtin import BuiltinToolsPlugin, MemoryPlugin, PORPlugin
 from my_project.plugins import MyCustomPlugin
 
 registry = PluginRegistry()
-registry.register_many([BuiltinToolsPlugin, MemoryPlugin, MyCustomPlugin])
+registry.register_many([PORPlugin, BuiltinToolsPlugin, MemoryPlugin, MyCustomPlugin])
 engine = Engine(plugin_registry=registry)
 agent = engine.load_agent_template("./agents/my_agent.yaml").instantiate(models=AgentModels(default=llm))
 ```
 
 | Plugin | Purpose |
 | --- | --- |
+| `react` | Run a model and tool loop |
+| `por` | Plan, execute, observe and replan, with optional automatic handoff |
 | `builtin_tools` | Basic tools and artifact paging |
 | `knowledge` | Ingestion, semantic chunking, hybrid retrieval, citations, rerank |
 | `memory` | Memory, governance tools, sensitive-data policy, decay, TTL |
 | `output_format` | Final output contracts, validation, repair, audit |
+| `post_process` | Optionally append round and token counts before final output validation |
 | `graph` | Entity/relation graph search and CRUD |
 | `skill` | Load skills, run scripts through sandbox |
 | `mcp` | MCP server tool loading and guarding |
@@ -388,9 +395,17 @@ agent = engine.load_agent_template("./agents/my_agent.yaml").instantiate(models=
 | `tracing` | Trace/span collection, audit mode, query tools |
 | `reflexion` | End-of-round and end-of-run self-reflection |
 | `repetition_guard` | Repeated tool / response / result detection |
-| `cost_statistics` | Token and tool-call accounting |
+| `cost_statistics` | Input and output token accounting |
 | `collaboration` | Agent-to-agent calls and host orchestration entry |
 | `swarm` | Lightweight parallel fan-out |
+
+### Engineering tools
+
+Enable `file_grep` in `plugins.builtin_tools.load`, grant `file_read`, and configure the workspace. Install ripgrep (`rg`) in the command execution environment. Matches include paths, line numbers, and text.
+
+`file_edit` matches exact text, including quotes and line endings. Inline `file_read` results include the whole file’s `sha256`. Pass it as `expected_sha256` to `file_edit`, `file_write`, or `file_append` to reject stale content. Hosts own cross-process workspace isolation.
+
+The local executor returns up to 1 MiB inline per output stream. Larger streams are saved in full under `.axc/logs/` in the command working directory. Supply an `ArtifactStore` to retrieve them through `artifact_read` or `artifact_page`. The host can remove log files once their artifact references expire.
 
 ## Sidecar Capabilities
 
@@ -456,7 +471,8 @@ flowchart TD
     I --> J["Plugin.initialize(config, ctx)"]
     J --> K["Plugin.get_tools()"]
     K --> L["Register ToolDefinition"]
-    L --> M["Create Agent and dispatcher consumer"]
+    L --> M["Agent bound to selected strategy"]
+    M --> N["Start configured dispatcher consumer"]
 ```
 
 ### One agent run
@@ -466,10 +482,11 @@ flowchart TD
     A["Agent.chat / stream / *_with_messages / resume"] --> B["RunRequest.create"]
     B --> C["Merge run_options.run_id and request metadata"]
     C --> D["Create ExecutionContext"]
-    D --> E["ExecutionRunLifecycle.on_execution_start"]
-    E --> F["MessageStore initializes system/user/plugin context"]
-    F --> G{"Routing mode"}
-    G -->|react_only or auto ReAct| H["ReActKernel round"]
+    D --> E["MessageStore initializes input history"]
+    E --> F["Run start hooks and inject plugin context"]
+    F --> G{"Selected strategy"}
+    G -->|host plugin| Custom["ExecutionLoop.run"]
+    G -->|react or por auto| H["ReActLoop round"]
     G -->|por_first or POR handoff| I["PORRunner / PORGraphRuntime"]
     H --> J["Plugin.transform_messages"]
     J --> K["compress: recent window + durable results + atomic tool groups"]
@@ -547,7 +564,7 @@ class MyPlugin(BasePlugin):
 
 Plugins must inherit `BasePlugin`, declare `config_schema`, and return tools as `ToolDefinition` instances. `ToolRegistry` does not accept dicts.
 
-Hosts can inspect registered plugin schemas through `registry.list_plugin_config_schemas()` or `registry.get_plugin_config_schema("my_plugin")`. The schema is for UI, templates, default display, and optional validation; YAML extra keys are still passed to `initialize(config, ctx)`.
+Hosts can inspect registered plugin schemas through `registry.list_plugin_config_schemas()` or `registry.get_plugin_config_schema("my_plugin")`. The loader validates YAML against that schema before calling `initialize(config, ctx)` and rejects unknown fields.
 
 ```yaml
 plugins:
@@ -570,15 +587,23 @@ axc --log-level DEBUG --json-logs chat --agent ./agents/my_agent.yaml
 
 CLI logging flags are global and must be placed before the subcommand.
 
+Inspect the assembled agent with the CLI's bundled plugin registry. This command initializes configured plugins and prints JSON without making a model call.
+
+```bash
+axc inspect --agent examples/01_basic_chat/agent.yaml
+```
+
+`strategy.reason` reports `explicit` for a named selection, `single_enabled` for one enabled strategy, or `runtime_routing` for an older routing template. The output includes plugin initialization order, registered tools, and capability permissions. Tools discovered during a run appear after discovery. A custom policy reports `null` for a tool's static permission. Hosts supplying their own plugins, mounts or policies can inspect the bound agent with `agent.inspect()`.
+
 ## Design Decisions
 
-- **Engine core = Executor + ReActKernel + LLMCaller.** Reads Agent YAML, calls LLM providers, runs the ReAct loop, emits events/results.
+- **Execution strategies supply the loop.** Executor manages each run. Hosts can select an official ReAct or POR driver or register their own [execution strategy](docs/PLUGIN_DEVELOPMENT.md#execution-strategies).
 - **POR state transitions live in pydantic-graph.** `PORGraphRuntime` owns the plan/step/observe/replan loop; services execute work and persist checkpoints.
-- **Workflow resume is a runtime boundary.** `MemoryWorkflowRuntime` is the default; `BurrWorkflowRuntime` is selected when the optional workflow dependency is installed.
+- **Workflow resume is a runtime boundary.** `MemoryWorkflowRuntime` is the default; `BurrWorkflowRuntime` is selected explicitly by the host after installing the workflow extra.
 - **Plugins are the runtime extension boundary.** Knowledge, memory, graph, MCP, output repair, skills belong in plugins.
 - **Orchestration is sidecar.** Multi-agent sessions, simulation, mode adapters are host-driven.
 - **Evaluation is sidecar.** EvalRunner, stores, matchers, reports are host-driven test framework pieces.
-- **Registration is not loading.** The spec registry is the full plugin table; agents load only YAML-enabled plugins.
+- **Explicit plugin loading.** Hosts register the classes they need from the official catalog. Templates enable them with `enabled: true`.
 - **Plugin schema is mandatory.** A plugin without `config_schema` cannot be registered.
 - **Tools come from plugins.** The engine core embeds no business tools.
 - **Tools must return `ToolOutput`.** Non-`ToolOutput` returns are rejected.
@@ -600,3 +625,22 @@ make test-core-cov
 ```
 
 The release gate requires at least 95% total coverage. The engine-body coverage target is 98%.
+
+### Send input to a running agent
+
+Give the run a unique ID before starting the stream. The host can submit more text while a model or tool is working. Use the same agent, session, run ID and message ID when retrying delivery.
+
+```python
+async for event in agent.stream("Review both reports", session_id="review", metadata={"run_id": "review-42"}):
+    if event.type == EventType.STEP_START and event.step_id == 1:
+        receipt = await agent.send_message("review-42", "Focus on the second report",
+                                           session_id="review", message_id="change-1")
+    if event.type in {EventType.DONE, EventType.CANCELLED, EventType.ERROR}:
+        print(event.metadata.get("processed_message_ids", []), event.metadata.get("unprocessed_message_ids", []))
+```
+
+An `accepted` receipt puts the message in FIFO order. `processed` means the text entered run history. A tool already in flight may finish first. POR publishes plan and step events during execution and revises remaining work at the next planning boundary. Cancellation uses `engine.cancel_run(run_id)`. The offline demo exercises both completion and cancellation. [Runnable example](examples/09_live_input/run.py)
+
+Keep requests for an active run on the engine process that owns it. A durable host `CheckpointStore` can recover accepted input after process loss. Unknown write-tool outcomes block resume until the host reconciles the recorded call IDs. See the plugin guide for the full receipt and recovery contracts. [Plugin guide](docs/PLUGIN_DEVELOPMENT.md)
+
+Fork an execution with `await agent.fork_run(run_id, checkpoint_id)`. Select a retained `cp.forkable` checkpoint and continue the new run through `resume_stream`. [Execution forks](docs/ARCHITECTURE.md#execution-forks)

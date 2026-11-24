@@ -1,7 +1,6 @@
-"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-宿主调用的标注匹配器，用于评测或参考答案短路。
-Host-invoked annotation matcher for eval/reference-answer short-circuiting."""
+"""Host-invoked annotation matcher for eval/reference-answer short-circuiting.
+宿主调用的标注匹配器，用于评测或参考答案短路。"""
+
 from __future__ import annotations
 
 import math
@@ -10,6 +9,7 @@ from dataclasses import dataclass
 from difflib import SequenceMatcher
 from typing import TYPE_CHECKING, Any
 
+from axc_agent_engine.core.errors import LLMError
 from axc_agent_engine.sidecar.eval.store import AnnotationReply
 
 if TYPE_CHECKING:
@@ -19,11 +19,8 @@ if TYPE_CHECKING:
 
 @dataclass
 class AnnotationMatch:
-	"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-一条匹配到的标注回复。
-	One matched annotation reply.
-	"""
+	"""One matched annotation reply.
+	一条匹配到的标注回复。"""
 
 	reply: AnnotationReply
 	score: float
@@ -32,16 +29,13 @@ class AnnotationMatch:
 
 
 class AnnotationMatcher:
-	"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-在不触碰 Agent runtime 的前提下，把用户输入匹配到 AnnotationStore。
-	Matches user input against AnnotationStore without touching Agent runtime.
-	"""
+	"""Matches user input against AnnotationStore without touching Agent runtime.
+	在不触碰 Agent runtime 的前提下，把用户输入匹配到 AnnotationStore。"""
 
 	def __init__(
 		self,
-		store: "AnnotationStore",
-		embedding_provider: "EmbeddingProvider | None" = None,
+		store: AnnotationStore,
+		embedding_provider: EmbeddingProvider | None = None,
 		threshold: float = 0.86,
 	) -> None:
 		self._store = store
@@ -49,20 +43,14 @@ class AnnotationMatcher:
 		self._threshold = threshold
 
 	async def match(self, query: str, threshold: float | None = None) -> AnnotationMatch | None:
-		"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-返回超过阈值的最佳标注匹配。
-		Return the best matching annotation above threshold.
-		"""
+		"""Return the best matching annotation above threshold.
+		返回超过阈值的最佳标注匹配。"""
 		matches = await self.match_all(query, top_k=1, threshold=threshold)
 		return matches[0] if matches else None
 
 	async def match_all(self, query: str, top_k: int = 5, threshold: float | None = None) -> list[AnnotationMatch]:
-		"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-使用精确、向量、词法降级评分返回排序后的匹配。
-		Return ranked matches using exact, vector, then lexical fallback scoring.
-		"""
+		"""Return ranked matches using exact, vector, then lexical fallback scoring.
+		使用精确、向量、词法降级评分返回排序后的匹配。"""
 		if not query.strip():
 			return []
 		replies = await self._store.list_replies()
@@ -78,19 +66,19 @@ class AnnotationMatcher:
 			if _normalize(text) == query_norm or _normalize(reply.case_id) == query_norm
 		]
 		if exact:
-			return exact[:max(1, top_k)]
+			return exact[: max(1, top_k)]
 
 		floor = self._threshold if threshold is None else threshold
 		vector_matches = await self._vector_matches(query, candidates)
 		if vector_matches:
-			return [match for match in vector_matches if match.score >= floor][:max(1, top_k)]
+			return [match for match in vector_matches if match.score >= floor][: max(1, top_k)]
 
 		lexical = [
 			AnnotationMatch(reply=reply, score=_lexical_score(query, text), method="lexical", matched_text=text)
 			for reply, text in candidates
 		]
 		lexical.sort(key=lambda item: item.score, reverse=True)
-		return [match for match in lexical if match.score >= floor][:max(1, top_k)]
+		return [match for match in lexical if match.score >= floor][: max(1, top_k)]
 
 	async def _vector_matches(
 		self,
@@ -101,7 +89,7 @@ class AnnotationMatcher:
 			return []
 		try:
 			vectors = await self._embedding_provider.embed([query, *[text for _, text in candidates]])
-		except Exception:
+		except (LLMError, OSError, RuntimeError, ValueError):
 			return []
 		if len(vectors) != len(candidates) + 1:
 			return []

@@ -1,0 +1,5 @@
+name: live-plan
+runtime:
+  strategy: por
+plugins:
+  por: {enabled: true}

@@ -1,17 +1,24 @@
 """Swarm 插件 — 通过 AgentMessageDispatcher + MessageBus 并行 fan-out。"""
+
 from __future__ import annotations
 
 import asyncio
 import logging
 import time
 import uuid
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from axc_agent_engine.core.constants import MAX_CALL_DEPTH
-from axc_agent_engine.core.errors import ErrorCategory, ErrorEnvelope
+from axc_agent_engine.core.errors import AxcError, ErrorCategory, ErrorEnvelope
 from axc_agent_engine.core.schema import ToolDefinition
 from axc_agent_engine.plugins.base import BasePlugin
-from axc_agent_engine.plugins.builtin.common import agent_event_callback, bounded_int, externalize_text, strict_bounded_int
+from axc_agent_engine.plugins.builtin.common import (
+	agent_event_callback,
+	bounded_int,
+	bounded_timeout,
+	externalize_text,
+	strict_bounded_int,
+)
 from axc_agent_engine.plugins.builtin.config_schemas import SWARM_CONFIG_SCHEMA
 
 if TYPE_CHECKING:
@@ -21,7 +28,7 @@ logger = logging.getLogger(__name__)
 
 
 class SwarmDispatcher:
-	def __init__(self, plugin: "SwarmPlugin") -> None:
+	def __init__(self, plugin: SwarmPlugin) -> None:
 		self.plugin = plugin
 
 	async def dispatch(self, args: dict, context: dict):
@@ -35,49 +42,68 @@ class SwarmPlugin(BasePlugin):
 	version = "3.1.0"
 	config_schema = SWARM_CONFIG_SCHEMA
 
-	def initialize(self, config: dict, plugin_ctx: "PluginContext") -> None:
-		self._enabled = config.get("enabled", True)
+	def initialize(self, config: dict, plugin_ctx: PluginContext) -> None:
 		self._max_concurrent = strict_bounded_int(config.get("max_concurrent", 5), 1, 100, "swarm.max_concurrent")
 		self._max_depth = strict_bounded_int(config.get("max_depth", MAX_CALL_DEPTH), 1, 20, "swarm.max_depth")
 		self._timeout = _strict_timeout(config.get("timeout", 60.0), "swarm.timeout")
 		self._task_timeout = _strict_timeout(config.get("task_timeout", self._timeout), "swarm.task_timeout")
-		self._allow_self_call = bool(config.get("allow_self_call", False))
-		self._allowed_agents = {str(name) for name in config.get("allowed_agents", [])}
-		self._denied_agents = {str(name) for name in config.get("denied_agents", [])}
+		self._allow_self_call = config.get("allow_self_call", False)
+		self._allowed_agents = set(config.get("allowed_agents", []))
+		self._denied_agents = set(config.get("denied_agents", []))
 		self._max_result_bytes = strict_bounded_int(
 			config.get("max_result_bytes", 256_000),
 			1,
 			10 * 1024 * 1024,
 			"swarm.max_result_bytes",
 		)
-		self._failure_policy = str(config.get("failure_policy", "best_effort"))
+		self._failure_policy = config.get("failure_policy", "best_effort")
 		self._plugin_ctx = plugin_ctx
 		self._dispatcher = SwarmDispatcher(self)
 
 	def get_tools(self) -> list[ToolDefinition]:
-		if not self._enabled:
-			return []
-		return [ToolDefinition(
-			name="swarm_dispatch",
-			description="并行调度多个 Agent 执行独立任务并返回标准化结果",
-			parameters={"type": "object", "properties": {
-				"goal": {"type": "string", "description": "总体目标"},
-				"tasks": {"type": "array", "description": "任务列表", "items": {"type": "object", "properties": {
-					"task_id": {"type": "string", "description": "可选任务 ID"},
-					"agent_name": {"type": "string"},
-					"description": {"type": "string"},
-					"timeout": {"type": "number", "description": "单任务超时时间（秒）"},
-					"priority": {"type": "integer", "description": "优先级，数字越小越先调度", "default": 100},
-				}, "required": ["agent_name", "description"]}},
-				"timeout": {"type": "number", "description": "本次 swarm 总超时时间（秒）"},
-				"failure_policy": {"type": "string", "enum": ["best_effort", "fail_fast"], "default": self._failure_policy},
-			}, "required": ["goal", "tasks"]},
-			is_read_only=False,
-			timeout=0,
-			capability="agent_call",
-			risk_level="moderate",
-			execute=self._tool_swarm_dispatch,
-		)]
+		return [
+			ToolDefinition(
+				name="swarm_dispatch",
+				description="并行调度多个 Agent 执行独立任务并返回标准化结果",
+				parameters={
+					"type": "object",
+					"properties": {
+						"goal": {"type": "string", "description": "总体目标"},
+						"tasks": {
+							"type": "array",
+							"description": "任务列表",
+							"items": {
+								"type": "object",
+								"properties": {
+									"task_id": {"type": "string", "description": "可选任务 ID"},
+									"agent_name": {"type": "string"},
+									"description": {"type": "string"},
+									"timeout": {"type": "number", "description": "单任务超时时间（秒）"},
+									"priority": {
+										"type": "integer",
+										"description": "优先级，数字越小越先调度",
+										"default": 100,
+									},
+								},
+								"required": ["agent_name", "description"],
+							},
+						},
+						"timeout": {"type": "number", "description": "本次 swarm 总超时时间（秒）"},
+						"failure_policy": {
+							"type": "string",
+							"enum": ["best_effort", "fail_fast"],
+							"default": self._failure_policy,
+						},
+					},
+					"required": ["goal", "tasks"],
+				},
+				is_read_only=False,
+				timeout=0,
+				capability="agent_call",
+				risk_level="moderate",
+				execute=self._tool_swarm_dispatch,
+			)
+		]
 
 	async def _tool_swarm_dispatch(self, args: dict, context: dict):
 		return await self._dispatcher.dispatch(args, context)
@@ -104,7 +130,7 @@ class SwarmPlugin(BasePlugin):
 		if validation_error:
 			return ToolOutput.error(validation_error)
 		normalized.sort(key=lambda task: (task["priority"], task["index"]))
-		total_timeout = _bounded_timeout(args.get("timeout", self._timeout), self._timeout)
+		total_timeout = bounded_timeout(args.get("timeout", self._timeout))
 		failure_policy = str(args.get("failure_policy", self._failure_policy))
 		if failure_policy not in {"best_effort", "fail_fast"}:
 			return ToolOutput.error("failure_policy must be best_effort or fail_fast")
@@ -114,10 +140,15 @@ class SwarmPlugin(BasePlugin):
 		if exec_ctx:
 			exec_ctx.runtime.agent_call_depth = current_depth + 1
 		try:
+
 			async def _run_task(task: dict) -> dict:
 				async with semaphore:
 					task_start = time.time()
-					task_metadata = {**metadata_base, "swarm_task_id": task["task_id"], "swarm_task_index": task["index"]}
+					task_metadata = {
+						**metadata_base,
+						"swarm_task_id": task["task_id"],
+						"swarm_task_index": task["index"],
+					}
 					envelope = AgentEnvelope(
 						sender=caller or "swarm",
 						recipient=task["agent_name"],
@@ -140,15 +171,26 @@ class SwarmPlugin(BasePlugin):
 							result_payload,
 							context.get("artifact_store"),
 							self._max_result_bytes,
-							{"kind": "swarm_result", "agent_name": task["agent_name"], "task_id": task["task_id"], "swarm_id": swarm_id},
+							{
+								"kind": "swarm_result",
+								"agent_name": task["agent_name"],
+								"task_id": task["task_id"],
+								"swarm_id": swarm_id,
+							},
 						)
 						return _task_result(task, "success", duration_ms=duration_ms, result=content, artifact=artifact)
-					except Exception as e:
-						return _task_result(task, "error", duration_ms=int((time.time() - task_start) * 1000), error=str(e))
+					except (OSError, RuntimeError, ValueError, AxcError) as e:
+						return _task_result(
+							task, "error", duration_ms=int((time.time() - task_start) * 1000), error=str(e)
+						)
 
-			results = await asyncio.wait_for(_gather_swarm(normalized, _run_task, failure_policy), timeout=total_timeout)
-		except asyncio.TimeoutError:
-			results = [_task_result(task, "cancelled", error=f"swarm timeout after {total_timeout}s") for task in normalized]
+			results = await asyncio.wait_for(
+				_gather_swarm(normalized, _run_task, failure_policy), timeout=total_timeout
+			)
+		except TimeoutError:
+			results = [
+				_task_result(task, "cancelled", error=f"swarm timeout after {total_timeout}s") for task in normalized
+			]
 		finally:
 			if exec_ctx:
 				exec_ctx.runtime.agent_call_depth = current_depth
@@ -191,19 +233,19 @@ class SwarmPlugin(BasePlugin):
 				return [], f"Agent '{agent_name}' 不存在"
 			if not self._is_agent_allowed(agent_name, caller):
 				return [], f"Agent '{agent_name}' is not allowed"
-			normalized.append({
-				"task_id": str(raw.get("task_id") or f"task-{index + 1}"),
-			"index": index,
-			"agent_name": agent_name,
-			"description": description,
-			"timeout": _bounded_timeout(raw.get("timeout", self._task_timeout), self._task_timeout),
-			"priority": bounded_int(raw.get("priority", 100), 0, 100000),
-		})
+			normalized.append(
+				{
+					"task_id": str(raw.get("task_id") or f"task-{index + 1}"),
+					"index": index,
+					"agent_name": agent_name,
+					"description": description,
+					"timeout": bounded_timeout(raw.get("timeout", self._task_timeout)),
+					"priority": bounded_int(raw.get("priority", 100), 0, 100000),
+				}
+			)
 		return normalized, ""
 
 	def _is_agent_allowed(self, agent_name: str, caller: str = "") -> bool:
-		if not agent_name:
-			return False
 		if not self._allow_self_call and caller and agent_name == caller:
 			return False
 		if agent_name in self._denied_agents:
@@ -225,6 +267,7 @@ class SwarmPlugin(BasePlugin):
 		if not audit_sink:
 			return
 		from axc_agent_engine.observability.audit import AuditEvent
+
 		metadata = exec_ctx.state.metadata
 		error = {}
 		if payload["error"] or payload["cancelled"]:
@@ -235,18 +278,20 @@ class SwarmPlugin(BasePlugin):
 				retryable=True,
 				details={"error": payload["error"], "cancelled": payload["cancelled"]},
 			).to_dict()
-		await audit_sink.record(AuditEvent(
-			type="swarm_dispatch_completed",
-			actor=str(metadata.get("agent_name") or ""),
-			session_id=str(metadata.get("session_id") or ""),
-			tool_name="swarm_dispatch",
-			capability="agent_call",
-			risk_level="moderate",
-			allowed=True,
-			duration_ms=payload["duration_ms"],
-			error=error,
-			metadata={k: v for k, v in payload.items() if k != "results"},
-		))
+		await audit_sink.record(
+			AuditEvent(
+				type="swarm_dispatch_completed",
+				actor=str(metadata.get("agent_name") or ""),
+				session_id=str(metadata.get("session_id") or ""),
+				tool_name="swarm_dispatch",
+				capability="agent_call",
+				risk_level="moderate",
+				allowed=True,
+				duration_ms=payload["duration_ms"],
+				error=error,
+				metadata={k: v for k, v in payload.items() if k != "results"},
+			)
+		)
 
 
 async def _gather_swarm(tasks: list[dict], runner, failure_policy: str) -> list[dict]:
@@ -311,14 +356,16 @@ def _swarm_metadata(context: dict, exec_ctx: Any, depth: int, swarm_id: str, goa
 	state_metadata = getattr(getattr(exec_ctx, "state", None), "metadata", None)
 	if isinstance(state_metadata, dict):
 		metadata.update(state_metadata)
-	metadata.update({
-		"agent_call_depth": depth,
-		"caller_agent": context.get("agent_name", metadata.get("agent_name", "")),
-		"caller_session_id": context.get("session_id", metadata.get("session_id", "")),
-		"parent_tool_call_id": context.get("tool_call_id", ""),
-		"swarm_id": swarm_id,
-		"swarm_goal": goal,
-	})
+	metadata.update(
+		{
+			"agent_call_depth": depth,
+			"caller_agent": context.get("agent_name", metadata.get("agent_name", "")),
+			"caller_session_id": context.get("session_id", metadata.get("session_id", "")),
+			"parent_tool_call_id": context.get("tool_call_id", ""),
+			"swarm_id": swarm_id,
+			"swarm_goal": goal,
+		}
+	)
 	if not metadata.get("trace_id"):
 		metadata["trace_id"] = str(metadata.get("run_id") or swarm_id)
 	return metadata
@@ -330,9 +377,7 @@ def _swarm_llm_view(payload: dict[str, Any]) -> str:
 		f"Goal: {payload.get('goal', '')}",
 		f"Summary: success={payload.get('success', 0)} error={payload.get('error', 0)} cancelled={payload.get('cancelled', 0)} total={payload.get('total', 0)}",
 	]
-	for item in payload.get("results", []) or []:
-		if not isinstance(item, dict):
-			continue
+	for item in payload["results"]:
 		lines.append(f"{int(item.get('index', 0)) + 1}. {item.get('agent_name', '')} [{item.get('status', '')}]")
 		result = str(item.get("result", "")).strip()
 		error = str(item.get("error", "")).strip()
@@ -354,21 +399,7 @@ async def _externalize_result(
 	return await externalize_text(content, artifact_store, max_result_bytes, metadata, logger, "swarm")
 
 
-def _bounded_timeout(value: Any, default: float) -> float:
-	try:
-		timeout = float(value)
-	except (TypeError, ValueError):
-		timeout = default
-	return max(1.0, min(timeout, 3600.0))
-
-
-def _strict_timeout(value: Any, field_name: str) -> float:
-	if isinstance(value, bool):
-		raise ValueError(f"{field_name} must be a number")
-	try:
-		timeout = float(value)
-	except (TypeError, ValueError) as exc:
-		raise ValueError(f"{field_name} must be a number") from exc
-	if timeout < 1.0 or timeout > 3600.0:
+def _strict_timeout(value: float, field_name: str) -> float:
+	if not 1 <= value <= 3600:
 		raise ValueError(f"{field_name} must be between 1.0 and 3600.0")
-	return timeout
+	return value

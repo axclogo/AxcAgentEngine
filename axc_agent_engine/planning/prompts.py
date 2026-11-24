@@ -1,5 +1,4 @@
-"""POR planning prompt templates.
-中文：此文档说明相关引擎组件的行为。"""
+"""POR planning prompt templates. POR 规划提示词模板。"""
 
 OBSERVE_PROMPT = (
 	"评估以下步骤的执行结果。\n"

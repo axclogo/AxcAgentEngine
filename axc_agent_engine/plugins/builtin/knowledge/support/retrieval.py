@@ -1,19 +1,22 @@
-"""Storage-neutral hybrid retrieval.
-中文：此文档说明相关引擎组件的行为。"""
+"""Storage-neutral hybrid retrieval. 与存储后端无关的混合检索。"""
+
 from __future__ import annotations
 
-import math
-import re
 import hashlib
 import json
-from collections import Counter
-from dataclasses import dataclass, field
-from typing import Any, Awaitable, Callable, Protocol, runtime_checkable
+import math
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass, field, replace
+from typing import Any, Protocol, runtime_checkable
+
+from axc_agent_engine.plugins.builtin.bm25 import BM25Corpus, tokenize
+from axc_agent_engine.plugins.builtin.common import string_array
+
 
 @dataclass(frozen=True)
 class KnowledgeDocument:
-	"""A searchable document chunk.
-中文：此文档说明相关引擎组件的行为。"""
+	"""A searchable document chunk. 可供检索的文档分块。"""
+
 	id: str
 	text: str
 	source: str = ""
@@ -24,16 +27,19 @@ class KnowledgeDocument:
 class KnowledgeFilter:
 	"""Storage-neutral retrieval filter.
 
-	Enterprise ACL systems should translate their permission model into metadata
-	filters before calling the engine; the engine does not own user/org policy.
-	
-中文：此文档说明相关引擎组件的行为。"""
+		Enterprise ACL systems should translate their permission model into metadata
+		filters before calling the engine; the engine does not own user/org policy.
+
+	与存储后端无关的检索过滤条件。"""
 
 	namespace: str = ""
 	metadata: dict[str, Any] = field(default_factory=dict)
 	source: str = ""
 	source_prefix: str = ""
 	allowed_acl_tags: list[str] = field(default_factory=list)
+
+	def __post_init__(self) -> None:
+		string_array(self.allowed_acl_tags, "allowed_acl_tags")
 
 	def matches(self, document: KnowledgeDocument) -> bool:
 		metadata = document.metadata or {}
@@ -52,8 +58,7 @@ class KnowledgeFilter:
 				return False
 		if self.allowed_acl_tags:
 			tags = metadata.get("acl_tags", [])
-			if isinstance(tags, str):
-				tags = [tags]
+			string_array(tags, "document acl_tags")
 			if tags and not set(tags) & set(self.allowed_acl_tags):
 				return False
 		return True
@@ -61,8 +66,7 @@ class KnowledgeFilter:
 
 @dataclass(frozen=True)
 class KnowledgeSearchRequest:
-	"""Structured retrieval request used by stores, retrievers, and tools.
-中文：此文档说明相关引擎组件的行为。"""
+	"""Structured retrieval request used by stores, retrievers, and tools. 存储、检索服务及工具共用的请求结构。"""
 
 	query: str
 	top_k: int = 5
@@ -74,8 +78,7 @@ class KnowledgeSearchRequest:
 
 @dataclass(frozen=True)
 class RetrievalTrace:
-	"""Debug metadata for retrieval observability.
-中文：此文档说明相关引擎组件的行为。"""
+	"""Debug metadata for retrieval observability. 用于观察检索过程的调试元数据。"""
 
 	query: str
 	rewritten_queries: list[str] = field(default_factory=list)
@@ -97,14 +100,13 @@ class RetrievalTrace:
 
 @dataclass(frozen=True)
 class KnowledgeSearchResponse:
-	"""Structured retrieval response with optional trace.
-中文：此文档说明相关引擎组件的行为。"""
+	"""Structured retrieval response with optional trace. 包含可选追踪信息的结构化检索结果。"""
 
-	results: list["RetrievalResult"]
+	results: list[RetrievalResult]
 	trace: RetrievalTrace | None = None
 
 	def to_dict(self) -> dict[str, Any]:
-		data = {"results": [result.to_dict() for result in self.results]}
+		data: dict[str, Any] = {"results": [result.to_dict() for result in self.results]}
 		if self.trace:
 			data["trace"] = self.trace.to_dict()
 		return data
@@ -112,8 +114,8 @@ class KnowledgeSearchResponse:
 
 @dataclass(frozen=True)
 class RetrievalResult:
-	"""One retrieval hit.
-中文：此文档说明相关引擎组件的行为。"""
+	"""One retrieval hit. 一条检索命中记录。"""
+
 	id: str
 	text: str
 	score: float
@@ -143,43 +145,54 @@ class RetrievalResult:
 
 @runtime_checkable
 class EmbeddingClient(Protocol):
-	"""Embeds texts for vector retrieval.
-中文：此文档说明相关引擎组件的行为。"""
+	"""Embeds texts for vector retrieval. 为向量检索生成文本向量。"""
+
 	async def embed(self, texts: list[str]) -> list[list[float]]: ...
 
 
 @runtime_checkable
 class Reranker(Protocol):
-	"""Reranks retrieval candidates.
-中文：此文档说明相关引擎组件的行为。"""
+	"""Reranks retrieval candidates. 对候选检索结果重新排序。"""
+
 	async def rerank(self, query: str, results: list[RetrievalResult], top_k: int) -> list[RetrievalResult]: ...
 
 
 @runtime_checkable
 class QueryRewriter(Protocol):
-	"""Expands or rewrites a retrieval query before search.
-中文：此文档说明相关引擎组件的行为。"""
+	"""Expands or rewrites a retrieval query before search. 检索前扩展或改写查询。"""
+
 	async def rewrite(self, query: str, max_queries: int = 4) -> list[str]: ...
 
 
 @runtime_checkable
 class KnowledgeIndexStore(Protocol):
-	"""Storage-neutral knowledge index API.
-中文：此文档说明相关引擎组件的行为。"""
-	async def add_documents(self, documents: list[KnowledgeDocument], embeddings: list[list[float]] | None = None) -> None: ...
-	async def upsert_documents(self, documents: list[KnowledgeDocument], embeddings: list[list[float]] | None = None) -> None: ...
+	"""Storage-neutral knowledge index API. 与存储后端无关的知识索引接口。"""
+
+	async def add_documents(
+		self, documents: list[KnowledgeDocument], embeddings: list[list[float]] | None = None
+	) -> None: ...
+	async def upsert_documents(
+		self, documents: list[KnowledgeDocument], embeddings: list[list[float]] | None = None
+	) -> None: ...
 	async def delete_documents(self, ids: list[str]) -> int: ...
 	async def delete_by_filter(self, filters: KnowledgeFilter | dict[str, Any]) -> int: ...
 	async def list_documents(self) -> list[KnowledgeDocument]: ...
-	async def bm25_search(self, query: str, top_k: int = 30, filters: KnowledgeFilter | dict[str, Any] | None = None) -> list[RetrievalResult]: ...
-	async def vector_search(self, query: str, top_k: int = 30, filters: KnowledgeFilter | dict[str, Any] | None = None) -> list[RetrievalResult]: ...
-	async def search(self, request: KnowledgeSearchRequest | str, top_k: int = 5, candidate_k: int = 30) -> list[RetrievalResult]: ...
-	async def search_with_trace(self, request: KnowledgeSearchRequest | str, top_k: int = 5, candidate_k: int = 30) -> KnowledgeSearchResponse: ...
+	async def bm25_search(
+		self, query: str, top_k: int = 30, filters: KnowledgeFilter | dict[str, Any] | None = None
+	) -> list[RetrievalResult]: ...
+	async def vector_search(
+		self, query: str, top_k: int = 30, filters: KnowledgeFilter | dict[str, Any] | None = None
+	) -> list[RetrievalResult]: ...
+	async def search(
+		self, request: KnowledgeSearchRequest | str, top_k: int = 5, candidate_k: int = 30
+	) -> list[RetrievalResult]: ...
+	async def search_with_trace(
+		self, request: KnowledgeSearchRequest | str, top_k: int = 5, candidate_k: int = 30
+	) -> KnowledgeSearchResponse: ...
 
 
 class HashEmbeddingClient:
-	"""Dependency-free deterministic embedding fallback for tests and local indexes.
-中文：此文档说明相关引擎组件的行为。"""
+	"""Dependency-free deterministic embedding fallback for tests and local indexes. 用于测试和本地索引的确定性向量生成器。"""
 
 	def __init__(self, dimensions: int = 256) -> None:
 		self.dimensions = max(8, dimensions)
@@ -189,8 +202,7 @@ class HashEmbeddingClient:
 
 
 class ScoreReranker:
-	"""Lexical reranker that keeps the engine usable without a model dependency.
-中文：此文档说明相关引擎组件的行为。"""
+	"""Lexical reranker that keeps the engine usable without a model dependency. 无需模型依赖的词法重排器。"""
 
 	async def rerank(self, query: str, results: list[RetrievalResult], top_k: int) -> list[RetrievalResult]:
 		query_terms = set(tokenize(query))
@@ -199,23 +211,24 @@ class ScoreReranker:
 			text_terms = set(tokenize(result.text))
 			overlap = len(query_terms & text_terms) / max(1, len(query_terms))
 			score = result.score + overlap
-			reranked.append(RetrievalResult(
-				id=result.id,
-				text=result.text,
-				score=score,
-				retrieval=f"{result.retrieval}+rerank",
-				source=result.source,
-				metadata=result.metadata,
-				citation=result.citation,
-				highlights=result.highlights,
-			))
+			reranked.append(
+				RetrievalResult(
+					id=result.id,
+					text=result.text,
+					score=score,
+					retrieval=f"{result.retrieval}+rerank",
+					source=result.source,
+					metadata=result.metadata,
+					citation=result.citation,
+					highlights=result.highlights,
+				)
+			)
 		reranked.sort(key=lambda item: item.score, reverse=True)
 		return reranked[:top_k]
 
 
 class LLMReranker:
-	"""LLM scoring fallback for retrieval candidates.
-中文：此文档说明相关引擎组件的行为。"""
+	"""LLM scoring fallback for retrieval candidates. 使用模型为候选检索结果评分。"""
 
 	def __init__(self, utility_model: Any, max_chars_per_doc: int = 700) -> None:
 		self.utility_model = utility_model
@@ -233,23 +246,24 @@ class LLMReranker:
 		for idx, score in scores:
 			if 0 <= idx < len(results):
 				result = results[idx]
-				scored.append(RetrievalResult(
-					id=result.id,
-					text=result.text,
-					score=float(score),
-					retrieval=f"{result.retrieval}+llm_rerank",
-					source=result.source,
-					metadata=result.metadata,
-					citation=result.citation,
-					highlights=result.highlights,
-				))
+				scored.append(
+					RetrievalResult(
+						id=result.id,
+						text=result.text,
+						score=float(score),
+						retrieval=f"{result.retrieval}+llm_rerank",
+						source=result.source,
+						metadata=result.metadata,
+						citation=result.citation,
+						highlights=result.highlights,
+					)
+				)
 		scored.sort(key=lambda item: item.score, reverse=True)
 		return scored[:top_k]
 
 
 class CascadeReranker:
-	"""Run rerankers in order; configured reranker failures are fatal.
-中文：此文档说明相关引擎组件的行为。"""
+	"""Run rerankers in order; configured reranker failures are fatal. 依次执行重排器，已配置的重排器失败时上报错误。"""
 
 	def __init__(self, rerankers: list[Reranker]) -> None:
 		self.rerankers = rerankers
@@ -263,16 +277,14 @@ class CascadeReranker:
 
 
 class NoopQueryRewriter:
-	"""Default query rewriter that preserves the original query.
-中文：此文档说明相关引擎组件的行为。"""
+	"""Default query rewriter that preserves the original query. 保留原查询的默认改写器。"""
 
 	async def rewrite(self, query: str, max_queries: int = 4) -> list[str]:
 		return [query] if query else []
 
 
 class LLMQueryRewriter:
-	"""LLM-based query expansion for better recall.
-中文：此文档说明相关引擎组件的行为。"""
+	"""LLM-based query expansion for better recall. 使用模型扩展查询以提高召回率。"""
 
 	def __init__(self, utility_model: Any) -> None:
 		self.utility_model = utility_model
@@ -294,8 +306,7 @@ class LLMQueryRewriter:
 
 
 class InMemoryKnowledgeIndexStore:
-	"""No-database knowledge index with BM25, optional embeddings, and hybrid search.
-中文：此文档说明相关引擎组件的行为。"""
+	"""No-database knowledge index with BM25, optional embeddings, and hybrid search. 支持 BM25、可选向量和混合搜索的内存知识索引。"""
 
 	def __init__(
 		self,
@@ -311,8 +322,7 @@ class InMemoryKnowledgeIndexStore:
 		self._bm25 = BM25Index()
 
 	def set_documents(self, documents: list[KnowledgeDocument], embeddings: list[list[float]] | None = None) -> None:
-		"""Replace indexed documents without requiring async embedding calls.
-中文：此文档说明相关引擎组件的行为。"""
+		"""Replace indexed documents without requiring async embedding calls. 替换索引文档，无需异步生成向量。"""
 		self._documents = {doc.id: doc for doc in documents}
 		self._embeddings = {}
 		if embeddings:
@@ -321,15 +331,18 @@ class InMemoryKnowledgeIndexStore:
 		self._rebuild()
 
 	def set_document_embedding(self, doc_id: str, embedding: list[float]) -> None:
-		"""Set or replace one document embedding.
-中文：此文档说明相关引擎组件的行为。"""
+		"""Set or replace one document embedding. 设置或替换单个文档的向量。"""
 		if doc_id in self._documents:
 			self._embeddings[doc_id] = list(embedding)
 
-	async def add_documents(self, documents: list[KnowledgeDocument], embeddings: list[list[float]] | None = None) -> None:
+	async def add_documents(
+		self, documents: list[KnowledgeDocument], embeddings: list[list[float]] | None = None
+	) -> None:
 		await self.upsert_documents(documents, embeddings=embeddings)
 
-	async def upsert_documents(self, documents: list[KnowledgeDocument], embeddings: list[list[float]] | None = None) -> None:
+	async def upsert_documents(
+		self, documents: list[KnowledgeDocument], embeddings: list[list[float]] | None = None
+	) -> None:
 		for doc in documents:
 			self._documents[doc.id] = doc
 		if embeddings:
@@ -394,12 +407,11 @@ class InMemoryKnowledgeIndexStore:
 			if score > 0:
 				scored.append((score, doc))
 		scored.sort(key=lambda item: item[0], reverse=True)
-		return [
-			_result_from_doc(doc, score, "vector", query)
-			for score, doc in scored[:top_k]
-		]
+		return [_result_from_doc(doc, score, "vector", query) for score, doc in scored[:top_k]]
 
-	async def search(self, request: KnowledgeSearchRequest | str, top_k: int = 5, candidate_k: int = 30) -> list[RetrievalResult]:
+	async def search(
+		self, request: KnowledgeSearchRequest | str, top_k: int = 5, candidate_k: int = 30
+	) -> list[RetrievalResult]:
 		return (await self.search_with_trace(request, top_k=top_k, candidate_k=candidate_k)).results
 
 	async def search_with_trace(
@@ -421,31 +433,8 @@ class InMemoryKnowledgeIndexStore:
 		self._bm25.build(list(self._documents.values()))
 
 
-class BM25Index:
-	"""Small dependency-free BM25 index.
-中文：此文档说明相关引擎组件的行为。"""
-
-	def __init__(self, documents: list[KnowledgeDocument] | None = None) -> None:
-		self.documents: list[KnowledgeDocument] = []
-		self._doc_terms: list[Counter] = []
-		self._doc_freq: Counter = Counter()
-		self._avg_dl = 1.0
-		if documents:
-			self.build(documents)
-
-	def build(self, documents: list[KnowledgeDocument]) -> None:
-		self.documents = list(documents)
-		self._doc_terms = []
-		self._doc_freq = Counter()
-		total_dl = 0
-		for doc in self.documents:
-			terms = tokenize(doc.text)
-			counter = Counter(terms)
-			self._doc_terms.append(counter)
-			total_dl += len(terms)
-			for term in set(terms):
-				self._doc_freq[term] += 1
-		self._avg_dl = total_dl / len(self.documents) if self.documents else 1.0
+class BM25Index(BM25Corpus[KnowledgeDocument]):
+	"""Small dependency-free BM25 index. 无外部依赖的内存 BM25 索引。"""
 
 	def search(
 		self,
@@ -453,38 +442,14 @@ class BM25Index:
 		top_k: int = 30,
 		filters: KnowledgeFilter | dict[str, Any] | None = None,
 	) -> list[RetrievalResult]:
-		query_terms = tokenize(query)
-		if not query_terms or not self.documents:
-			return []
-		knowledge_filter = normalize_filter(filters)
-		n_docs = len(self.documents)
-		k1, b = 1.5, 0.75
-		scored: list[tuple[float, int]] = []
-		for idx, counter in enumerate(self._doc_terms):
-			if not knowledge_filter.matches(self.documents[idx]):
-				continue
-			score = 0.0
-			dl = sum(counter.values()) or 1
-			for term in query_terms:
-				df = self._doc_freq.get(term, 0)
-				if not df:
-					continue
-				idf = math.log((n_docs - df + 0.5) / (df + 0.5) + 1.0)
-				tf = counter.get(term, 0)
-				score += idf * ((tf * (k1 + 1)) / (tf + k1 * (1 - b + b * dl / self._avg_dl)))
-			if score > 0:
-				scored.append((score, idx))
-		scored.sort(key=lambda item: item[0], reverse=True)
-		results = []
-		for score, idx in scored[:top_k]:
-			doc = self.documents[idx]
-			results.append(_result_from_doc(doc, score, "bm25", query))
-		return results
+		matches = normalize_filter(filters).matches
+		return [
+			_result_from_doc(doc, score, "bm25", query) for score, doc in self.rank(tokenize(query), top_k, matches)
+		]
 
 
 class HybridRetriever:
-	"""BM25 + vector + optional rerank retrieval pipeline.
-中文：此文档说明相关引擎组件的行为。"""
+	"""BM25 + vector + optional rerank retrieval pipeline. 集成 BM25、向量召回和可选重排的检索流程。"""
 
 	def __init__(
 		self,
@@ -499,7 +464,9 @@ class HybridRetriever:
 		self.reranker = reranker
 		self.query_rewriter = query_rewriter
 
-	async def search(self, query: KnowledgeSearchRequest | str, top_k: int = 5, candidate_k: int = 30) -> list[RetrievalResult]:
+	async def search(
+		self, query: KnowledgeSearchRequest | str, top_k: int = 5, candidate_k: int = 30
+	) -> list[RetrievalResult]:
 		return (await self.search_with_trace(query, top_k=top_k, candidate_k=candidate_k)).results
 
 	async def search_with_trace(
@@ -529,21 +496,24 @@ class HybridRetriever:
 			if reranked_results:
 				reranked = True
 				merged = reranked_results
-		results = merged[:request.top_k]
-		trace = RetrievalTrace(
-			query=request.query,
-			rewritten_queries=queries,
-			candidate_count=candidate_count,
-			returned_count=len(results),
-			filtered=request.filters != KnowledgeFilter(),
-			reranked=reranked,
-		) if request.include_trace else None
+		results = merged[: request.top_k]
+		trace = (
+			RetrievalTrace(
+				query=request.query,
+				rewritten_queries=queries,
+				candidate_count=candidate_count,
+				returned_count=len(results),
+				filtered=request.filters != KnowledgeFilter(),
+				reranked=reranked,
+			)
+			if request.include_trace
+			else None
+		)
 		return KnowledgeSearchResponse(results=results, trace=trace)
 
 
 def rrf_merge(*ranked_lists: list[RetrievalResult], top_k: int = 10, k: int = 60) -> list[RetrievalResult]:
-	"""Reciprocal rank fusion.
-中文：此文档说明相关引擎组件的行为。"""
+	"""Reciprocal rank fusion. 倒数排名融合。"""
 	scores: dict[str, float] = {}
 	items: dict[str, RetrievalResult] = {}
 	retrievals: dict[str, set[str]] = {}
@@ -557,33 +527,43 @@ def rrf_merge(*ranked_lists: list[RetrievalResult], top_k: int = 10, k: int = 60
 		item = items[item_id]
 		labels = retrievals.get(item_id, set())
 		retrieval = "hybrid" if len(labels) > 1 or "vector" in labels else item.retrieval
-		results.append(RetrievalResult(
-			id=item.id,
-			text=item.text,
-			source=item.source,
-			score=score,
-			retrieval=retrieval,
-			metadata=item.metadata,
-			citation=item.citation,
-			highlights=item.highlights,
-		))
+		results.append(
+			RetrievalResult(
+				id=item.id,
+				text=item.text,
+				source=item.source,
+				score=score,
+				retrieval=retrieval,
+				metadata=item.metadata,
+				citation=item.citation,
+				highlights=item.highlights,
+			)
+		)
 	return results
 
 
-def normalize_filter(filters: KnowledgeFilter | dict[str, Any] | None) -> KnowledgeFilter:
-	if filters is None:
-		return KnowledgeFilter()
+def normalize_filter(filters: KnowledgeFilter | dict[str, Any] | None, namespace: str = "") -> KnowledgeFilter:
 	if isinstance(filters, KnowledgeFilter):
+		if namespace and not filters.namespace:
+			return replace(filters, namespace=namespace)
 		return filters
-	metadata = dict(filters.get("metadata", {})) if isinstance(filters.get("metadata"), dict) else {}
-	for key, value in filters.items():
+	if filters is None:
+		return KnowledgeFilter(namespace=namespace)
+	if not isinstance(filters, dict):
+		raise TypeError("knowledge filters must be an object")
+	metadata = filters.get("metadata", {})
+	if not isinstance(metadata, dict):
+		raise TypeError("knowledge filters.metadata must be an object")
+	metadata = metadata.copy()
+	tags = filters.get("allowed_acl_tags", filters.get("acl_tags", []))
+	for key, item in filters.items():
 		if key not in {"namespace", "source", "source_prefix", "acl_tags", "allowed_acl_tags", "metadata"}:
-			metadata[key] = value
+			metadata[key] = item
 	return KnowledgeFilter(
-		namespace=str(filters.get("namespace") or ""),
+		namespace=str(filters.get("namespace") or namespace or ""),
 		source=str(filters.get("source") or ""),
 		source_prefix=str(filters.get("source_prefix") or ""),
-		allowed_acl_tags=[str(item) for item in filters.get("allowed_acl_tags", filters.get("acl_tags", []))],
+		allowed_acl_tags=tags,
 		metadata=metadata,
 	)
 
@@ -617,7 +597,17 @@ def _citation_for(doc: KnowledgeDocument) -> dict[str, Any]:
 		"source": doc.source or metadata.get("source", ""),
 		"chunk_id": metadata.get("chunk_id", doc.id),
 	}
-	for key in ("document_id", "title", "url", "page", "start_line", "end_line", "heading_path", "version", "updated_at"):
+	for key in (
+		"document_id",
+		"title",
+		"url",
+		"page",
+		"start_line",
+		"end_line",
+		"heading_path",
+		"version",
+		"updated_at",
+	):
 		if key in metadata and metadata[key] not in ("", None):
 			citation[key] = metadata[key]
 	return citation
@@ -641,19 +631,6 @@ def _highlights(query: str, text: str, max_items: int = 3, window: int = 80) -> 
 		if len(highlights) >= max_items:
 			break
 	return highlights
-
-
-def tokenize(text: str) -> list[str]:
-	"""Tokenize Chinese, English, numbers, and identifiers.
-中文：此文档说明相关引擎组件的行为。"""
-	text = text.lower()
-	tokens: list[str] = []
-	tokens.extend(re.findall(r"[a-z_][a-z0-9_]*", text))
-	tokens.extend(re.findall(r"\d+", text))
-	for word in re.findall(r"[\u4e00-\u9fff]+", text):
-		tokens.extend(list(word))
-		tokens.extend(word[i:i + 2] for i in range(len(word) - 1))
-	return [token for token in tokens if token]
 
 
 def _parse_rerank_scores(data: Any, size: int) -> list[tuple[int, float]]:
@@ -685,7 +662,7 @@ def _rerank_prompt(query: str, results: list[RetrievalResult], max_chars: int) -
 		docs.append(f"{idx}. {text}")
 	return (
 		"请按 0 到 1 给每个文档与问题的相关性打分。"
-		"只返回 JSON 数组，每项格式为 {\"index\": number, \"score\": number}。\n"
+		'只返回 JSON 数组，每项格式为 {"index": number, "score": number}。\n'
 		f"问题：{query}\n文档：\n" + "\n".join(docs)
 	)
 
@@ -700,7 +677,7 @@ def _parse_llm_scores(content: str, size: int) -> list[tuple[int, float]]:
 	start = text.find("[")
 	end = text.rfind("]")
 	if start >= 0 and end > start:
-		text = text[start:end + 1]
+		text = text[start : end + 1]
 	try:
 		return _parse_rerank_scores(json.loads(text), size)
 	except (json.JSONDecodeError, TypeError):
@@ -717,7 +694,7 @@ def _parse_query_array(content: str) -> list[str]:
 	start = text.find("[")
 	end = text.rfind("]")
 	if start >= 0 and end > start:
-		text = text[start:end + 1]
+		text = text[start : end + 1]
 	try:
 		raw = json.loads(text)
 	except (json.JSONDecodeError, TypeError):

@@ -1,4 +1,5 @@
 """Tests for sidecar AgentOps utilities."""
+
 from __future__ import annotations
 
 from axc_agent_engine.sidecar import (
@@ -18,16 +19,26 @@ from axc_agent_engine.sidecar import (
 
 
 def test_agent_selector_prefers_capable_high_quality_agent():
-	selector = AgentSelector([
-		AgentProfile(name="cheap", description="general assistant", capabilities={"chat"}, quality_score=0.6),
-		AgentProfile(name="security", description="security analysis and red team", capabilities={"security", "audit"}, tags={"risk"}, quality_score=0.9),
-	])
+	selector = AgentSelector(
+		[
+			AgentProfile(name="cheap", description="general assistant", capabilities={"chat"}, quality_score=0.6),
+			AgentProfile(
+				name="security",
+				description="security analysis and red team",
+				capabilities={"security", "audit"},
+				tags={"risk"},
+				quality_score=0.9,
+			),
+		]
+	)
 
-	best = selector.best(SelectionRequest(
-		task="security audit for plugin sandbox",
-		required_capabilities={"security"},
-		preferred_tags={"risk"},
-	))
+	best = selector.best(
+		SelectionRequest(
+			task="security audit for plugin sandbox",
+			required_capabilities={"security"},
+			preferred_tags={"risk"},
+		)
+	)
 
 	assert best is not None
 	assert best.agent.name == "security"
@@ -123,8 +134,18 @@ def test_cost_optimizer_estimates_and_flags_large_uncompressed_context():
 	estimator = CostEstimator(prices={"big": ModelPrice(input_per_1k=0.01, output_per_1k=0.03)})
 	builder = CostReportBuilder(estimator)
 	samples = [
-		CostSample(sample_id="c1", agent_name="agent", model="big", input_tokens=9000, output_tokens=1000, duration_ms=40000, compressed=False),
-		CostSample(sample_id="c2", agent_name="agent", model="big", input_tokens=1000, output_tokens=500, success=False),
+		CostSample(
+			sample_id="c1",
+			agent_name="agent",
+			model="big",
+			input_tokens=9000,
+			output_tokens=1000,
+			duration_ms=40000,
+			compressed=False,
+		),
+		CostSample(
+			sample_id="c2", agent_name="agent", model="big", input_tokens=1000, output_tokens=500, success=False
+		),
 	]
 
 	report = builder.build(samples)

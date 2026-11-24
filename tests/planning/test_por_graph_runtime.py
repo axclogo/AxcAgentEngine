@@ -12,7 +12,7 @@ class RecordingPORService:
 
 	async def announce_plan(self, state: PORGraphState) -> None:
 		self.calls.append("announce")
-		state.events.append(Event(type=EventType.PLAN_CREATED, content=state.plan.goal))
+		state.emit(Event(type=EventType.PLAN_CREATED, content=state.plan.goal))
 
 	async def select_steps(self, state: PORGraphState) -> None:
 		self.calls.append("select")
@@ -21,19 +21,19 @@ class RecordingPORService:
 	async def execute_step(self, state: PORGraphState) -> None:
 		self.calls.append("execute_step")
 		state.step_result = "step-result"
-		state.events.append(Event(type=EventType.STEP_START, step_id=state.current_step.step_id))
+		state.emit(Event(type=EventType.STEP_START, step_id=state.current_step.step_id))
 
 	async def observe_step(self, state: PORGraphState) -> None:
 		self.calls.append("observe")
-		state.events.append(Event(type=EventType.STEP_COMPLETED, step_id=state.current_step.step_id, content=state.step_result))
+		state.emit(Event(type=EventType.STEP_COMPLETED, step_id=state.current_step.step_id, content=state.step_result))
 
 	async def replan_step(self, state: PORGraphState) -> None:
 		self.calls.append("replan")
-		state.events.append(Event.done("done"))
+		state.emit(Event.done("done"))
 
 	async def finalize_plan(self, state: PORGraphState) -> PORGraphResult:
 		self.calls.append("finalize")
-		return PORGraphResult(events=state.events)
+		return PORGraphResult()
 
 
 async def test_por_graph_runtime_runs_explicit_plan_nodes():

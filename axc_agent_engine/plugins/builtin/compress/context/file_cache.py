@@ -1,5 +1,5 @@
-"""Recently read file cache used after context compression.
-中文：此文档说明相关引擎组件的行为。"""
+"""Recently read file cache used after context compression. 压缩上下文后使用的近期文件缓存。"""
+
 from __future__ import annotations
 
 import time
@@ -11,8 +11,7 @@ from axc_agent_engine.tools.tool_output import ToolOutput
 
 @dataclass
 class FileCacheEntry:
-	"""One bounded file-read snapshot preserved across compression.
-中文：此文档说明相关引擎组件的行为。"""
+	"""One bounded file-read snapshot preserved across compression. 跨压缩保留的一份有界文件读取快照。"""
 
 	path: str
 	text: str
@@ -36,7 +35,7 @@ class FileCacheEntry:
 		}
 
 	@classmethod
-	def from_dict(cls, data: dict[str, Any]) -> "FileCacheEntry":
+	def from_dict(cls, data: dict[str, Any]) -> FileCacheEntry:
 		return cls(
 			path=str(data.get("path") or ""),
 			text=str(data.get("text") or ""),
@@ -50,8 +49,7 @@ class FileCacheEntry:
 
 
 class FileReadCache:
-	"""Bounded in-memory file snapshots persisted by CompressionBoundary.
-中文：此文档说明相关引擎组件的行为。"""
+	"""Bounded in-memory file snapshots persisted by CompressionBoundary. 随压缩边界保存的有界文件快照集合。"""
 
 	def __init__(self, max_files: int = 5) -> None:
 		self.max_files = max(0, int(max_files))
@@ -92,7 +90,7 @@ class FileReadCache:
 
 	def _trim(self) -> None:
 		if self.max_files > 0 and len(self._entries) > self.max_files:
-			self._entries = self._entries[-self.max_files:]
+			self._entries = self._entries[-self.max_files :]
 
 
 def _entry_from_output(arguments: dict[str, Any], output: ToolOutput) -> FileCacheEntry | None:

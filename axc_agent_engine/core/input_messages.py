@@ -1,5 +1,6 @@
 """Input message normalization helpers.
 中文：输入消息归一化辅助函数。"""
+
 from __future__ import annotations
 
 from typing import Any
@@ -16,7 +17,7 @@ def extract_last_user_message(messages: list[dict]) -> str:
 
 def content_to_text(content: Any) -> str:
 	"""Extract textual goal from string or OpenAI-compatible multimodal content.
-中文：从字符串或 OpenAI 兼容多模态内容中提取文本目标。"""
+	中文：从字符串或 OpenAI 兼容多模态内容中提取文本目标。"""
 	if isinstance(content, str):
 		return content
 	if isinstance(content, list):
@@ -37,7 +38,7 @@ def normalize_multimodal_messages(messages: list[dict[str, Any]]) -> list[dict[s
 def normalize_content_parts(content: Any) -> Any:
 	if not isinstance(content, list):
 		return content
-	parts = []
+	parts: list[dict[str, Any]] = []
 	for part in content:
 		if not isinstance(part, dict):
 			raise TypeError("message content part must be an object")

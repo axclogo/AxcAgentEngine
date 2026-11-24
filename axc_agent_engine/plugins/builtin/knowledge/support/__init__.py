@@ -1,5 +1,5 @@
-"""Knowledge retrieval primitives.
-中文：此文档说明相关引擎组件的行为。"""
+"""Knowledge retrieval primitives. 知识检索基础接口。"""
+
 from axc_agent_engine.plugins.builtin.knowledge.support.chunker import Chunk, SemanticChunker
 from axc_agent_engine.plugins.builtin.knowledge.support.ingestion import (
 	DocumentParser,
@@ -16,8 +16,8 @@ from axc_agent_engine.plugins.builtin.knowledge.support.retrieval import (
 	HashEmbeddingClient,
 	HybridRetriever,
 	InMemoryKnowledgeIndexStore,
-	KnowledgeFilter,
 	KnowledgeDocument,
+	KnowledgeFilter,
 	KnowledgeIndexStore,
 	KnowledgeSearchRequest,
 	KnowledgeSearchResponse,
@@ -40,10 +40,10 @@ __all__ = [
 	"EmbeddingClient",
 	"HashEmbeddingClient",
 	"HybridRetriever",
-	"IngestionResult",
 	"InMemoryKnowledgeIndexStore",
-	"KnowledgeFilter",
+	"IngestionResult",
 	"KnowledgeDocument",
+	"KnowledgeFilter",
 	"KnowledgeIndexStore",
 	"KnowledgeSearchRequest",
 	"KnowledgeSearchResponse",

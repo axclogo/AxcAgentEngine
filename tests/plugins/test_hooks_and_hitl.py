@@ -10,17 +10,32 @@ from axc_agent_engine.tools.tool_output import ToolOutput
 
 async def test_hooks_pre_tool_transform_reject_and_llm_filters():
 	plugin = HooksPlugin()
-	plugin.initialize({"rules": [
-		{"event": "pre_tool_call", "condition": "tool_name == 'write'", "action": "transform", "params": {"set": {"safe": True}}},
-		{"event": "pre_tool_call", "condition": "arguments.get('block') == True", "action": "reject", "params": {"message": "no"}},
-		{"event": "pre_llm_call", "action": "inject", "params": {"content": "ctx"}},
-		{"event": "pre_llm_call", "action": "filter_tools", "params": {"allowed": ["keep"]}},
-	]}, None)
+	plugin.initialize(
+		{
+			"rules": [
+				{
+					"event": "pre_tool_call",
+					"condition": "tool_name == 'write'",
+					"action": "transform",
+					"params": {"set": {"safe": True}},
+				},
+				{
+					"event": "pre_tool_call",
+					"condition": "arguments.get('block') == True",
+					"action": "reject",
+					"params": {"message": "no"},
+				},
+				{"event": "pre_llm_call", "action": "inject", "params": {"content": "ctx"}},
+				{"event": "pre_llm_call", "action": "filter_tools", "params": {"allowed": ["keep"]}},
+			]
+		},
+		None,
+	)
 	allowed, args = await plugin.pre_tool_call(ExecutionContext(), "write", {"x": 1})
 	assert allowed is True
 	assert args["safe"] is True
-	allowed, _ = await plugin.pre_tool_call(ExecutionContext(), "read", {"block": True})
-	assert allowed is False
+	decision = await plugin.pre_tool_call(ExecutionContext(), "read", {"block": True})
+	assert not decision.allowed
 	messages, tools = plugin.pre_llm_call(
 		ExecutionContext(),
 		[{"role": "user", "content": "hi"}],
@@ -33,12 +48,17 @@ async def test_hooks_pre_tool_transform_reject_and_llm_filters():
 async def test_hooks_notify_error_plan_step_and_post_tool():
 	payloads = []
 	plugin = HooksPlugin()
-	plugin.initialize({"rules": [
-		{"event": "on_error", "action": "notify", "params": {"callback": payloads.append}},
-		{"event": "on_plan_created", "action": "notify", "params": {"callback": payloads.append}},
-		{"event": "on_step_completed", "action": "notify", "params": {"callback": payloads.append}},
-		{"event": "post_tool_call", "condition": "result.startswith('ok')", "action": "log"},
-	]}, None)
+	plugin.initialize(
+		{
+			"rules": [
+				{"event": "on_error", "action": "notify", "params": {"callback": payloads.append}},
+				{"event": "on_plan_created", "action": "notify", "params": {"callback": payloads.append}},
+				{"event": "on_step_completed", "action": "notify", "params": {"callback": payloads.append}},
+				{"event": "post_tool_call", "condition": "result.startswith('ok')", "action": "log"},
+			]
+		},
+		None,
+	)
 	await plugin.on_error(ExecutionContext(), RuntimeError("boom"))
 	await plugin.on_plan_created(ExecutionContext(), {"goal": "g"})
 	await plugin.on_step_completed(ExecutionContext(), {"step_id": 1})
@@ -49,13 +69,18 @@ async def test_hooks_notify_error_plan_step_and_post_tool():
 
 async def test_hooks_fail_fast_notify_and_condition_edges():
 	plugin = HooksPlugin()
-	plugin.initialize({"rules": [
-		{"event": "pre_llm_call", "condition": "False", "action": "inject", "params": {"content": "hidden"}},
-		{"event": "on_error", "action": "log"},
-		{"event": "on_plan_created", "action": "log"},
-		{"event": "on_step_completed", "action": "log"},
-		{"event": "post_tool_call", "condition": "False", "action": "log"},
-	]}, None)
+	plugin.initialize(
+		{
+			"rules": [
+				{"event": "pre_llm_call", "condition": "False", "action": "inject", "params": {"content": "hidden"}},
+				{"event": "on_error", "action": "log"},
+				{"event": "on_plan_created", "action": "log"},
+				{"event": "on_step_completed", "action": "log"},
+				{"event": "post_tool_call", "condition": "False", "action": "log"},
+			]
+		},
+		None,
+	)
 	messages, tools = plugin.pre_llm_call(ExecutionContext(), [{"role": "user", "content": "x"}], [])
 	assert messages == [{"role": "user", "content": "x"}]
 	assert tools == []
@@ -80,7 +105,9 @@ async def test_hooks_fail_fast_notify_and_condition_edges():
 
 
 def test_safe_eval_condition_supported_and_rejected_paths():
-	assert _safe_eval_condition("tool_name.startswith('r') and arguments['x'] in [1, 2]", {"tool_name": "read", "arguments": {"x": 1}})
+	assert _safe_eval_condition(
+		"tool_name.startswith('r') and arguments['x'] in [1, 2]", {"tool_name": "read", "arguments": {"x": 1}}
+	)
 	assert _safe_eval_condition("not False", {})
 	with pytest.raises(ValueError, match="too long"):
 		_safe_eval_condition("x" * 501, {})
@@ -99,8 +126,8 @@ async def test_hitl_tools_auto_approval_reject_and_ask_human():
 	assert allowed is True
 
 	ctx = ExecutionContext()
-	allowed, _ = await plugin.pre_tool_call(ctx, "shell_command", {"command": "rm -rf /"})
-	assert allowed is False
+	decision = await plugin.pre_tool_call(ctx, "shell_command", {"command": "rm -rf /"})
+	assert not decision.allowed
 
 	request_q = asyncio.Queue()
 	response_q = asyncio.Queue()
@@ -138,22 +165,24 @@ async def test_hitl_queue_rejection_timeout_listener_and_resolve_paths():
 	ctx = ExecutionContext()
 	ctx.runtime.approval_queue = asyncio.Queue()
 
-	allowed, _ = await plugin.pre_tool_call(ctx, "shell_command", {"command": "rm -rf /"})
-	assert allowed is False
-	assert plugin._last_rejection_code == "tool.rejected_by_human_in_the_loop"
+	decision = await plugin.pre_tool_call(ctx, "shell_command", {"command": "rm -rf /"})
+	assert not decision.allowed
+	assert decision.code == "tool.rejected_by_human_in_the_loop"
 
 	plugin.initialize({"timeout": 1}, None)
 	ctx.runtime.approval_queue = asyncio.Queue()
 
 	async def reject():
 		req = await ctx.runtime.approval_queue.get()
-		await ctx.runtime.approval_queue.put({"type": "response", "request_id": req["request_id"], "approved": False, "reason": "no"})
+		await ctx.runtime.approval_queue.put(
+			{"type": "response", "request_id": req["request_id"], "approved": False, "reason": "no"}
+		)
 
 	task = asyncio.create_task(reject())
-	allowed, _ = await plugin.pre_tool_call(ctx, "shell_command", {"command": "rm file"})
+	decision = await plugin.pre_tool_call(ctx, "shell_command", {"command": "rm file"})
 	await task
-	assert allowed is False
-	assert plugin._last_rejection_reason == "no"
+	assert not decision.allowed
+	assert decision.reason == "no"
 
 	future = asyncio.get_running_loop().create_future()
 	plugin._pending_approvals["manual"] = future
@@ -167,6 +196,22 @@ async def test_hitl_ask_human_timeout():
 	plugin.initialize({"timeout": 0.01}, None)
 	request_q = asyncio.Queue()
 	response_q = asyncio.Queue()
-	result = await plugin._ask_human({"question": "Continue?"}, {"request_queue": request_q, "response_queue": response_q})
+	result = await plugin._ask_human(
+		{"question": "Continue?"}, {"request_queue": request_q, "response_queue": response_q}
+	)
 	assert result.is_error
 	assert (await request_q.get())["question"] == "Continue?"
+
+
+async def test_approval_rejects_text_false_at_host_boundary():
+	plugin = HumanInTheLoopPlugin()
+	plugin.initialize({"timeout": 1}, None)
+	ctx = ExecutionContext()
+	ctx.runtime.approval_queue = asyncio.Queue()
+	task = asyncio.create_task(plugin.pre_tool_call(ctx, "shell_command", {"command": "rm file"}))
+	req = await ctx.runtime.approval_queue.get()
+	await ctx.runtime.approval_queue.put({"type": "response", "request_id": req["request_id"], "approved": "false"})
+	with pytest.raises(TypeError, match="boolean"):
+		await task
+	assert not plugin._pending_approvals
+	assert await plugin.pre_tool_call(ctx, "get_time", {}) == (True, {})

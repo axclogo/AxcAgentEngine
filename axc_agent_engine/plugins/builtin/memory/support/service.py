@@ -1,5 +1,5 @@
-"""Layered memory service.
-中文：此文档说明相关引擎组件的行为。"""
+"""Layered memory service. 分层记忆服务。"""
+
 from __future__ import annotations
 
 import hashlib
@@ -7,12 +7,17 @@ import json
 import math
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any, Protocol, runtime_checkable
 
 from axc_agent_engine.plugins.builtin.memory.support.graph import GraphMemory
-from axc_agent_engine.plugins.builtin.memory.support.retrieval import BM25Index, MemoryDocument, RetrievalResult, rrf_merge
+from axc_agent_engine.plugins.builtin.memory.support.retrieval import (
+	BM25Index,
+	MemoryDocument,
+	RetrievalResult,
+	rrf_merge,
+)
 
 
 class MemoryLayer(StrEnum):
@@ -31,7 +36,7 @@ class MemoryItem:
 	importance: float = 0.5
 	confidence: float = 0.8
 	source: str = ""
-	created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+	created_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
 	last_accessed_at: str = ""
 	access_count: int = 0
 	decay_score: float = 1.0
@@ -60,7 +65,7 @@ class MemoryItem:
 		}
 
 	@classmethod
-	def from_dict(cls, data: dict[str, Any]) -> "MemoryItem":
+	def from_dict(cls, data: dict[str, Any]) -> MemoryItem:
 		return cls(
 			id=str(data.get("id") or uuid.uuid4()),
 			layer=str(data.get("layer") or MemoryLayer.SEMANTIC),
@@ -69,7 +74,7 @@ class MemoryItem:
 			importance=float(data.get("importance", 0.5)),
 			confidence=float(data.get("confidence", 0.8)),
 			source=str(data.get("source") or ""),
-			created_at=str(data.get("created_at") or datetime.now(timezone.utc).isoformat()),
+			created_at=str(data.get("created_at") or datetime.now(UTC).isoformat()),
 			last_accessed_at=str(data.get("last_accessed_at") or ""),
 			access_count=int(data.get("access_count", 0)),
 			decay_score=float(data.get("decay_score", 1.0)),
@@ -80,8 +85,8 @@ class MemoryItem:
 
 @runtime_checkable
 class MemoryStore(Protocol):
-	"""Storage-neutral four-layer memory persistence.
-中文：此文档说明相关引擎组件的行为。"""
+	"""Storage-neutral four-layer memory persistence. 与存储后端无关的四层记忆持久化接口。"""
+
 	def add_item(self, item: MemoryItem) -> MemoryItem: ...
 	def get_item(self, item_id: str) -> MemoryItem | None: ...
 	def list_items(self, layer: str | None = None) -> list[MemoryItem]: ...
@@ -91,35 +96,36 @@ class MemoryStore(Protocol):
 
 @runtime_checkable
 class MemoryRetriever(Protocol):
-	"""Retrieves relevant memories from a store.
-中文：此文档说明相关引擎组件的行为。"""
+	"""Retrieves relevant memories from a store. 从存储中检索相关记忆。"""
+
 	def retrieve(self, topic: str = "", layer: str | None = None, top_k: int = 5) -> list[MemoryItem]: ...
 
 
 @runtime_checkable
 class FactExtractor(Protocol):
-	"""Extracts structured facts from model output or conversation text.
-中文：此文档说明相关引擎组件的行为。"""
+	"""Extracts structured facts from model output or conversation text. 从模型输出或对话文本抽取结构化事实。"""
+
 	def extract(self, text: str) -> list[dict[str, Any]]: ...
 
 
 @runtime_checkable
 class Deduplicator(Protocol):
-	"""Finds duplicate memory records.
-中文：此文档说明相关引擎组件的行为。"""
-	def find_duplicate(self, content: str, candidates: list[MemoryItem], layer: str | None = None) -> MemoryItem | None: ...
+	"""Finds duplicate memory records. 查找重复记忆。"""
+
+	def find_duplicate(
+		self, content: str, candidates: list[MemoryItem], layer: str | None = None
+	) -> MemoryItem | None: ...
 
 
 @runtime_checkable
 class GraphMemoryStore(Protocol):
-	"""Graph memory operations used by layered memory.
-中文：此文档说明相关引擎组件的行为。"""
+	"""Graph memory operations used by layered memory. 分层记忆使用的图操作。"""
+
 	def search(self, query: str, limit: int = 10) -> list[dict[str, Any]]: ...
 
 
 class InMemoryMemoryStore:
-	"""No-database MemoryStore fallback.
-中文：此文档说明相关引擎组件的行为。"""
+	"""No-database MemoryStore fallback. 无需数据库的记忆存储实现。"""
 
 	def __init__(self, items: list[MemoryItem] | None = None) -> None:
 		self._items: dict[str, MemoryItem] = {item.id: item for item in items or []}
@@ -148,16 +154,14 @@ class InMemoryMemoryStore:
 
 
 class JsonFactExtractor:
-	"""FactExtractor backed by the engine's JSON fact response parser.
-中文：此文档说明相关引擎组件的行为。"""
+	"""FactExtractor backed by the engine's JSON fact response parser. 使用引擎 JSON 响应解析器的事实抽取器。"""
 
 	def extract(self, text: str) -> list[dict[str, Any]]:
 		return parse_facts_response(text)
 
 
 class SimilarityDeduplicator:
-	"""Character-shingle deduplicator used by the fallback memory service.
-中文：此文档说明相关引擎组件的行为。"""
+	"""Character-shingle deduplicator used by the fallback memory service. 按字符片段判重的记忆服务。"""
 
 	def __init__(self, threshold: float = 0.85) -> None:
 		self.threshold = threshold
@@ -172,14 +176,17 @@ class SimilarityDeduplicator:
 
 
 class MemoryService:
-	"""Four-layer memory with deduplication, decay, BM25 retrieval, and graph hooks.
-中文：此文档说明相关引擎组件的行为。"""
+	"""Four-layer memory with deduplication, decay, BM25 retrieval, and graph hooks. 具有去重、衰减、BM25 检索和图钩子的四层记忆。"""
 
-	def __init__(self, dedup_threshold: float = 0.85, decay_half_life_days: int = 7,
-				 graph: GraphMemory | None = None,
-				 store: MemoryStore | None = None,
-				 deduplicator: Deduplicator | None = None,
-				 fact_extractor: FactExtractor | None = None) -> None:
+	def __init__(
+		self,
+		dedup_threshold: float = 0.85,
+		decay_half_life_days: int = 7,
+		graph: GraphMemory | None = None,
+		store: MemoryStore | None = None,
+		deduplicator: Deduplicator | None = None,
+		fact_extractor: FactExtractor | None = None,
+	) -> None:
 		self.dedup_threshold = dedup_threshold
 		self.decay_half_life_days = max(1, decay_half_life_days)
 		self.graph = graph or GraphMemory()
@@ -204,10 +211,16 @@ class MemoryService:
 		for item in value:
 			self.store.add_item(item)
 
-	def add(self, content: str, layer: str = MemoryLayer.SEMANTIC,
-			fact_type: str = "fact", importance: float = 0.5,
-			confidence: float = 0.8, source: str = "",
-			metadata: dict[str, Any] | None = None) -> MemoryItem:
+	def add(
+		self,
+		content: str,
+		layer: str = MemoryLayer.SEMANTIC,
+		fact_type: str = "fact",
+		importance: float = 0.5,
+		confidence: float = 0.8,
+		source: str = "",
+		metadata: dict[str, Any] | None = None,
+	) -> MemoryItem:
 		content = content.strip()
 		if not content:
 			raise ValueError("memory content cannot be empty")
@@ -236,7 +249,7 @@ class MemoryService:
 		existing.importance = max(existing.importance, _normalize_importance(new_importance))
 		existing.confidence = min(existing.confidence + 0.05, 1.0)
 		existing.access_count += 1
-		existing.last_accessed_at = datetime.now(timezone.utc).isoformat()
+		existing.last_accessed_at = datetime.now(UTC).isoformat()
 		self._dirty_layers.add(existing.layer)
 
 	def find_duplicate(self, content: str, layer: str | None = None) -> MemoryItem | None:
@@ -269,26 +282,29 @@ class MemoryService:
 				if not item:
 					continue
 				score = result.score + 0.3 * item.importance + 0.2 * item.decay_score
-				weighted.append(RetrievalResult(
-					id=result.id,
-					text=result.text,
-					score=score,
-					retrieval=result.retrieval,
-					source=result.source,
-					metadata=result.metadata,
-				))
+				weighted.append(
+					RetrievalResult(
+						id=result.id,
+						text=result.text,
+						score=score,
+						retrieval=result.retrieval,
+						source=result.source,
+						metadata=result.metadata,
+					)
+				)
 			merged_inputs.append(weighted)
 		graph_ids = [row.get("source_memory_id") for row in self.graph.search(query, limit=top_k * 2)]
 		graph_results = [
 			RetrievalResult(id=str(memory_id), text="", score=1.0, retrieval="graph")
-			for memory_id in graph_ids if memory_id
+			for memory_id in graph_ids
+			if memory_id
 		]
 		if graph_results:
 			merged_inputs.append(graph_results)
 		return rrf_merge(*merged_inputs, top_k=top_k) if merged_inputs else []
 
 	def decay(self) -> None:
-		now = datetime.now(timezone.utc)
+		now = datetime.now(UTC)
 		for item in self.items:
 			if item.layer in (MemoryLayer.IDENTITY, MemoryLayer.LESSON):
 				item.decay_score = 1.0
@@ -303,7 +319,9 @@ class MemoryService:
 
 	def remove_decayed(self, threshold: float = 0.05) -> list[str]:
 		self.decay()
-		removed = [item.id for item in self.items if item.layer == MemoryLayer.EPISODIC and item.decay_score < threshold]
+		removed = [
+			item.id for item in self.items if item.layer == MemoryLayer.EPISODIC and item.decay_score < threshold
+		]
 		if removed:
 			self.items = [item for item in self.items if item.id not in set(removed)]
 			self._bm25.clear()
@@ -350,8 +368,11 @@ class MemoryService:
 	def _index_for(self, layer: str) -> BM25Index:
 		if layer not in self._bm25 or layer in self._dirty_layers:
 			docs = [
-				MemoryDocument(id=item.id, text=item.content, metadata={"layer": item.layer, "fact_type": item.fact_type})
-				for item in self.items if item.layer == layer
+				MemoryDocument(
+					id=item.id, text=item.content, metadata={"layer": item.layer, "fact_type": item.fact_type}
+				)
+				for item in self.items
+				if item.layer == layer
 			]
 			self._bm25[layer] = BM25Index(docs)
 			self._dirty_layers.discard(layer)
@@ -359,13 +380,12 @@ class MemoryService:
 
 	def _touch(self, item: MemoryItem) -> MemoryItem:
 		item.access_count += 1
-		item.last_accessed_at = datetime.now(timezone.utc).isoformat()
+		item.last_accessed_at = datetime.now(UTC).isoformat()
 		return item
 
 
 def parse_facts_response(text: str) -> list[dict[str, Any]]:
-	"""Parse JSON fact extraction responses.
-中文：此文档说明相关引擎组件的行为。"""
+	"""Parse JSON fact extraction responses. 解析事实抽取的 JSON 响应。"""
 	if not text:
 		return []
 	text = text.strip()
@@ -377,7 +397,7 @@ def parse_facts_response(text: str) -> list[dict[str, Any]]:
 	if start < 0 or end <= start:
 		return []
 	try:
-		raw = json.loads(text[start:end + 1])
+		raw = json.loads(text[start : end + 1])
 	except (json.JSONDecodeError, TypeError):
 		return []
 	if not isinstance(raw, list):
@@ -386,11 +406,13 @@ def parse_facts_response(text: str) -> list[dict[str, Any]]:
 	for item in raw:
 		if not isinstance(item, dict) or not item.get("content"):
 			continue
-		facts.append({
-			"type": item.get("type", "fact"),
-			"content": str(item["content"]).strip(),
-			"importance": _normalize_importance(item.get("importance", 0.5)),
-		})
+		facts.append(
+			{
+				"type": item.get("type", "fact"),
+				"content": str(item["content"]).strip(),
+				"importance": _normalize_importance(item.get("importance", 0.5)),
+			}
+		)
 	return facts
 
 
@@ -400,8 +422,8 @@ def char_similarity(a: str, b: str) -> float:
 	if len(a) < 2 or len(b) < 2:
 		set_a, set_b = set(a), set(b)
 	else:
-		set_a = {a[i:i + 2] for i in range(len(a) - 1)}
-		set_b = {b[i:i + 2] for i in range(len(b) - 1)}
+		set_a = {a[i : i + 2] for i in range(len(a) - 1)}
+		set_b = {b[i : i + 2] for i in range(len(b) - 1)}
 	union = len(set_a | set_b)
 	return len(set_a & set_b) / union if union else 0.0
 

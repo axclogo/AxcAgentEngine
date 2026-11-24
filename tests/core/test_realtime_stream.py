@@ -1,13 +1,16 @@
 """Tests for real-time streaming with standardized LLMStreamChunk/LLMResponse."""
+
 import asyncio
 import time
+
 import pytest
+
 from axc_agent_engine.core.context import ExecutionConfig, ExecutionContext, ExecutionState
+from axc_agent_engine.core.events import EventType
 from axc_agent_engine.core.executor import Executor
 from axc_agent_engine.core.llm_caller import LLMCaller
 from axc_agent_engine.core.plugin_manager import PluginManager
-from axc_agent_engine.core.events import EventType
-from axc_agent_engine.core.schema import LLMStreamChunk, LLMResponse, LLMMessage, LLMUsage
+from axc_agent_engine.core.schema import LLMMessage, LLMResponse, LLMStreamChunk, LLMUsage
 from axc_agent_engine.tools.registry import ToolRegistry
 
 
@@ -74,28 +77,37 @@ class TestRealtimeStream:
 			@property
 			def model(self):
 				return "primary"
+
 			async def stream(self, messages, tools=None, **kwargs):
 				yield LLMStreamChunk(content_delta="A")
 				raise httpx.NetworkError("broken after partial")
+
 			async def chat(self, messages, tools=None, **kwargs):
 				raise AssertionError("stream path expected")
+
 			async def ask(self, prompt, **kwargs):
 				return ""
+
 			async def close(self):
 				pass
 
 		class FallbackProvider:
 			called = False
+
 			@property
 			def model(self):
 				return "fallback"
+
 			async def stream(self, messages, tools=None, **kwargs):
 				FallbackProvider.called = True
 				yield LLMStreamChunk(content_delta="fallback")
+
 			async def chat(self, messages, tools=None, **kwargs):
 				raise AssertionError("stream path expected")
+
 			async def ask(self, prompt, **kwargs):
 				return ""
+
 			async def close(self):
 				pass
 
@@ -124,12 +136,16 @@ class TestRealtimeStream:
 			@property
 			def model(self):
 				return "test-sync"
+
 			async def chat(self, messages, tools=None, **kwargs):
 				return LLMResponse(message=LLMMessage(content="hello"), usage=LLMUsage(input_tokens=5, output_tokens=3))
+
 			async def stream(self, messages, tools=None, **kwargs):
 				raise AssertionError("should not be called")
+
 			async def ask(self, prompt, **kwargs):
 				return ""
+
 			async def close(self):
 				pass
 

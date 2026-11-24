@@ -1,8 +1,9 @@
-"""Runtime objects for tool orchestration.
-中文：此文档说明相关引擎组件的行为。"""
+"""Runtime objects for tool orchestration. 工具编排使用的运行时对象。"""
+
 from __future__ import annotations
 
 import asyncio
+import uuid
 from dataclasses import dataclass
 from typing import Any
 
@@ -13,8 +14,8 @@ from axc_agent_engine.tools.registry import ToolRegistry
 
 @dataclass
 class ToolCallRuntime:
-	"""English: This documentation describes the related engine component behavior.
-中文：单次工具调用的运行时上下文。"""
+	"""Runtime context for one tool call. 单次工具调用的运行时上下文。"""
+
 	name: str
 	arguments: dict
 	tool_call_id: str
@@ -33,7 +34,7 @@ def tool_runtime(tc: dict, ctx: ExecutionContext, registry: ToolRegistry) -> Too
 	return ToolCallRuntime(
 		name=name,
 		arguments=tc.get("arguments", {}),
-		tool_call_id=tc.get("id", ""),
+		tool_call_id=tc.get("id") or uuid.uuid4().hex,
 		actor=ctx.state.metadata.get("agent_name", ""),
 		session_id=ctx.state.metadata.get("session_id", ""),
 		tool_def=registry.get(name),
@@ -41,8 +42,7 @@ def tool_runtime(tc: dict, ctx: ExecutionContext, registry: ToolRegistry) -> Too
 
 
 def push_current_tool_runtime(ctx: ExecutionContext, runtime: ToolCallRuntime) -> int:
-	"""Store per-task tool metadata so observability plugins can correlate hooks safely.
-中文：此文档说明相关引擎组件的行为。"""
+	"""Store per-task tool metadata so observability plugins can correlate hooks safely. 按任务保存工具元数据，供观测插件关联钩子。"""
 	task = asyncio.current_task()
 	key = id(task) if task else id(runtime)
 	contexts = ctx.runtime.plugin_states.setdefault("_tool_runtime_contexts", {})

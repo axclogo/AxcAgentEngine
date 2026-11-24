@@ -1,4 +1,5 @@
 """LLM 配置。"""
+
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -8,6 +9,7 @@ from axc_agent_engine.tools.name_mapping import ToolNameMappingConfig
 @dataclass
 class LLMConfig:
 	"""LLM 连接配置。"""
+
 	base_url: str
 	api_key: str
 	model: str

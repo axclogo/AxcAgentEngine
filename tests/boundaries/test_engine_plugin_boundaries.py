@@ -1,10 +1,10 @@
 """Boundary tests for keeping optional capabilities out of the core package."""
+
 from __future__ import annotations
 
-import sys
 import subprocess
+import sys
 from pathlib import Path
-
 
 PLUGIN_ONLY_TOP_LEVELS = {
 	"eval",
@@ -34,12 +34,14 @@ import axc_agent_engine.engine  # noqa: F401
 loaded = [
     name for name in sys.modules
     if name.startswith('axc_agent_engine.plugins.builtin.')
+    or name.startswith('axc_agent_engine.plugins.strategies.')
+    or name.startswith('axc_agent_engine.planning')
     or name.startswith('axc_agent_engine.sidecar')
 ]
 if loaded:
     raise SystemExit('\\n'.join(sorted(loaded)))
 """
-	result = subprocess.run([sys.executable, "-c", code], cwd=ROOT, text=True, capture_output=True)
+	result = subprocess.run([sys.executable, "-c", code], cwd=ROOT, text=True, capture_output=True, check=False)
 
 	assert result.returncode == 0, result.stderr or result.stdout
 

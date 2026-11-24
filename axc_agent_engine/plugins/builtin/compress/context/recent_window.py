@@ -1,13 +1,12 @@
-"""L2 recent round window selection.
-中文：此文档说明相关引擎组件的行为。"""
+"""L2 recent round window selection. 第二层近期会话窗口选择。"""
+
 from __future__ import annotations
 
 from typing import Any
 
 
 def select_recent_window(messages: list[dict[str, Any]], rounds: int) -> list[dict[str, Any]]:
-	"""Keep system messages and the most recent N user rounds with tool pairs.
-中文：此文档说明相关引擎组件的行为。"""
+	"""Keep system messages and the most recent N user rounds with tool pairs. 保留系统消息、最近的用户轮次及配对工具结果。"""
 	if rounds <= 0:
 		return [m for m in messages if m.get("role") == "system"]
 	max_round = max((int(m.get("round", 0)) for m in messages), default=0)

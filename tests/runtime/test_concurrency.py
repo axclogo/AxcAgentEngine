@@ -1,17 +1,18 @@
 """Tests for engine-level concurrency controls."""
+
 import asyncio
 import time
 
 import pytest
 
 from axc_agent_engine.agent import Agent
+from axc_agent_engine.core.context import ExecutionServices
+from axc_agent_engine.core.errors import ExecutionTimeoutError
+from axc_agent_engine.core.schema import LLMMessage, LLMResponse, LLMUsage, RuntimeConfig
+from axc_agent_engine.engine import AgentModels, Engine
+from axc_agent_engine.llm.rate_limited import RateLimitedProvider
 from axc_agent_engine.runtime.checkpoint import Checkpoint, CheckpointStatus, InMemoryCheckpointStore
 from axc_agent_engine.runtime.concurrency import ConcurrencyConfig
-from axc_agent_engine.core.context import ExecutionServices
-from axc_agent_engine.engine import AgentModels, Engine
-from axc_agent_engine.core.errors import ExecutionTimeoutError
-from axc_agent_engine.llm.rate_limited import RateLimitedProvider
-from axc_agent_engine.core.schema import LLMMessage, LLMResponse, LLMUsage, RuntimeConfig
 
 
 class SlowProvider:
@@ -139,17 +140,19 @@ async def test_resume_stream_uses_session_gate():
 	provider = SlowProvider()
 	store = InMemoryCheckpointStore()
 	for run_id in ("r1", "r2"):
-		await store.save(Checkpoint(
-			run_id=run_id,
-			sequence=1,
-			kind="round",
-			status=CheckpointStatus.INTERRUPTED,
-			state={
-				"current_round": 1,
-				"messages": [{"role": "user", "content": run_id}],
-				"metadata": {"session_id": "s", "agent_name": "a"},
-			},
-		))
+		await store.save(
+			Checkpoint(
+				run_id=run_id,
+				sequence=1,
+				kind="round",
+				status=CheckpointStatus.INTERRUPTED,
+				state={
+					"current_round": 1,
+					"messages": [{"role": "user", "content": run_id}],
+					"metadata": {"session_id": "s", "agent_name": "a"},
+				},
+			)
+		)
 	agent = Agent(
 		"a",
 		"",
@@ -161,6 +164,49 @@ async def test_resume_stream_uses_session_gate():
 		services=ExecutionServices(checkpoint_store=store),
 	)
 
-	await asyncio.gather(agent.resume("r1", run_options={"stream": False}), agent.resume("r2", run_options={"stream": False}))
+	await asyncio.gather(
+		agent.resume("r1", run_options={"stream": False}), agent.resume("r2", run_options={"stream": False})
+	)
 
 	assert provider.max_active == 1
+
+
+@pytest.mark.parametrize("cancel", [True, False])
+async def test_session_wait_failure_releases_outer_slots(tmp_path, mock_llm, cancel):
+	path = tmp_path / "slots.yaml"
+	path.write_text("name: test\nruntime:\n  concurrency: {max_agent_concurrent_runs: 1, queue_timeout: 0.03}")
+	engine = Engine(concurrency=ConcurrencyConfig(max_engine_concurrent_runs=1, queue_timeout=0.1))
+	agent = engine.load_agent_template(str(path)).instantiate(models=AgentModels(default=mock_llm))
+	try:
+		async with agent._session_gate.slot("busy"):
+			waiter = asyncio.create_task(agent.chat("waiting", session_id="busy"))
+			if cancel:
+				async with asyncio.timeout(1):
+					while agent._session_gate._entries["busy"].ref_count != 2:
+						await asyncio.sleep(0)
+				waiter.cancel()
+			with pytest.raises(asyncio.CancelledError if cancel else ExecutionTimeoutError):
+				await waiter
+			assert await asyncio.wait_for(agent.chat("independent", session_id="other"), 1) == "hello"
+	finally:
+		await engine.close()
+
+
+async def test_named_run_waits_for_reset_storage_to_finish():
+	from axc_agent_engine.runtime.concurrency import SessionExecutionGate
+
+	gate = SessionExecutionGate(max_per_session=0)
+	attempted, entered = asyncio.Event(), asyncio.Event()
+
+	async def run():
+		attempted.set()
+		async with gate.slot("same"):
+			entered.set()
+
+	async with asyncio.timeout(2):
+		async with gate.reset("same"):
+			task = asyncio.create_task(run())
+			await attempted.wait()
+			assert not entered.is_set()
+		await task
+	assert entered.is_set()

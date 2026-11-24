@@ -1,4 +1,5 @@
 """Tests for #3 MessageStore snapshot/rollback."""
+
 from axc_agent_engine.core.message_store import MessageStore
 
 
@@ -86,6 +87,7 @@ class TestMessageStoreSnapshot:
 		"""Verify tool error messages use Chinese format."""
 		ms = MessageStore()
 		from axc_agent_engine.tools.executor import ToolResult
+
 		results = [ToolResult(tool_call_id="t1", tool_name="test", arguments={}, error="fail", success=False)]
 		ms.append_tool_results(results)
 		assert "[错误]" in ms.get_all()[0]["content"]

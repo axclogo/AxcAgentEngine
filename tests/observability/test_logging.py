@@ -16,7 +16,9 @@ def test_json_formatter_includes_error():
 	try:
 		raise RuntimeError("boom")
 	except RuntimeError:
-		record = logging.getLogger("x").makeRecord("x", logging.ERROR, __file__, 1, "failed", (), exc_info=sys.exc_info())
+		record = logging.getLogger("x").makeRecord(
+			"x", logging.ERROR, __file__, 1, "failed", (), exc_info=sys.exc_info()
+		)
 	body = json.loads(JsonFormatter().format(record))
 	assert body["level"] == "ERROR"
 	assert body["message"] == "failed"

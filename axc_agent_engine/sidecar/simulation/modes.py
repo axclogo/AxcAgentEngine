@@ -1,12 +1,12 @@
-"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-通用仿真内核的模式适配器。
-Mode adapters for the generic simulation kernel."""
+"""Mode adapters for the generic simulation kernel.
+通用仿真内核的模式适配器。"""
+
 from __future__ import annotations
 
+from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any
 
 from axc_agent_engine.sidecar.simulation.defaults import AllActorsSelector, RoundRobinActorSelector
 from axc_agent_engine.sidecar.simulation.interfaces import ActorSelector
@@ -16,11 +16,9 @@ from axc_agent_engine.sidecar.simulation.runner import SimulationRunner
 
 @dataclass(frozen=True)
 class SimulationModeAdapter:
-	"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-为一种通用仿真模式构建 Scenario/Runner 组合。
-	Builds a Scenario/Runner pair for one general-purpose simulation mode.
-	"""
+	"""Builds a Scenario/Runner pair for one general-purpose simulation mode.
+	为一种通用仿真模式构建 Scenario/Runner 组合。"""
+
 	name: str
 	actor_selector_factory: Callable[[], ActorSelector]
 	default_agents: tuple[AgentProfile, ...]

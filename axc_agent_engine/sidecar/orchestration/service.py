@@ -1,10 +1,10 @@
-"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-旁路编排任务服务。
-Sidecar orchestration task service."""
+"""Sidecar orchestration task service.
+旁路编排任务服务。"""
+
 from __future__ import annotations
 
 import asyncio
+import logging
 import uuid
 from copy import deepcopy
 from dataclasses import dataclass, field
@@ -25,11 +25,9 @@ class OrchestrationTaskStatus(StrEnum):
 
 @dataclass
 class OrchestrationTask:
-	"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-宿主可见的一次旁路编排运行记录。
-	Host-visible record for one sidecar orchestration run.
-	"""
+	"""Host-visible record for one sidecar orchestration run.
+	宿主可见的一次旁路编排运行记录。"""
+
 	task_id: str
 	mode: str
 	topic: str
@@ -42,11 +40,8 @@ class OrchestrationTask:
 
 
 class OrchestrationTaskRepository:
-	"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-带异步变更边界的内存任务仓储。
-	In-memory task repository with async mutation boundary.
-	"""
+	"""In-memory task repository with async mutation boundary.
+	带异步变更边界的内存任务仓储。"""
 
 	def __init__(self) -> None:
 		self._tasks: dict[str, OrchestrationTask] = {}
@@ -64,11 +59,8 @@ class OrchestrationTaskRepository:
 
 
 class OrchestrationEventPresenter:
-	"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-把会话事件和最终任务结果转换为宿主可见 payload。
-	Converts session events and final task result into host-visible payloads.
-	"""
+	"""Converts session events and final task result into host-visible payloads.
+	把会话事件和最终任务结果转换为宿主可见 payload。"""
 
 	def event_to_dict(self, event: MultiAgentEvent) -> dict[str, Any]:
 		return {
@@ -89,11 +81,8 @@ class OrchestrationEventPresenter:
 
 
 class OrchestrationWorker:
-	"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-通过 MultiAgentSession 运行一个编排任务。
-	Runs one orchestration task through MultiAgentSession.
-	"""
+	"""Runs one orchestration task through MultiAgentSession.
+	通过 MultiAgentSession 运行一个编排任务。"""
 
 	def __init__(self, agent_getter: Any, agent_lister: Any, dispatcher: Any, utility_model: Any = None) -> None:
 		self._agent_getter = agent_getter
@@ -102,7 +91,9 @@ class OrchestrationWorker:
 		self._utility_model = utility_model
 		self._presenter = OrchestrationEventPresenter()
 
-	async def run(self, task: OrchestrationTask, max_rounds: int, supervisor_name: str, persona: dict[str, dict]) -> None:
+	async def run(
+		self, task: OrchestrationTask, max_rounds: int, supervisor_name: str, persona: dict[str, dict]
+	) -> None:
 		task.status = OrchestrationTaskStatus.RUNNING
 		try:
 			agent_map = {agent.name: agent for agent in self._agent_lister()}
@@ -116,7 +107,9 @@ class OrchestrationWorker:
 				session_mode = SessionMode(task.mode)
 			except ValueError as exc:
 				raise ValueError(f"Unknown orchestration mode: {task.mode}") from exc
-			supervisor = (agent_map.get(supervisor_name) or self._agent_getter(supervisor_name)) if supervisor_name else None
+			supervisor = (
+				(agent_map.get(supervisor_name) or self._agent_getter(supervisor_name)) if supervisor_name else None
+			)
 			session = MultiAgentSession(
 				agents,
 				self._dispatcher,
@@ -138,16 +131,14 @@ class OrchestrationWorker:
 			task.status = OrchestrationTaskStatus.CANCELLED
 			raise
 		except Exception as exc:
+			logging.getLogger(__name__).exception("Agent execution failed")
 			task.status = OrchestrationTaskStatus.FAILED
 			task.error = str(exc)
 
 
 class OrchestrationTaskService:
-	"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-在 Agent 执行链路外创建并跟踪多 Agent 编排任务。
-	Create and track multi-agent orchestration tasks outside Agent execution.
-	"""
+	"""Create and track multi-agent orchestration tasks outside Agent execution.
+	在 Agent 执行链路外创建并跟踪多 Agent 编排任务。"""
 
 	def __init__(self, agent_getter: Any, agent_lister: Any, dispatcher: Any, utility_model: Any = None) -> None:
 		self._agent_getter = agent_getter
@@ -240,5 +231,7 @@ class OrchestrationTaskService:
 			if not worker.done():
 				await self.cancel_task(task_id)
 
-	async def _run_task(self, task: OrchestrationTask, max_rounds: int, supervisor_name: str, persona: dict[str, dict]) -> None:
+	async def _run_task(
+		self, task: OrchestrationTask, max_rounds: int, supervisor_name: str, persona: dict[str, dict]
+	) -> None:
 		await self._runner.run(task, max_rounds, supervisor_name, persona)

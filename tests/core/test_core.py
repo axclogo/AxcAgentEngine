@@ -1,20 +1,21 @@
 """Tests for core modules — executor, llm_caller, message_store, session_manager."""
+
 import asyncio
-import pytest
 from unittest.mock import AsyncMock
 
+import pytest
+
+from axc_agent_engine.core.constants import PLUGIN_CONTEXT_TAG
+from axc_agent_engine.core.context import ExecutionConfig, ExecutionContext
+from axc_agent_engine.core.errors import ProviderError, RetryableProviderError
+from axc_agent_engine.core.events import EventType
 from axc_agent_engine.core.executor import Executor
 from axc_agent_engine.core.llm_caller import LLMCaller
-from axc_agent_engine.core.errors import RetryableProviderError
 from axc_agent_engine.core.message_store import MessageStore
-from axc_agent_engine.core.session_manager import SessionManager
-from axc_agent_engine.core.session import Session
 from axc_agent_engine.core.plugin_manager import PluginManager
-from axc_agent_engine.core.context import ExecutionContext, ExecutionConfig
-from axc_agent_engine.core.events import EventType
-from axc_agent_engine.core.errors import ProviderError
-from axc_agent_engine.core.constants import PLUGIN_CONTEXT_TAG
 from axc_agent_engine.core.schema import LLMMessage, LLMResponse, LLMUsage
+from axc_agent_engine.core.session import Session
+from axc_agent_engine.core.session_manager import SessionManager
 from axc_agent_engine.plugins import model_info_from_models
 
 
@@ -82,6 +83,7 @@ class TestMessageStore:
 		ms = MessageStore()
 		from axc_agent_engine.tools.executor import ToolResult
 		from axc_agent_engine.tools.tool_output import ToolOutput
+
 		results = [
 			ToolResult(tool_call_id="1", tool_name="echo", arguments={}, output=ToolOutput.text("ok"), success=True),
 			ToolResult(tool_call_id="2", tool_name="bad", arguments={}, error="fail", success=False),
@@ -254,13 +256,14 @@ class TestSessionManager:
 		assert restored.messages == [{"role": "user", "content": {"text": "old"}}]
 		assert restored.metadata == {"tenant": {"id": "t1"}}
 
+
 class TestLLMCaller:
 	@pytest.mark.asyncio
 	async def test_sync_call(self, mock_llm):
 		pm = PluginManager([])
 		caller = LLMCaller(primary=mock_llm, fallback=None, plugin_manager=pm)
 		ctx = ExecutionContext(config=ExecutionConfig(stream=False))
-		message, events = await caller.call(ctx, [{"role": "user", "content": "hi"}], None)
+		message, _events = await caller.call(ctx, [{"role": "user", "content": "hi"}], None)
 		assert message["content"] == "hello"
 		assert ctx.state.total_input_tokens == 10
 		assert ctx.state.total_output_tokens == 5
@@ -275,7 +278,7 @@ class TestLLMCaller:
 		ctx = ExecutionContext(config=ExecutionConfig(stream=False))
 		ctx.runtime.model_info = model_info_from_models(primary, mock_llm)
 		ctx.state.metadata["model"] = ctx.runtime.model_info.to_dict()
-		message, events = await caller.call(ctx, [{"role": "user", "content": "hi"}], None)
+		message, _events = await caller.call(ctx, [{"role": "user", "content": "hi"}], None)
 		assert message["content"] == "hello"
 		assert ctx.state.fallback_triggered is True
 		assert ctx.runtime.model_info.active == "test-model"
@@ -294,14 +297,17 @@ class TestLLMCaller:
 	@pytest.mark.asyncio
 	async def test_stream_aggregation(self, mock_llm):
 		from axc_agent_engine.core.schema import LLMStreamChunk, LLMUsage
+
 		chunks = [
 			LLMStreamChunk(content_delta="hel"),
 			LLMStreamChunk(content_delta="lo"),
 			LLMStreamChunk(usage=LLMUsage(input_tokens=5, output_tokens=2)),
 		]
+
 		async def fake_stream(*args, **kwargs):
 			for c in chunks:
 				yield c
+
 		mock_llm.stream = fake_stream
 		pm = PluginManager([])
 		caller = LLMCaller(primary=mock_llm, fallback=None, plugin_manager=pm)
@@ -315,32 +321,38 @@ class TestLLMCaller:
 	@pytest.mark.asyncio
 	async def test_stream_thinking(self, mock_llm):
 		from axc_agent_engine.core.schema import LLMStreamChunk
+
 		chunks = [
 			LLMStreamChunk(thinking_delta="let me think"),
 			LLMStreamChunk(content_delta="answer"),
 		]
+
 		async def fake_stream(*args, **kwargs):
 			for c in chunks:
 				yield c
+
 		mock_llm.stream = fake_stream
 		pm = PluginManager([])
 		caller = LLMCaller(primary=mock_llm, fallback=None, plugin_manager=pm)
 		ctx = ExecutionContext(config=ExecutionConfig(stream=True))
-		message, events = await caller.call(ctx, [], None)
+		_message, events = await caller.call(ctx, [], None)
 		thinking_events = [e for e in events if e.type == EventType.THINKING_DELTA]
 		assert len(thinking_events) == 1
 
 	@pytest.mark.asyncio
 	async def test_stream_tool_calls(self, mock_llm):
 		from axc_agent_engine.core.schema import LLMStreamChunk
+
 		chunks = [
 			LLMStreamChunk(tool_call_delta={"index": 0, "id": "tc1", "function": {"name": "echo", "arguments": ""}}),
 			LLMStreamChunk(tool_call_delta={"index": 0, "function": {"arguments": '{"text":'}}),
 			LLMStreamChunk(tool_call_delta={"index": 0, "function": {"arguments": '"hi"}'}}),
 		]
+
 		async def fake_stream(*args, **kwargs):
 			for c in chunks:
 				yield c
+
 		mock_llm.stream = fake_stream
 		pm = PluginManager([])
 		caller = LLMCaller(primary=mock_llm, fallback=None, plugin_manager=pm)
@@ -357,6 +369,7 @@ class TestLLMCaller:
 async def _run_executor(executor, message: str) -> str:
 	"""Helper: collect DONE event from executor stream."""
 	from axc_agent_engine.core.errors import ProviderError
+
 	result = ""
 	async for event in executor.run_stream(message):
 		if event.type == EventType.DONE:
@@ -381,12 +394,16 @@ class TestExecutor:
 		# LLM always returns tool calls, never a final response
 		llm = AsyncMock()
 		llm.model = "test"
-		llm.chat = AsyncMock(return_value=LLMResponse(
-			message=LLMMessage(role="assistant", content="", tool_calls=[
-				{"id": "tc1", "function": {"name": "echo", "arguments": '{"text":"hi"}'}}
-			]),
-			usage=LLMUsage(input_tokens=1, output_tokens=1),
-		))
+		llm.chat = AsyncMock(
+			return_value=LLMResponse(
+				message=LLMMessage(
+					role="assistant",
+					content="",
+					tool_calls=[{"id": "tc1", "function": {"name": "echo", "arguments": '{"text":"hi"}'}}],
+				),
+				usage=LLMUsage(input_tokens=1, output_tokens=1),
+			)
+		)
 		pm = PluginManager([])
 		caller = LLMCaller(primary=llm, fallback=None, plugin_manager=pm)
 		ctx = ExecutionContext(config=ExecutionConfig(system_prompt="test", stream=False, max_rounds=2))
@@ -409,16 +426,24 @@ class TestExecutor:
 	async def test_total_timeout(self, tool_registry):
 		async def slow_chat(*args, **kwargs):
 			await asyncio.sleep(0.1)
-			return LLMResponse(message=LLMMessage(role="assistant", content="", tool_calls=[
-				{"id": "tc1", "function": {"name": "echo", "arguments": '{"text":"hi"}'}}
-			]), usage=LLMUsage(input_tokens=1, output_tokens=1))
+			return LLMResponse(
+				message=LLMMessage(
+					role="assistant",
+					content="",
+					tool_calls=[{"id": "tc1", "function": {"name": "echo", "arguments": '{"text":"hi"}'}}],
+				),
+				usage=LLMUsage(input_tokens=1, output_tokens=1),
+			)
+
 		llm = AsyncMock()
 		llm.model = "test"
 		llm.chat = slow_chat
 		pm = PluginManager([])
 		caller = LLMCaller(primary=llm, fallback=None, plugin_manager=pm)
-		ctx = ExecutionContext(config=ExecutionConfig(system_prompt="test", stream=False, max_rounds=100, total_timeout=0))
-		_executor = Executor(llm_caller=caller, registry=tool_registry, plugin_manager=pm, ctx=ctx)  # noqa: F841
+		ctx = ExecutionContext(
+			config=ExecutionConfig(system_prompt="test", stream=False, max_rounds=100, total_timeout=0)
+		)
+		_executor = Executor(llm_caller=caller, registry=tool_registry, plugin_manager=pm, ctx=ctx)
 		# total_timeout=0 means immediate timeout check will pass on first round
 		# but we set it to trigger
 		ctx.config = ExecutionConfig(system_prompt="test", stream=False, max_rounds=100, total_timeout=1)

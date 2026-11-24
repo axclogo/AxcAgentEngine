@@ -1,18 +1,21 @@
 """Plugin configuration schema models.
 中文：插件配置 Schema 模型。"""
+
 from __future__ import annotations
 
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
+from axc_agent_engine.core.errors import ConfigValueError
 
 PluginConfigFieldType = Literal["string", "integer", "number", "boolean", "object", "array"]
 
 
 class PluginConfigField(BaseModel):
 	"""One plugin YAML field descriptor.
-中文：单个插件 YAML 字段描述。"""
+	中文：单个插件 YAML 字段描述。"""
+
 	key: str
 	label: str = ""
 	label_en: str = ""
@@ -21,14 +24,15 @@ class PluginConfigField(BaseModel):
 	default: Any = None
 	required: bool = False
 	enum: list[Any] = Field(default_factory=list)
-	children: list["PluginConfigField"] = Field(default_factory=list)
-	item_schema: "PluginConfigField | None" = None
+	children: list[PluginConfigField] = Field(default_factory=list)
+	item_schema: PluginConfigField | None = None
 	advanced: bool = False
 
 
 class PluginConfigSchema(BaseModel):
 	"""Structured schema declared by a plugin.
-中文：插件声明的结构化配置 Schema。"""
+	中文：插件声明的结构化配置 Schema。"""
+
 	plugin_name: str = ""
 	display_name: str = ""
 	display_name_en: str = ""
@@ -51,7 +55,7 @@ def config_field(
 	advanced: bool = False,
 ) -> PluginConfigField:
 	"""Build one field descriptor with compact call sites.
-中文：用紧凑调用方式构建字段描述。"""
+	中文：用紧凑调用方式构建字段描述。"""
 	return PluginConfigField(
 		key=key,
 		label=label,
@@ -60,8 +64,8 @@ def config_field(
 		description=description,
 		default=default,
 		required=required,
-		enum=list(enum or []),
-		children=list(children or []),
+		enum=[] if enum is None else enum,
+		children=[] if children is None else children,
 		item_schema=item_schema,
 		advanced=advanced,
 	)
@@ -79,7 +83,7 @@ def object_field(
 	advanced: bool = False,
 ) -> PluginConfigField:
 	"""Build a nested object field.
-中文：构建嵌套对象字段。"""
+	中文：构建嵌套对象字段。"""
 	return config_field(
 		key,
 		label,
@@ -105,7 +109,7 @@ def array_field(
 	advanced: bool = False,
 ) -> PluginConfigField:
 	"""Build an array field with item schema.
-中文：构建带元素 Schema 的数组字段。"""
+	中文：构建带元素 Schema 的数组字段。"""
 	return config_field(
 		key,
 		label,
@@ -128,7 +132,7 @@ def config_schema(
 	display_name_en: str = "",
 ) -> PluginConfigSchema:
 	"""Build a plugin-level schema descriptor.
-中文：构建插件级配置 Schema 描述。"""
+	中文：构建插件级配置 Schema 描述。"""
 	return PluginConfigSchema(
 		plugin_name=plugin_name,
 		display_name=display_name,
@@ -145,10 +149,14 @@ def normalize_plugin_config_schema(
 	display_name: str = "",
 ) -> PluginConfigSchema:
 	"""Normalize a declared schema and add shared fields.
-中文：规范化插件声明 Schema 并补充通用字段。"""
+	中文：规范化插件声明 Schema 并补充通用字段。"""
 	if raw_schema is None:
 		raise ValueError(f"Plugin {plugin_name} must declare config_schema")
-	schema = raw_schema if isinstance(raw_schema, PluginConfigSchema) else PluginConfigSchema(**raw_schema)
+	schema = (
+		raw_schema.model_copy(deep=True)
+		if isinstance(raw_schema, PluginConfigSchema)
+		else PluginConfigSchema(**raw_schema)
+	)
 	if not schema.plugin_name:
 		schema.plugin_name = plugin_name
 	if schema.plugin_name != plugin_name:
@@ -161,26 +169,28 @@ def normalize_plugin_config_schema(
 
 def validate_plugin_config(plugin_name: str, config: dict[str, Any], schema: PluginConfigSchema) -> None:
 	"""Strictly validate plugin YAML against declared schema.
-中文：按插件声明 Schema 严格校验 YAML 配置。"""
+	中文：按插件声明 Schema 严格校验 YAML 配置。"""
 	if not isinstance(config, dict):
-		raise ValueError(f"Plugin {plugin_name} config must be an object")
+		raise ConfigValueError(f"Plugin {plugin_name} config must be an object")
 	_validate_object(config, schema.fields, f"plugins.{plugin_name}")
 
 
 def _with_common_fields(fields: list[PluginConfigField]) -> list[PluginConfigField]:
 	"""Add shared plugin fields unless already declared.
-中文：补充插件通用字段，已有声明则保留。"""
+	中文：补充插件通用字段，已有声明则保留。"""
 	by_key = {field.key for field in fields}
 	common = []
 	if "enabled" not in by_key:
-		common.append(config_field(
-			"enabled",
-			"启用",
-			"boolean",
-			"是否启用插件",
-			label_en="Enabled",
-			default=True,
-		))
+		common.append(
+			config_field(
+				"enabled",
+				"启用",
+				"boolean",
+				"是否启用插件",
+				label_en="Enabled",
+				default=False,
+			)
+		)
 	return common + list(fields)
 
 
@@ -200,10 +210,8 @@ def _validate_object(value: dict[str, Any], fields: list[PluginConfigField], pat
 
 
 def _validate_value(value: Any, field: PluginConfigField, path: str) -> None:
-	if value is None:
-		if field.required:
-			raise ValueError(f"Config field {path} is required")
-		return
+	if value is None and field.required:
+		raise ValueError(f"Config field {path} is required")
 	if field.enum and value not in field.enum:
 		raise ValueError(f"Config field {path} must be one of {field.enum}, got {value!r}")
 	if field.type == "string":
@@ -230,4 +238,4 @@ def _validate_value(value: Any, field: PluginConfigField, path: str) -> None:
 
 def _require_type(value: Any, expected: type, path: str, label: str) -> None:
 	if not isinstance(value, expected):
-		raise ValueError(f"Config field {path} must be a {label}")
+		raise ConfigValueError(f"Config field {path} must be a {label}")

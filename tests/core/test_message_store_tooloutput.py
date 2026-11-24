@@ -1,7 +1,8 @@
 """Tests for MessageStore with ToolOutput context_view integration."""
+
 from axc_agent_engine.core.message_store import MessageStore
 from axc_agent_engine.tools.executor import ToolResult
-from axc_agent_engine.tools.tool_output import ToolOutput, ArtifactRef
+from axc_agent_engine.tools.tool_output import ArtifactRef, ToolOutput
 
 
 class TestMessageStoreToolOutput:
@@ -62,7 +63,11 @@ class TestMessageStoreToolOutput:
 	def test_append_error_tooloutput(self):
 		ms = MessageStore()
 		output = ToolOutput.error("something failed")
-		results = [ToolResult(tool_call_id="1", tool_name="t", arguments={}, output=output, error="something failed", success=False)]
+		results = [
+			ToolResult(
+				tool_call_id="1", tool_name="t", arguments={}, output=output, error="something failed", success=False
+			)
+		]
 		ms.append_tool_results(results)
 		assert "[错误]" in ms.get_all()[0]["content"]
 
@@ -81,13 +86,17 @@ class TestMessageStoreToolOutput:
 
 	def test_tool_call_id_preserved(self):
 		ms = MessageStore()
-		results = [ToolResult(tool_call_id="tc-42", tool_name="t", arguments={}, output=ToolOutput.text("ok"), success=True)]
+		results = [
+			ToolResult(tool_call_id="tc-42", tool_name="t", arguments={}, output=ToolOutput.text("ok"), success=True)
+		]
 		ms.append_tool_results(results)
 		assert ms.get_all()[0]["tool_call_id"] == "tc-42"
 
 	def test_role_is_tool(self):
 		ms = MessageStore()
-		results = [ToolResult(tool_call_id="1", tool_name="t", arguments={}, output=ToolOutput.text("ok"), success=True)]
+		results = [
+			ToolResult(tool_call_id="1", tool_name="t", arguments={}, output=ToolOutput.text("ok"), success=True)
+		]
 		ms.append_tool_results(results)
 		assert ms.get_all()[0]["role"] == "tool"
 

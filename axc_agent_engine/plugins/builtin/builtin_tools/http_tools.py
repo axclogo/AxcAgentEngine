@@ -1,15 +1,15 @@
-"""HTTP builtin tool and SSRF policy.
-中文：此文档说明相关引擎组件的行为。"""
+"""HTTP builtin tool and SSRF policy. 内置 HTTP 工具及 SSRF 检查。"""
+
 import asyncio
 import ipaddress
 import socket
 from typing import Any
 from urllib.parse import urlparse
 
+from axc_agent_engine.plugins.builtin.common import bounded_int
 from axc_agent_engine.tools.tool_output import ArtifactRef, ToolOutput
 
 from .artifact_store import ArtifactStoreReader
-from .support import bounded_int
 
 BLOCKED_HTTP_HOSTS = frozenset({"localhost", "metadata.google.internal"})
 MAX_TOOL_TIMEOUT = 600
@@ -19,8 +19,7 @@ HTTP_RESULT_EXTERNALIZE_BYTES = 10 * 1024 * 1024
 
 
 def is_blocked_ip(ip: str) -> bool:
-	"""Return True for local, private, metadata, or otherwise unsafe IP ranges.
-中文：此文档说明相关引擎组件的行为。"""
+	"""Return True for local, private, metadata, or otherwise unsafe IP ranges. 识别本机、私网、元数据服务等受限地址。"""
 	try:
 		addr = ipaddress.ip_address(ip)
 	except ValueError:
@@ -29,8 +28,7 @@ def is_blocked_ip(ip: str) -> bool:
 
 
 def resolve_host_ips(hostname: str) -> list[str]:
-	"""Resolve host to IP strings for SSRF checks.
-中文：此文档说明相关引擎组件的行为。"""
+	"""Resolve host to IP strings for SSRF checks. 将主机名解析为 IP 地址以检查 SSRF 风险。"""
 	infos = socket.getaddrinfo(hostname, None, type=socket.SOCK_STREAM)
 	return sorted({info[4][0] for info in infos})
 
@@ -82,7 +80,7 @@ class BuiltinHttpTools:
 		url_error = await self._http_policy.validate_url(url)
 		if url_error:
 			return ToolOutput.error(url_error)
-		timeout = bounded_int(args.get("timeout", 30), 1, MAX_TOOL_TIMEOUT, 30)
+		timeout = bounded_int(args.get("timeout", 30), 1, MAX_TOOL_TIMEOUT)
 		try:
 			async with self._httpx.AsyncClient(timeout=timeout) as client:
 				resp = await client.request(
@@ -110,8 +108,10 @@ class BuiltinHttpTools:
 					content_data["body_artifact_id"] = artifact_id
 				summary = f"HTTP {resp.status_code} 来自 {url}（{len(body)} 字节）"
 				llm_view = _http_llm_view(url, content_data, artifacts[0] if artifacts else None)
-				return ToolOutput(content=content_data, content_type="json", summary=summary, llm_view=llm_view, artifacts=artifacts)
-		except Exception as e:
+				return ToolOutput(
+					content=content_data, content_type="json", summary=summary, llm_view=llm_view, artifacts=artifacts
+				)
+		except (self._httpx.HTTPError, OSError, ValueError) as e:
 			return ToolOutput.error(str(e))
 
 
@@ -122,12 +122,14 @@ def _http_llm_view(url: str, content: dict[str, Any], artifact: ArtifactRef | No
 		f"content_type: {content.get('content_type', '')}",
 	]
 	if artifact:
-		lines.extend([
-			"完整响应体已外部化。",
-			f"artifact_id: {artifact.id}",
-			f"size: {artifact.size} bytes",
-			"内容已完整外部化；请用 artifact_read/artifact_page 按需读取。",
-		])
+		lines.extend(
+			[
+				"完整响应体已外部化。",
+				f"artifact_id: {artifact.id}",
+				f"size: {artifact.size} bytes",
+				"内容已完整外部化；请用 artifact_read/artifact_page 按需读取。",
+			]
+		)
 	else:
 		lines.extend(["body:", str(content.get("body", ""))])
 	return "\n".join(lines)

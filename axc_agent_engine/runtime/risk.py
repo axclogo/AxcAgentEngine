@@ -1,11 +1,12 @@
-"""Tool risk classification and shell safety checks.
-中文：此文档说明相关引擎组件的行为。"""
+"""Tool risk classification and shell safety checks. 工具风险分类与命令安全检查。"""
+
 from __future__ import annotations
 
 import re
 from dataclasses import dataclass
 from typing import Any
 
+from axc_agent_engine.core.errors import ConfigValueError
 from axc_agent_engine.core.schema import RiskLevel
 
 RISK_LEVELS = {RiskLevel.SAFE: 0, RiskLevel.MODERATE: 1, RiskLevel.DANGEROUS: 2, RiskLevel.BLOCKED: 3}
@@ -36,25 +37,79 @@ DANGEROUS_SHELL_PATTERNS = [
 ]
 
 SAFE_COMMAND_PREFIXES = {
-	"ls", "cat", "head", "tail", "wc", "find", "grep", "egrep", "fgrep",
-	"awk", "sed", "sort", "uniq", "diff", "file", "stat", "echo", "printf",
-	"pwd", "whoami", "date", "env", "which", "type", "git status", "git log",
-	"git diff", "git branch", "git show", "python --version", "python3 --version",
-	"node --version", "pip list", "pip show", "npm list", "df", "du", "free",
-	"top", "ps", "uptime", "uname",
+	"ls",
+	"cat",
+	"head",
+	"tail",
+	"wc",
+	"find",
+	"grep",
+	"egrep",
+	"fgrep",
+	"awk",
+	"sed",
+	"sort",
+	"uniq",
+	"diff",
+	"file",
+	"stat",
+	"echo",
+	"printf",
+	"pwd",
+	"whoami",
+	"date",
+	"env",
+	"which",
+	"type",
+	"git status",
+	"git log",
+	"git diff",
+	"git branch",
+	"git show",
+	"python --version",
+	"python3 --version",
+	"node --version",
+	"pip list",
+	"pip show",
+	"npm list",
+	"df",
+	"du",
+	"free",
+	"top",
+	"ps",
+	"uptime",
+	"uname",
 }
 
 DEFAULT_RULES: list[dict[str, Any]] = [
-	{"name": "sensitive path write", "tool_pattern": r"file_(write|edit|delete)",
-	 "arg_name": "path", "arg_pattern": r"(config|\.env|password|secret|key|credentials)",
-	 "escalate_to": RiskLevel.DANGEROUS},
-	{"name": "dangerous sql", "tool_pattern": r"(query|sql|execute)",
-	 "arg_name": "sql", "arg_pattern": r"(DROP|DELETE|TRUNCATE|ALTER|UPDATE)\s",
-	 "escalate_to": RiskLevel.DANGEROUS},
-	{"name": "bulk operation", "tool_pattern": r".*", "arg_name": "ids",
-	 "arg_check": "list_gt_20", "escalate_to": RiskLevel.MODERATE},
-	{"name": "external url", "tool_pattern": r"(http_request|api_call|fetch)",
-	 "arg_name": "url", "arg_pattern": r"^https?://", "escalate_to": RiskLevel.MODERATE},
+	{
+		"name": "sensitive path write",
+		"tool_pattern": r"file_(write|edit|delete)",
+		"arg_name": "path",
+		"arg_pattern": r"(config|\.env|password|secret|key|credentials)",
+		"escalate_to": RiskLevel.DANGEROUS,
+	},
+	{
+		"name": "dangerous sql",
+		"tool_pattern": r"(query|sql|execute)",
+		"arg_name": "sql",
+		"arg_pattern": r"(DROP|DELETE|TRUNCATE|ALTER|UPDATE)\s",
+		"escalate_to": RiskLevel.DANGEROUS,
+	},
+	{
+		"name": "bulk operation",
+		"tool_pattern": r".*",
+		"arg_name": "ids",
+		"arg_check": "list_gt_20",
+		"escalate_to": RiskLevel.MODERATE,
+	},
+	{
+		"name": "external url",
+		"tool_pattern": r"(http_request|api_call|fetch)",
+		"arg_name": "url",
+		"arg_pattern": r"^https?://",
+		"escalate_to": RiskLevel.MODERATE,
+	},
 ]
 
 ARG_CHECKS = {
@@ -78,8 +133,9 @@ class RiskRuleEngine:
 		for rule in self.rules:
 			_validate_rule(rule)
 
-	def classify(self, tool_name: str, arguments: dict[str, Any],
-				 static_risk: str | RiskLevel = RiskLevel.SAFE) -> RiskAssessment:
+	def classify(
+		self, tool_name: str, arguments: dict[str, Any], static_risk: str | RiskLevel = RiskLevel.SAFE
+	) -> RiskAssessment:
 		static_value = static_risk.value if isinstance(static_risk, RiskLevel) else str(static_risk)
 		static = RiskLevel(static_value) if static_value in {level.value for level in RISK_LEVELS} else RiskLevel.SAFE
 		current_level = RISK_LEVELS.get(static, 0)
@@ -117,7 +173,9 @@ class RiskRuleEngine:
 					reason = rule.get("name", "")
 					matched_rule = rule.get("arg_pattern", rule.get("arg_check", ""))
 		level = RISK_NAMES[current_level]
-		return RiskAssessment(level=level, reason=reason, matched_rule=str(matched_rule), allowed=level != RiskLevel.BLOCKED)
+		return RiskAssessment(
+			level=level, reason=reason, matched_rule=str(matched_rule), allowed=level != RiskLevel.BLOCKED
+		)
 
 
 def check_shell_command(command: str) -> RiskAssessment:
@@ -139,15 +197,18 @@ def check_shell_command(command: str) -> RiskAssessment:
 	return RiskAssessment(RiskLevel.MODERATE, f"unknown command: {first_word}")
 
 
-def classify_tool_risk(tool_name: str, arguments: dict[str, Any],
-					   static_risk: str | RiskLevel = RiskLevel.SAFE,
-					   custom_rules: list[dict] | None = None) -> RiskAssessment:
+def classify_tool_risk(
+	tool_name: str,
+	arguments: dict[str, Any],
+	static_risk: str | RiskLevel = RiskLevel.SAFE,
+	custom_rules: list[dict] | None = None,
+) -> RiskAssessment:
 	return RiskRuleEngine(custom_rules).classify(tool_name, arguments, static_risk)
 
 
 def _validate_rule(rule: dict[str, Any]) -> None:
 	if not isinstance(rule, dict):
-		raise ValueError("Risk rule must be an object")
+		raise ConfigValueError("Risk rule must be an object")
 	re.compile(str(rule.get("tool_pattern", ".*")))
 	if rule.get("arg_pattern"):
 		re.compile(str(rule["arg_pattern"]))

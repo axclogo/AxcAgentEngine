@@ -1,11 +1,14 @@
 """Tests for LLMCaller retry/fallback with standardized LLMResponse/LLMStreamChunk."""
+
+from unittest.mock import AsyncMock, MagicMock
+
 import pytest
-from unittest.mock import MagicMock, AsyncMock
-from axc_agent_engine.core.llm_caller import LLMCaller
-from axc_agent_engine.core.context import ExecutionContext, ExecutionConfig, ExecutionState
+
+from axc_agent_engine.core.context import ExecutionConfig, ExecutionContext, ExecutionState
 from axc_agent_engine.core.errors import ProviderContractError, ProviderError, RetryableProviderError
+from axc_agent_engine.core.llm_caller import LLMCaller
 from axc_agent_engine.core.plugin_manager import PluginManager
-from axc_agent_engine.core.schema import LLMResponse, LLMMessage, LLMUsage, LLMStreamChunk
+from axc_agent_engine.core.schema import LLMMessage, LLMResponse, LLMStreamChunk, LLMUsage
 
 
 def _make_ctx(stream=True):
@@ -29,7 +32,7 @@ class TestLLMCallerRetry:
 		pm = PluginManager([])
 		caller = LLMCaller(primary=primary, fallback=fallback, plugin_manager=pm)
 		ctx = _make_ctx(stream=False)
-		msg, events = await caller.call(ctx, [{"role": "user", "content": "hi"}], None)
+		msg, _events = await caller.call(ctx, [{"role": "user", "content": "hi"}], None)
 		assert msg["content"] == "from fallback"
 		assert ctx.state.fallback_triggered is True
 
@@ -59,14 +62,17 @@ class TestLLMCallerRetry:
 	@pytest.mark.asyncio
 	async def test_stream_retry_on_network_error(self):
 		import httpx
+
 		call_count = [0]
 
 		def mock_stream(messages, tools=None, **kwargs):
 			call_count[0] += 1
 			if call_count[0] == 1:
 				raise httpx.NetworkError("connection reset")
+
 			async def gen():
 				yield LLMStreamChunk(content_delta="ok")
+
 			return gen()
 
 		primary = MagicMock()
@@ -74,7 +80,7 @@ class TestLLMCallerRetry:
 		pm = PluginManager([])
 		caller = LLMCaller(primary=primary, fallback=None, plugin_manager=pm)
 		ctx = _make_ctx(stream=True)
-		msg, events = await caller.call(ctx, [{"role": "user", "content": "hi"}], None)
+		msg, _events = await caller.call(ctx, [{"role": "user", "content": "hi"}], None)
 		assert msg["content"] == "ok"
 		assert call_count[0] == 2
 
@@ -88,6 +94,7 @@ class TestLLMCallerRetry:
 		def fallback_stream(messages, tools=None, **kwargs):
 			async def gen():
 				yield LLMStreamChunk(content_delta="fallback")
+
 			return gen()
 
 		primary = MagicMock()
@@ -97,7 +104,7 @@ class TestLLMCallerRetry:
 		pm = PluginManager([])
 		caller = LLMCaller(primary=primary, fallback=fallback, plugin_manager=pm)
 		ctx = _make_ctx(stream=True)
-		msg, events = await caller.call(ctx, [{"role": "user", "content": "hi"}], None)
+		msg, _events = await caller.call(ctx, [{"role": "user", "content": "hi"}], None)
 		assert msg["content"] == "fallback"
 		assert ctx.state.fallback_triggered is True
 
@@ -109,9 +116,11 @@ class TestLLMCallerRetry:
 
 		def primary_stream(messages, tools=None, **kwargs):
 			call_count[0] += 1
+
 			async def gen():
 				yield LLMStreamChunk(content_delta="partial")
 				raise httpx.NetworkError("broken after partial")
+
 			return gen()
 
 		def fallback_stream(messages, tools=None, **kwargs):
@@ -140,6 +149,7 @@ class TestLLMCallerRetry:
 		def fallback_stream(messages, tools=None, **kwargs):
 			async def gen():
 				yield LLMStreamChunk(content_delta="fb")
+
 			return gen()
 
 		primary = MagicMock()
@@ -158,6 +168,7 @@ class TestLLMCallerRetry:
 		def ok_stream(messages, tools=None, **kwargs):
 			async def gen():
 				yield LLMStreamChunk(content_delta="hello")
+
 			return gen()
 
 		primary = MagicMock()
@@ -165,7 +176,7 @@ class TestLLMCallerRetry:
 		pm = PluginManager([])
 		caller = LLMCaller(primary=primary, fallback=None, plugin_manager=pm)
 		ctx = _make_ctx(stream=True)
-		msg, events = await caller.call(ctx, [{"role": "user", "content": "hi"}], None)
+		msg, _events = await caller.call(ctx, [{"role": "user", "content": "hi"}], None)
 		assert msg["content"] == "hello"
 
 	@pytest.mark.asyncio
@@ -185,15 +196,21 @@ class TestLLMCallerRetry:
 		pm = PluginManager([])
 		caller = LLMCaller(primary=primary, fallback=None, plugin_manager=pm)
 		ctx = _make_ctx(stream=False)
-		await caller.call(ctx, [{
-			"role": "tool",
-			"tool_call_id": "tc-1",
-			"name": "agent_call",
-			"content": "result",
-			"metadata": {"durable": True},
-			"round": 1,
-			"token_estimate": 1,
-		}], None)
+		await caller.call(
+			ctx,
+			[
+				{
+					"role": "tool",
+					"tool_call_id": "tc-1",
+					"name": "agent_call",
+					"content": "result",
+					"metadata": {"durable": True},
+					"round": 1,
+					"token_estimate": 1,
+				}
+			],
+			None,
+		)
 		sent = primary.chat.call_args.args[0][0]
 		assert sent == {"role": "tool", "tool_call_id": "tc-1", "name": "agent_call", "content": "result"}
 
@@ -201,8 +218,10 @@ class TestLLMCallerRetry:
 	async def test_post_llm_call_receives_delta_and_total_usage(self):
 		class UsagePlugin:
 			name = "usage"
+
 			def pre_llm_call(self, ctx, messages, tools):
 				return messages, tools
+
 			async def post_llm_call(self, ctx, messages, response, duration_ms):
 				self.response = response
 

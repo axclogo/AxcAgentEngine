@@ -1,4 +1,5 @@
 """Tests for official Knowledge plugin resource boundaries and hybrid retrieval."""
+
 import pytest
 
 from axc_agent_engine.plugins import PluginContext
@@ -18,14 +19,16 @@ class VectorStore:
 
 	async def search(self, embedding, top_k=5):
 		self.search_called = True
-		return [{
-			"id": "vec1",
-			"text": "Python vector retrieval guide",
-			"score": 0.91,
-			"retrieval": "vector",
-			"source": "vector",
-			"metadata": {"namespace": "tenant-a", "chunk_id": 3},
-		}]
+		return [
+			{
+				"id": "vec1",
+				"text": "Python vector retrieval guide",
+				"score": 0.91,
+				"retrieval": "vector",
+				"source": "vector",
+				"metadata": {"namespace": "tenant-a", "chunk_id": 3},
+			}
+		]
 
 
 class MountedIndex:
@@ -53,19 +56,25 @@ async def test_sources_bm25_search_has_citations_and_trace(tmp_path):
 	doc = tmp_path / "tenant_a.md"
 	doc.write_text("# Help\n\nPython retrieval setup for employees.", encoding="utf-8")
 	plugin = KnowledgePlugin()
-	plugin.initialize({
-		"sources": ["tenant_a.md"],
-		"namespace": "tenant-a",
-		"metadata": {"acl_tags": ["employee"]},
-		"include_trace": True,
-	}, PluginContext(workspace=str(tmp_path)))
+	plugin.initialize(
+		{
+			"sources": ["tenant_a.md"],
+			"namespace": "tenant-a",
+			"metadata": {"acl_tags": ["employee"]},
+			"include_trace": True,
+		},
+		PluginContext(workspace=str(tmp_path)),
+	)
 
-	output = await plugin._tool_knowledge_search({
-		"query": "Python retrieval",
-		"namespace": "tenant-a",
-		"allowed_acl_tags": ["employee"],
-		"include_trace": True,
-	}, {})
+	output = await plugin._tool_knowledge_search(
+		{
+			"query": "Python retrieval",
+			"namespace": "tenant-a",
+			"allowed_acl_tags": ["employee"],
+			"include_trace": True,
+		},
+		{},
+	)
 
 	assert not output.is_error
 	assert output.content["results"]
@@ -106,10 +115,12 @@ async def test_vector_store_and_bm25_are_fused_by_plugin(tmp_path):
 		{"sources": ["doc.md"]},
 		PluginContext(
 			workspace=str(tmp_path),
-			resources=ResourceRegistry({
-				"knowledge.embedding": Embeddings(),
-				"knowledge.vector_store": vector_store,
-			}),
+			resources=ResourceRegistry(
+				{
+					"knowledge.embedding": Embeddings(),
+					"knowledge.vector_store": vector_store,
+				}
+			),
 		),
 	)
 
@@ -140,11 +151,15 @@ async def test_mounted_documents_feed_plugin_owned_strategy():
 	plugin = KnowledgePlugin()
 	plugin.initialize(
 		{},
-		PluginContext(resources=ResourceRegistry({
-			"knowledge.documents": [
-				KnowledgeDocument(id="d1", text="Mounted document retrieval", metadata={"namespace": "n"}),
-			]
-		})),
+		PluginContext(
+			resources=ResourceRegistry(
+				{
+					"knowledge.documents": [
+						KnowledgeDocument(id="d1", text="Mounted document retrieval", metadata={"namespace": "n"}),
+					]
+				}
+			)
+		),
 	)
 	await plugin.on_execution_start(None)
 

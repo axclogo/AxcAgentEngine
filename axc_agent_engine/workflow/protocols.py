@@ -3,7 +3,8 @@
 The engine keeps ReAct and POR independent from workflow persistence. Pause and
 resume entry points pass through this small protocol so Apache Burr can be used
 as an adapter without becoming a core execution dependency.
-中文：此文档说明相关引擎组件的行为。"""
+工作流运行时接口。"""
+
 from __future__ import annotations
 
 from collections.abc import AsyncIterator, Callable
@@ -52,7 +53,7 @@ class WorkflowResumePlan:
 
 
 class WorkflowRuntime(Protocol):
-	async def run(self, request: WorkflowRunRequest) -> AsyncIterator[Event]: ...
-	async def resume(self, request: WorkflowResumeRequest) -> AsyncIterator[Event]: ...
+	def run(self, request: WorkflowRunRequest) -> AsyncIterator[Event]: ...
+	def resume(self, request: WorkflowResumeRequest) -> AsyncIterator[Event]: ...
 	async def pause(self, run_id: str, reason: str = "") -> None: ...
 	async def status(self, run_id: str) -> WorkflowStatus: ...

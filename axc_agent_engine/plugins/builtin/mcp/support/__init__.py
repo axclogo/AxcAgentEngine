@@ -1,5 +1,6 @@
-"""MCP plugin support layer.
-中文：此文档说明相关引擎组件的行为。"""
-from axc_agent_engine.plugins.builtin.mcp.support.client import MCPConnection, MCPTool
+"""MCP plugin support layer. MCP 插件支持模块。"""
+
+from .connection import MCPConnection
+from .models import MCPTool
 
 __all__ = ["MCPConnection", "MCPTool"]

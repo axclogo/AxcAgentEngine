@@ -1,36 +1,26 @@
 """POR 调度器 — 按依赖关系调度步骤执行"""
+
 import logging
 
-from axc_agent_engine.planning.planner import Plan, PlanStep
 from axc_agent_engine.core.schema import StepStatus
+from axc_agent_engine.planning.planner import Plan, PlanStep
 
 logger = logging.getLogger(__name__)
 
 
 def get_next_steps(plan: Plan) -> list[PlanStep]:
-	"""English: This documentation describes the related engine component behavior.
-中文：获取所有可执行的待执行步骤（依赖已满足）"""
-	ready = []
-	for step in plan.steps:
-		if step.status == StepStatus.PENDING:
-			deps_done = all(
-				_get_step(plan, dep_id) and _get_step(plan, dep_id).status == StepStatus.DONE
-				for dep_id in step.depends_on
-			)
-			if deps_done:
-				ready.append(step)
-	return ready
+	"""Return pending steps whose dependencies are satisfied. 获取所有可执行的待执行步骤（依赖已满足）"""
+	done = {step.step_id for step in plan.steps if step.status == StepStatus.DONE}
+	return [step for step in plan.steps if step.status == StepStatus.PENDING and done.issuperset(step.depends_on)]
 
 
 def get_remaining_count(plan: Plan) -> int:
-	"""English: This documentation describes the related engine component behavior.
-中文：获取剩余待执行步骤数"""
+	"""Count unfinished steps. 获取剩余待执行步骤数"""
 	return sum(1 for s in plan.steps if s.status == StepStatus.PENDING)
 
 
 def mark_step_done(plan: Plan, step_id: int, result: str) -> None:
-	"""English: This documentation describes the related engine component behavior.
-中文：标记步骤完成"""
+	"""Mark a step as completed. 标记步骤完成"""
 	step = _get_step(plan, step_id)
 	if step:
 		step.status = StepStatus.DONE
@@ -38,8 +28,7 @@ def mark_step_done(plan: Plan, step_id: int, result: str) -> None:
 
 
 def mark_step_failed(plan: Plan, step_id: int, error: str) -> None:
-	"""English: This documentation describes the related engine component behavior.
-中文：标记步骤失败"""
+	"""Mark a step as failed. 标记步骤失败"""
 	step = _get_step(plan, step_id)
 	if step:
 		step.status = StepStatus.FAILED

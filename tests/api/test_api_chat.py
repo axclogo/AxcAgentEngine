@@ -1,21 +1,22 @@
 """Tests for OpenAI Chat Completions API parity."""
-from axc_agent_engine.core.events import Event
+
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from axc_agent_engine.api.app import create_app
 from axc_agent_engine.api.deps import EngineState
 from axc_agent_engine.api.routes.chat import (
-	ChatMessage,
-	ChatRequest,
 	_CHAT_OPTIONS,
 	_CHAT_VALIDATOR,
+	ChatMessage,
+	ChatRequest,
 	_capabilities,
 	_error_response,
 	_stream_response,
 	_sync_response,
 	create_chat_router,
 )
+from axc_agent_engine.core.events import Event
 
 
 class TestChatRequest:
@@ -39,9 +40,14 @@ class TestChatRequest:
 	def test_option_resolver_all_fields(self):
 		req = ChatRequest(
 			messages=[ChatMessage(role="user", content="hi")],
-			temperature=0.7, max_tokens=200, top_p=0.9,
-			stop=["END"], presence_penalty=0.1, frequency_penalty=0.2,
-			seed=42, user="test_user",
+			temperature=0.7,
+			max_tokens=200,
+			top_p=0.9,
+			stop=["END"],
+			presence_penalty=0.1,
+			frequency_penalty=0.2,
+			seed=42,
+			user="test_user",
 			response_format={"type": "json_object"},
 		)
 		opts = _CHAT_OPTIONS.llm_options(req)
@@ -65,6 +71,7 @@ class TestChatRequest:
 		resp = _error_response(400, "bad request", "invalid_request_error", "bad_param")
 		assert resp.status_code == 400
 		import json
+
 		body = json.loads(resp.body)
 		assert body["error"]["message"] == "bad request"
 		assert body["error"]["type"] == "invalid_request_error"
@@ -76,6 +83,7 @@ class TestChatRequest:
 		resp = _CHAT_VALIDATOR.validate(req)
 		assert resp.status_code == 400
 		import json
+
 		body = json.loads(resp.body)
 		assert body["error"]["param"] == "logprobs"
 		assert body["error"]["code"] == "unsupported_parameter"
@@ -135,38 +143,50 @@ class TestUnsupportedRequestParameters:
 		return TestClient(app)
 
 	def test_rejects_n_greater_than_one(self):
-		resp = self._client().post("/v1/chat/completions", json={
-			"model": "agent",
-			"messages": [{"role": "user", "content": "hi"}],
-			"n": 2,
-		})
+		resp = self._client().post(
+			"/v1/chat/completions",
+			json={
+				"model": "agent",
+				"messages": [{"role": "user", "content": "hi"}],
+				"n": 2,
+			},
+		)
 		assert resp.status_code == 400
 		assert resp.json()["error"]["code"] == "unsupported_parameter"
 
 	def test_rejects_request_level_tools(self):
-		resp = self._client().post("/v1/chat/completions", json={
-			"model": "agent",
-			"messages": [{"role": "user", "content": "hi"}],
-			"tools": [{"type": "function", "function": {"name": "x", "parameters": {}}}],
-		})
+		resp = self._client().post(
+			"/v1/chat/completions",
+			json={
+				"model": "agent",
+				"messages": [{"role": "user", "content": "hi"}],
+				"tools": [{"type": "function", "function": {"name": "x", "parameters": {}}}],
+			},
+		)
 		assert resp.status_code == 400
 		assert resp.json()["error"]["code"] == "unsupported_parameter"
 
 	def test_rejects_tool_choice(self):
-		resp = self._client().post("/v1/chat/completions", json={
-			"model": "agent",
-			"messages": [{"role": "user", "content": "hi"}],
-			"tool_choice": "auto",
-		})
+		resp = self._client().post(
+			"/v1/chat/completions",
+			json={
+				"model": "agent",
+				"messages": [{"role": "user", "content": "hi"}],
+				"tool_choice": "auto",
+			},
+		)
 		assert resp.status_code == 400
 		assert resp.json()["error"]["code"] == "unsupported_parameter"
 
 	def test_rejects_unknown_parameter(self):
-		resp = self._client().post("/v1/chat/completions", json={
-			"model": "agent",
-			"messages": [{"role": "user", "content": "hi"}],
-			"logprobs": True,
-		})
+		resp = self._client().post(
+			"/v1/chat/completions",
+			json={
+				"model": "agent",
+				"messages": [{"role": "user", "content": "hi"}],
+				"logprobs": True,
+			},
+		)
 		assert resp.status_code == 400
 		assert resp.json()["error"]["param"] == "logprobs"
 
@@ -178,9 +198,12 @@ class TestUnsupportedRequestParameters:
 		assert "/v1/capabilities" in body["openai_compatibility"]["routes"]
 
 	def test_missing_agent_or_model_is_rejected(self):
-		resp = self._client().post("/v1/chat/completions", json={
-			"messages": [{"role": "user", "content": "hi"}],
-		})
+		resp = self._client().post(
+			"/v1/chat/completions",
+			json={
+				"messages": [{"role": "user", "content": "hi"}],
+			},
+		)
 		assert resp.status_code == 400
 
 
@@ -191,22 +214,8 @@ class FakeAPIAgent:
 		yield Event.cost_update(3, 2)
 		yield Event.delta("he")
 		yield Event.tool_call("lookup", "tc1", {"q": "x"})
-		yield Event.tool_args_preview("lookup", "tc1", "{\"q\"", "{\"q\"", 0)
+		yield Event.tool_args_preview("lookup", "tc1", '{"q"', '{"q"', 0)
 		yield Event.done("hello")
-
-
-class FakeAPIEngine:
-	def __init__(self, agent=None):
-		self.agent = agent or FakeAPIAgent()
-		self.loaded = []
-
-	def load_agent_template(self, yaml_path):
-		self.loaded.append(yaml_path)
-		agent = self.agent
-		class Template:
-			def instantiate(self, *, models, mounts=None, metadata=None, overrides=None):
-				return agent
-		return Template()
 
 
 async def test_sync_response_collects_done_and_usage():
@@ -233,7 +242,9 @@ async def test_stream_response_emits_content_tool_usage_and_done():
 		stream_options={"include_usage": True},
 		messages=[ChatMessage(role="user", content="hi")],
 	)
-	chunks = [chunk async for chunk in _stream_response(FakeAPIAgent(), [{"role": "user", "content": "hi"}], request, {})]
+	chunks = [
+		chunk async for chunk in _stream_response(FakeAPIAgent(), [{"role": "user", "content": "hi"}], request, {})
+	]
 	joined = "".join(chunks)
 	assert '"role": "assistant"' in joined
 	assert '"content": "he"' in joined
@@ -242,31 +253,54 @@ async def test_stream_response_emits_content_tool_usage_and_done():
 	assert chunks[-1] == "data: [DONE]\n\n"
 
 
-def test_engine_state_loads_lists_and_resolves_yaml(tmp_path):
-	agent_file = tmp_path / "demo.yaml"
-	agent_file.write_text("name: demo\n", encoding="utf-8")
-	state = EngineState(engine=FakeAPIEngine(), models=object(), agents_dir=str(tmp_path))
-	agent = state.get_agent("demo")
-	assert agent.description == "fake"
-	assert state.get_agent("demo") is agent
-	assert {"name": "demo", "description": "fake"} in state.list_agents()
-	assert state._resolve_yaml(str(agent_file)) == str(agent_file)
-	assert state.get_agent("missing") is None
+async def test_engine_state_uses_host_registry_and_directory(tmp_path, mock_llm):
+	from axc_agent_engine import AgentModels, Engine
+
+	root = tmp_path / "templates"
+	root.mkdir()
+	allowed = root / "first.yaml"
+	allowed.write_text("name: configured\ndescription: local")
+	outside = tmp_path / "external.yaml"
+	outside.write_text("name: other")
+	(root / "external-link.yaml").symlink_to(outside)
+	(root / "valid-link.yml").symlink_to(allowed)
+	(root / "directory.yml").mkdir()
+	engine = Engine()
+	state = EngineState(engine=engine, models=AgentModels(default=mock_llm), agents_dir=str(root))
+	try:
+		preloaded = engine.load_agent_template(str(allowed)).instantiate(models=state.models)
+		preloaded.name = "public label"
+		assert state.get_agent("configured") is preloaded
+		assert state.get_agent("first") is preloaded
+		assert state.get_agent("valid-link") is preloaded
+		assert sorted(a["name"] for a in state.list_agents()) == ["configured", "first", "valid-link"]
+		for name in ("missing", "first.yaml", str(outside), "../external", "external-link", "directory"):
+			assert state.get_agent(name) is None
+		await engine.unload_agent("configured")
+		assert state.get_agent("configured") is None
+		assert state.get_agent("first") is not preloaded
+		assert len(engine.list_agents()) == 1
+	finally:
+		await engine.close()
 
 
-def test_create_app_routes_and_error_handler(tmp_path):
+def test_create_app_routes_and_error_handler(tmp_path, mock_llm):
+	from axc_agent_engine import AgentModels, Engine
 	from axc_agent_engine.core.errors import ProviderError
 
 	agent_file = tmp_path / "agent.yaml"
 	agent_file.write_text("name: agent\n", encoding="utf-8")
-	app = create_app(FakeAPIEngine(), models=object(), agents_dir=str(tmp_path))
+	app = create_app(Engine(), models=AgentModels(default=mock_llm), agents_dir=str(tmp_path))
 	client = TestClient(app)
 	assert client.get("/health").json() == {"status": "ok"}
 	assert client.get("/ready").json() == {"status": "ready"}
-	resp = client.post("/v1/chat/completions", json={
-		"model": "agent",
-		"messages": [{"role": "user", "content": "hi"}],
-	})
+	resp = client.post(
+		"/v1/chat/completions",
+		json={
+			"model": "agent",
+			"messages": [{"role": "user", "content": "hi"}],
+		},
+	)
 	assert resp.status_code == 200
 
 	@app.get("/boom")
@@ -274,3 +308,92 @@ def test_create_app_routes_and_error_handler(tmp_path):
 		raise ProviderError("provider down")
 
 	assert client.get("/boom").status_code == 502
+
+
+def test_http_por_stream_and_completion_agree_on_final_answer_and_usage(tmp_path):
+	import json
+
+	from axc_agent_engine import AgentModels, Engine, LLMMessage, LLMResponse, LLMStreamChunk, LLMUsage, PluginRegistry
+	from axc_agent_engine.plugins.builtin import PORPlugin
+
+	class Model:
+		model = "offline"
+
+		async def chat(self, messages, tools=None, **kwargs):
+			plan = {"goal": "finish", "steps": [{"step_id": 1, "description": "read"}]}
+			return LLMResponse(message=LLMMessage(content=json.dumps(plan)))
+
+		async def stream(self, messages, tools=None, **kwargs):
+			yield LLMStreamChunk(content_delta="answer", usage=LLMUsage(input_tokens=3, output_tokens=2))
+
+		async def ask(self, prompt, **kwargs):
+			return '{"action":"done","step_ok":true,"goal_achieved":true}'
+
+	registry = PluginRegistry()
+	registry.register(PORPlugin)
+	engine = Engine(plugin_registry=registry)
+	models = AgentModels(default=Model())
+	(tmp_path / "report.yaml").write_text("name: report\nplugins: {por: {enabled: true}}")
+	app = create_app(engine, models=models, agents_dir=str(tmp_path))
+	request = {"model": "report", "messages": [{"role": "user", "content": "prepare report"}]}
+	with TestClient(app) as client:
+		buffered = client.post("/v1/chat/completions", json=request)
+		assert buffered.status_code == 200
+		stream = client.post(
+			"/v1/chat/completions", json={**request, "stream": True, "stream_options": {"include_usage": True}}
+		)
+		assert stream.status_code == 200
+	lines = [line.removeprefix("data: ") for line in stream.text.splitlines() if line]
+	assert lines[-1] == "[DONE]"
+	chunks = [json.loads(line) for line in lines[:-1]]
+	text = "".join(c["delta"].get("content", "") for chunk in chunks for c in chunk["choices"])
+	assert text == buffered.json()["choices"][0]["message"]["content"] == "answer"
+	assert (
+		chunks[-1]["usage"]
+		== buffered.json()["usage"]
+		== {"prompt_tokens": 6, "completion_tokens": 4, "total_tokens": 10}
+	)
+
+
+async def test_http_terminal_text_completes_deltas_once():
+	import json
+
+	class Agent:
+		def __init__(self, deltas):
+			self.deltas = deltas
+
+		async def stream_with_messages(self, *args, **kwargs):
+			for delta in self.deltas:
+				yield Event.delta(delta)
+			yield Event.done("hello")
+
+	request = ChatRequest(model="demo", messages=[ChatMessage(role="user", content="hi")])
+	for deltas in [[], ["he"], ["he", "llo"]]:
+		chunks = [
+			json.loads(chunk.removeprefix("data: "))
+			async for chunk in _stream_response(Agent(deltas), [], request, {})
+			if "[DONE]" not in chunk
+		]
+		assert "".join(choice["delta"].get("content", "") for chunk in chunks for choice in chunk["choices"]) == "hello"
+
+
+async def test_http_cancellation_returns_reason_and_partial_stream_usage():
+	import json
+
+	class Agent:
+		async def stream_with_messages(self, *args, **kwargs):
+			yield Event.cancelled("host stopped", {"usage": {"input_tokens": 3, "output_tokens": 1}})
+
+	req = ChatRequest(
+		model="demo", messages=[ChatMessage(role="user", content="hi")], stream_options={"include_usage": True}
+	)
+	response = await _sync_response(Agent(), [], req, {})
+	assert response.status_code == 499
+	assert json.loads(response.body)["error"]["code"] == "run_cancelled"
+
+	chunks = [chunk async for chunk in _stream_response(Agent(), [], req, {})]
+	assert chunks[-1] == "data: [DONE]\n\n"
+	error, usage = [json.loads(chunk.removeprefix("data: ")) for chunk in chunks[-3:-1]]
+	assert error["axc_event"] == {"type": "cancelled", "data": {"content": "host stopped"}}
+	assert error["choices"][0]["finish_reason"] == "error"
+	assert usage["usage"]["total_tokens"] == 4

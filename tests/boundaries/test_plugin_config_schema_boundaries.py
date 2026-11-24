@@ -1,5 +1,6 @@
 """Plugin configuration schema boundary tests.
 中文：插件配置 Schema 边界测试。"""
+
 from __future__ import annotations
 
 import ast
@@ -8,7 +9,6 @@ from pathlib import Path
 from axc_agent_engine.plugins.builtin import AVAILABLE_BUILTIN_PLUGINS
 from axc_agent_engine.plugins.registry import PluginRegistry
 
-
 ROOT = next(path for path in Path(__file__).resolve().parents if (path / "pyproject.toml").exists())
 PLUGIN_ROOT = ROOT / "axc_agent_engine" / "plugins"
 MODEL_CONFIG_KEYS = {"model", "model_name", "llm", "llm_model", "provider", "provider_name"}
@@ -16,7 +16,7 @@ MODEL_CONFIG_KEYS = {"model", "model_name", "llm", "llm_model", "provider", "pro
 
 def test_plugin_config_schemas_do_not_expose_model_selection():
 	"""Plugin YAML must not choose agent model/provider.
-中文：插件 YAML 不能选择 Agent 模型或 provider。"""
+	中文：插件 YAML 不能选择 Agent 模型或 provider。"""
 	registry = PluginRegistry()
 	registry.register_many(AVAILABLE_BUILTIN_PLUGINS.values())
 	offenders: list[str] = []
@@ -30,7 +30,7 @@ def test_plugin_config_schemas_do_not_expose_model_selection():
 
 def test_plugins_do_not_read_model_selection_from_config():
 	"""Plugin code must not read model/provider selection from YAML config.
-中文：插件代码不能从 YAML config 读取模型或 provider 选择。"""
+	中文：插件代码不能从 YAML config 读取模型或 provider 选择。"""
 	offenders: list[str] = []
 	for path in sorted(PLUGIN_ROOT.rglob("*.py")):
 		tree = ast.parse(path.read_text(encoding="utf-8"))

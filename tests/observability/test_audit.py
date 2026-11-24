@@ -1,9 +1,10 @@
 """Tests for structured audit events."""
+
 from __future__ import annotations
 
-from axc_agent_engine.observability.audit import AuditEventType, InMemoryAuditSink
 from axc_agent_engine.core.context import ExecutionConfig, ExecutionContext, ExecutionServices
 from axc_agent_engine.core.schema import Capability, ToolDefinition
+from axc_agent_engine.observability.audit import AuditEventType, InMemoryAuditSink
 from axc_agent_engine.tools.audit import audit_tool_event
 from axc_agent_engine.tools.orchestrator import execute_tool_calls
 from axc_agent_engine.tools.registry import ToolRegistry

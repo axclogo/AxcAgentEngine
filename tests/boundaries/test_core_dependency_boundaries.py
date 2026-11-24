@@ -1,9 +1,9 @@
 """Core dependency boundary tests for execution-kernel refactors."""
+
 from __future__ import annotations
 
-from pathlib import Path
 import tomllib
-
+from pathlib import Path
 
 ROOT = next(path for path in Path(__file__).resolve().parents if (path / "pyproject.toml").exists())
 
@@ -54,9 +54,7 @@ def test_burr_is_only_workflow_adapter_dependency():
 
 
 def test_react_kernel_does_not_depend_on_planning_or_workflow():
-	path = ROOT / "axc_agent_engine/core/react_kernel.py"
-	if not path.exists():
-		return
+	path = ROOT / "axc_agent_engine/plugins/strategies/react_kernel.py"
 	text = path.read_text(encoding="utf-8")
 	assert "axc_agent_engine.planning" not in text
 	assert "axc_agent_engine.workflow" not in text

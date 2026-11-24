@@ -1,22 +1,21 @@
 """Tests for Executor checkpoint persistence."""
+
 from __future__ import annotations
 
 import json
-from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
 
-from axc_agent_engine.runtime.checkpoint import Checkpoint, CheckpointStatus, InMemoryCheckpointStore
 from axc_agent_engine.core.context import ExecutionConfig, ExecutionContext, ExecutionServices
+from axc_agent_engine.core.events import Event, EventType
 from axc_agent_engine.core.executor import Executor
 from axc_agent_engine.core.llm_caller import LLMCaller
 from axc_agent_engine.core.plugin_manager import PluginManager
-from axc_agent_engine.core.events import EventType
-from axc_agent_engine.core.events import Event
 from axc_agent_engine.core.schema import LLMMessage, LLMResponse, LLMUsage, ToolDefinition
 from axc_agent_engine.plugins import PluginContext
 from axc_agent_engine.plugins.builtin.tracing.plugin import TracingPlugin
+from axc_agent_engine.runtime.checkpoint import Checkpoint, CheckpointStatus, InMemoryCheckpointStore
 from axc_agent_engine.tools.registry import ToolRegistry
 from axc_agent_engine.tools.tool_output import ToolOutput
 from axc_agent_engine.workflow.state import resume_snapshot_from_checkpoint
@@ -97,7 +96,7 @@ async def test_executor_writes_start_round_and_done_checkpoints():
 
 
 async def test_executor_raises_when_checkpoint_store_save_fails():
-	class BrokenCheckpointStore:
+	class BrokenCheckpointStore(InMemoryCheckpointStore):
 		async def save(self, checkpoint):
 			raise RuntimeError("checkpoint write failed")
 
@@ -129,11 +128,13 @@ async def test_executor_writes_round_completed_checkpoint_after_tool_call():
 	async def echo(args, ctx):
 		return ToolOutput.text(args["msg"])
 
-	registry.register(ToolDefinition(
-		name="echo",
-		execute=echo,
-		parameters={"type": "object", "properties": {"msg": {"type": "string"}}, "required": ["msg"]},
-	))
+	registry.register(
+		ToolDefinition(
+			name="echo",
+			execute=echo,
+			parameters={"type": "object", "properties": {"msg": {"type": "string"}}, "required": ["msg"]},
+		)
+	)
 	ctx = ExecutionContext(
 		config=ExecutionConfig(stream=False, max_rounds=5),
 		services=ExecutionServices(checkpoint_store=store),
@@ -145,7 +146,9 @@ async def test_executor_writes_round_completed_checkpoint_after_tool_call():
 
 	assert events[-1].type == EventType.DONE
 	checkpoints = await store.list("run-tool")
-	round_completed = [item for item in checkpoints if item.kind == "round" and item.status == CheckpointStatus.COMPLETED]
+	round_completed = [
+		item for item in checkpoints if item.kind == "round" and item.status == CheckpointStatus.COMPLETED
+	]
 	assert len(round_completed) == 1
 	assert round_completed[0].state["tool_calls"] == ["echo"]
 	assert any(msg.get("role") == "tool" for msg in round_completed[0].state["messages"])
@@ -272,8 +275,8 @@ async def test_executor_restores_por_checkpoint_and_runs_resume_branch(monkeypat
 			seen.update({"checkpoint": checkpoint_state, "user_message": user_message, "run_id": run_id})
 			yield Event.done("resumed por")
 
-	monkeypatch.setattr(executor, "_new_por_runner", lambda: Runner())
-	executor.load_resume_snapshot("por-run", {"por_checkpoint": {"step": 2}})
+	monkeypatch.setattr(executor._loop, "_new_por_runner", lambda: Runner())
+	executor.load_resume_snapshot("por-run", {"strategy": "por", "strategy_state": {"step": 2}})
 
 	events = [event async for event in executor.run_stream("continue")]
 
@@ -299,8 +302,8 @@ async def test_executor_por_first_generates_and_runs_plan(monkeypatch):
 			seen["run_message"] = user_message
 			yield Event.done("por done")
 
-	monkeypatch.setattr("axc_agent_engine.core.executor.PlanningService.generate_plan", generate_plan)
-	monkeypatch.setattr(executor, "_new_por_runner", lambda: Runner())
+	monkeypatch.setattr("axc_agent_engine.plugins.strategies.por.PlanningService.generate_plan", generate_plan)
+	monkeypatch.setattr(executor._loop, "_new_por_runner", lambda: Runner())
 
 	events = [event async for event in executor.run_stream("make plan")]
 
@@ -309,53 +312,22 @@ async def test_executor_por_first_generates_and_runs_plan(monkeypatch):
 	assert seen["plan"] is plan
 
 
-async def test_executor_por_first_plan_error_and_empty_plan(monkeypatch):
+async def test_executor_por_first_plan_error(monkeypatch):
 	executor, _ctx = _executor_for_branch_tests(routing_mode="por_first")
 
 	async def failing_plan(llm, ctx, user_message):
 		raise RuntimeError("planner down")
 
-	monkeypatch.setattr("axc_agent_engine.core.executor.PlanningService.generate_plan", failing_plan)
+	monkeypatch.setattr("axc_agent_engine.plugins.strategies.por.PlanningService.generate_plan", failing_plan)
 	error_events = [event async for event in executor.run_stream("bad")]
 	assert error_events[-1].type == EventType.ERROR
 	assert error_events[-1].content == "planner down"
 
-	empty_executor, _ = _executor_for_branch_tests(routing_mode="por_first")
-	empty_plan = MagicMock()
-	empty_plan.steps = []
 
-	async def empty_generate(llm, ctx, user_message):
-		return empty_plan
-
-	monkeypatch.setattr("axc_agent_engine.core.executor.PlanningService.generate_plan", empty_generate)
-	react_events = [event async for event in empty_executor.run_stream("react fallback")]
-	assert react_events[-1].type == EventType.DONE
-	assert react_events[-1].content == "react"
-
-
-async def test_executor_detect_plan_handoff_branches(monkeypatch):
+async def test_por_handoff_only_accepts_a_valid_plan():
 	executor, _ctx = _executor_for_branch_tests()
-	plan = MagicMock()
-	plan.steps = [object()]
-	executor._router.route = lambda message: SimpleNamespace(action="por_plan", plan=plan)
-
-	assert await executor._detect_plan_handoff({}, "u") == (True, plan, "")
-
-	empty_plan = MagicMock()
-	empty_plan.steps = []
-	executor._router.route = lambda message: SimpleNamespace(action="por_plan", plan=empty_plan)
-	assert await executor._detect_plan_handoff({}, "u") == (False, None, "PlanningService returned an empty plan")
-
-	executor._router.route = lambda message: SimpleNamespace(action="react", plan=None)
-	assert await executor._detect_plan_handoff({}, "u") == (False, None, "")
-
-	executor._router.route = lambda message: SimpleNamespace(action="por_plan", plan=None)
-
-	async def failing_plan(llm, ctx, user_message):
-		raise RuntimeError("no plan")
-
-	monkeypatch.setattr("axc_agent_engine.core.executor.PlanningService.generate_plan", failing_plan)
-	assert await executor._detect_plan_handoff({}, "u") == (False, None, "no plan")
+	for content in ("plain text", '{"goal":"g","steps":[]}', '{"goal":"g","steps":[{"step_id":1,"depends_on":[2]}]}'):
+		assert executor._loop._handoff({"content": content}, "goal") is None
 
 
 async def test_executor_exception_path_writes_failed_checkpoint_and_lifecycle_error(monkeypatch):
@@ -364,11 +336,11 @@ async def test_executor_exception_path_writes_failed_checkpoint_and_lifecycle_er
 	executor._ctx.services.checkpoint_store = store
 	executor._ctx.state.metadata["run_id"] = "exception-run"
 
-	async def broken_loop(user_message):
+	async def broken_loop(user_message, state):
 		raise RuntimeError("loop exploded")
 		yield
 
-	monkeypatch.setattr(executor, "_react_loop", broken_loop)
+	monkeypatch.setattr(executor._loop, "run", broken_loop)
 
 	with pytest.raises(RuntimeError, match="loop exploded"):
 		[event async for event in executor.run_stream("boom")]
@@ -379,7 +351,7 @@ async def test_executor_exception_path_writes_failed_checkpoint_and_lifecycle_er
 
 
 def test_executor_init_messages_can_skip_user_message():
-	executor, ctx = _executor_for_branch_tests(system_prompt="system")
+	executor, _ctx = _executor_for_branch_tests(system_prompt="system")
 	executor.skip_user_init = True
 
 	executor._init_messages("user")
@@ -389,8 +361,8 @@ def test_executor_init_messages_can_skip_user_message():
 
 async def test_agent_resume_stream_restores_latest_execution_checkpoint():
 	from axc_agent_engine.agent import Agent
-	from axc_agent_engine.core.session_manager import SessionManager
 	from axc_agent_engine.core.schema import RuntimeConfig
+	from axc_agent_engine.core.session_manager import SessionManager
 	from axc_agent_engine.storage.in_memory import InMemoryMessagePersistence
 
 	captured_messages: list[list[dict]] = []
@@ -400,18 +372,20 @@ async def test_agent_resume_stream_restores_latest_execution_checkpoint():
 		{"role": "user", "content": "original"},
 		{"role": "assistant", "content": "partial"},
 	]
-	await store.save(Checkpoint(
-		run_id="agent-resume",
-		sequence=2,
-		kind="round",
-		status=CheckpointStatus.INTERRUPTED,
-		state={
-			"cursor": {"current_round": 2},
-			"messages": messages,
-			"usage": {"input_tokens": 0, "output_tokens": 0},
-			"metadata": {"session_id": "s1", "agent_name": "agent"},
-		},
-	))
+	await store.save(
+		Checkpoint(
+			run_id="agent-resume",
+			sequence=2,
+			kind="round",
+			status=CheckpointStatus.INTERRUPTED,
+			state={
+				"cursor": {"current_round": 2},
+				"messages": messages,
+				"usage": {"input_tokens": 0, "output_tokens": 0},
+				"metadata": {"session_id": "s1", "agent_name": "agent"},
+			},
+		)
+	)
 	persistence = InMemoryMessagePersistence()
 	session_manager = SessionManager("agent", persistence=persistence)
 	agent = Agent(

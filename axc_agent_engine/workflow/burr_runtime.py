@@ -1,79 +1,33 @@
-"""Apache Burr workflow runtime adapter.
+"""Track workflow transitions through optional Burr actions. 通过可选的 Burr 动作记录工作流状态转移。"""
 
-Burr remains optional and isolated in this module. Importing the main engine
-does not import Burr; deployers choose this runtime when they want durable
-workflow state around pause/resume.
-中文：此文档说明相关引擎组件的行为。"""
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
-from dataclasses import dataclass
 from typing import Any
 
-from axc_agent_engine.core.events import Event, EventType
-from axc_agent_engine.workflow.protocols import (
-	WorkflowResumeRequest,
-	WorkflowRunRequest,
-	WorkflowStatus,
-)
-from axc_agent_engine.workflow.state import prepare_resume_plan
+from axc_agent_engine.workflow.memory_runtime import MemoryWorkflowRuntime, WorkflowRecord
+from axc_agent_engine.workflow.protocols import WorkflowResumePlan, WorkflowResumeRequest, WorkflowStatus
 
 
-@dataclass
-class _BurrRecord:
-	status: WorkflowStatus
-	state: dict[str, Any]
-
-
-class BurrWorkflowRuntime:
-	"""WorkflowRuntime implementation backed by Apache Burr state objects.
-中文：此文档说明相关引擎组件的行为。"""
+class BurrWorkflowRuntime(MemoryWorkflowRuntime):
+	"""Record workflow transitions with Burr. 使用 Burr 记录工作流状态转移。"""
 
 	def __init__(self) -> None:
-		self._records: dict[str, _BurrRecord] = {}
+		super().__init__()
 		self._burr = self._load_burr()
 
-	async def run(self, request: WorkflowRunRequest) -> AsyncIterator[Event]:
-		self._set_state(request.run_id, WorkflowStatus.RUNNING, request.metadata)
-		async for event in request.handler():
-			self._record_event(request.run_id, event)
-			yield event
-
-	async def resume(self, request: WorkflowResumeRequest) -> AsyncIterator[Event]:
-		plan = await prepare_resume_plan(request)
-		if plan is None:
-			yield Event.error(f"No checkpoint found for run_id={request.run_id}")
-			return
-		metadata = dict(request.metadata)
-		metadata.update(plan.metadata)
-		metadata["message"] = request.message
-		metadata["kind"] = plan.kind
+	def _start_resume(self, request: WorkflowResumeRequest, plan: WorkflowResumePlan) -> None:
+		metadata = {**request.metadata, **plan.metadata, "message": request.message, "kind": plan.kind}
 		self._set_state(request.run_id, WorkflowStatus.RUNNING, metadata)
 		self._run_burr_action("resume", request.run_id, metadata)
-		async for event in request.handler(plan):
-			self._record_event(request.run_id, event)
-			yield event
-
-	async def pause(self, run_id: str, reason: str = "") -> None:
-		self._set_state(run_id, WorkflowStatus.PAUSED, {"reason": reason})
-
-	async def status(self, run_id: str) -> WorkflowStatus:
-		record = self._records.get(run_id)
-		return record.status if record else WorkflowStatus.MISSING
 
 	def _set_state(self, run_id: str, status: WorkflowStatus, values: dict[str, Any] | None = None) -> None:
 		State = self._burr["State"]
 		state = State(values or {}).update(status=status.value)
-		self._records[run_id] = _BurrRecord(status=status, state=dict(state.get_all()))
-
-	def _record_event(self, run_id: str, event: Event) -> None:
-		if event.type == EventType.DONE:
-			self._set_state(run_id, WorkflowStatus.COMPLETED, {"result": event.content})
-		elif event.type == EventType.ERROR:
-			self._set_state(run_id, WorkflowStatus.FAILED, {"error": event.content})
+		self._records[run_id] = WorkflowRecord(status=status, state=dict(state.get_all()))
 
 	def _run_burr_action(self, action_name: str, run_id: str, values: dict[str, Any]) -> None:
-		State = self._burr["State"]
+		from burr.core import State
+
 		ApplicationBuilder = self._burr["ApplicationBuilder"]
 		action = self._burr["action"]
 
@@ -89,20 +43,18 @@ class BurrWorkflowRuntime:
 			.build()
 		)
 		_, _, state = app.run(halt_after=["workflow_action"])
-		record = self._records.get(run_id)
-		self._records[run_id] = _BurrRecord(
-			status=record.status if record else WorkflowStatus.RUNNING,
+		self._records[run_id] = WorkflowRecord(
+			status=self._records[run_id].status,
 			state=dict(state.get_all()),
 		)
 
 	def _load_burr(self) -> dict[str, Any]:
 		try:
-			from burr.core import ApplicationBuilder, State, action, expr
+			from burr.core import ApplicationBuilder, State, action
 		except ImportError as e:
 			raise RuntimeError("BurrWorkflowRuntime requires installing axc-agent-engine[workflow]") from e
 		return {
 			"ApplicationBuilder": ApplicationBuilder,
 			"State": State,
 			"action": action,
-			"expr": expr,
 		}

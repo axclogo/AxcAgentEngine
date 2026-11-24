@@ -1,10 +1,11 @@
 """Parameterized boundary coverage for the engine redesign."""
+
 import pytest
 
-from axc_agent_engine.runtime.input import PassthroughInputProvider
 from axc_agent_engine.plugins.builtin.compress.context.normalizer import normalize_messages, public_message
 from axc_agent_engine.plugins.builtin.compress.context.packer import pack_context
 from axc_agent_engine.plugins.builtin.compress.context.recent_window import select_recent_window
+from axc_agent_engine.runtime.input import PassthroughInputProvider
 from axc_agent_engine.runtime.resources import ResourceRegistry
 
 
@@ -62,12 +63,14 @@ def test_recent_window_matrix(index):
 def test_pack_context_current_user_matrix(index):
 	old = "old " * (200 + index)
 	current = f"current-{index}"
-	messages = normalize_messages([
-		{"role": "system", "content": "sys"},
-		{"role": "user", "content": old},
-		{"role": "assistant", "content": old},
-		{"role": "user", "content": current},
-	])
+	messages = normalize_messages(
+		[
+			{"role": "system", "content": "sys"},
+			{"role": "user", "content": old},
+			{"role": "assistant", "content": old},
+			{"role": "user", "content": current},
+		]
+	)
 	result = pack_context(messages, max_input_tokens=80, reserve_output_tokens=20)
 	assert result.messages[0]["role"] == "system"
 	assert result.messages[-1]["content"] == current

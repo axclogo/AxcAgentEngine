@@ -1,13 +1,13 @@
 """JSON 提取工具 — 从 LLM 文本响应中提取 JSON。"""
+
 import json
 import re
 from typing import Any
 
 
 def extract_json_object(text: str) -> dict[str, Any]:
-	"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-从文本中提取第一个 JSON 对象，失败返回空 dict"""
+	"""Extract the first JSON object or return an empty dictionary.
+	从文本中提取第一个 JSON 对象，失败返回空 dict"""
 	text = text.strip()
 	for candidate in _json_candidates(text, "{", "}"):
 		try:
@@ -20,9 +20,8 @@ def extract_json_object(text: str) -> dict[str, Any]:
 
 
 def extract_json_array(text: str) -> list[dict] | None:
-	"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-从文本中提取 JSON 数组，失败返回 None"""
+	"""Extract a JSON array if present.
+	从文本中提取 JSON 数组，失败返回 None"""
 	text = text.strip()
 	for candidate in _json_candidates(text, "[", "]"):
 		try:
@@ -35,9 +34,8 @@ def extract_json_array(text: str) -> list[dict] | None:
 
 
 def _json_candidates(text: str, open_char: str, close_char: str) -> list[str]:
-	"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-按可信度返回可能的 JSON 片段。"""
+	"""Yield JSON candidates in confidence order.
+	按可信度返回可能的 JSON 片段。"""
 	if not text:
 		return []
 	candidates = [text]
@@ -75,5 +73,5 @@ def _extract_balanced(text: str, open_char: str, close_char: str) -> str:
 		elif char == close_char:
 			depth -= 1
 			if depth == 0:
-				return text[start:idx + 1]
+				return text[start : idx + 1]
 	return ""

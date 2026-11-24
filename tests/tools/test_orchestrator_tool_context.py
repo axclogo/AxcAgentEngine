@@ -1,10 +1,12 @@
 """Tests for orchestrator building ToolContext correctly."""
+
 import pytest
-from axc_agent_engine.tools.orchestrator import execute_tool_calls, partition_tool_calls
-from axc_agent_engine.tools.registry import ToolRegistry
-from axc_agent_engine.core.context import ExecutionContext, ExecutionConfig, ExecutionState
+
+from axc_agent_engine.core.context import ExecutionConfig, ExecutionContext, ExecutionState
 from axc_agent_engine.core.plugin_manager import PluginManager
 from axc_agent_engine.core.schema import ToolDefinition
+from axc_agent_engine.tools.orchestrator import execute_tool_calls, partition_tool_calls
+from axc_agent_engine.tools.registry import ToolRegistry
 from axc_agent_engine.tools.tool_output import ToolOutput
 
 
@@ -53,8 +55,14 @@ class TestExecuteToolCalls:
 			return ToolOutput.json_output({"ok": True})
 
 		reg = ToolRegistry()
-		reg.register(ToolDefinition(name="test_tool", execute=capture_tool, is_read_only=True,
-			parameters={"type": "object", "properties": {}}))
+		reg.register(
+			ToolDefinition(
+				name="test_tool",
+				execute=capture_tool,
+				is_read_only=True,
+				parameters={"type": "object", "properties": {}},
+			)
+		)
 		ctx = ExecutionContext(
 			config=ExecutionConfig(workspace="/my/workspace"),
 			state=ExecutionState(),
@@ -75,8 +83,7 @@ class TestExecuteToolCalls:
 			return ToolOutput.text("ok")
 
 		reg = ToolRegistry()
-		reg.register(ToolDefinition(name="t", execute=capture_tool,
-			parameters={"type": "object", "properties": {}}))
+		reg.register(ToolDefinition(name="t", execute=capture_tool, parameters={"type": "object", "properties": {}}))
 		ctx = ExecutionContext(config=ExecutionConfig(), state=ExecutionState())
 		pm = PluginManager([])
 		results = await execute_tool_calls([{"name": "t", "arguments": {}, "id": "x"}], reg, pm.plugins, ctx)
@@ -99,6 +106,7 @@ class TestExecuteToolCalls:
 
 		class RejectPlugin(BasePlugin):
 			name = "reject"
+
 			async def pre_tool_call(self, exec_ctx, tool_name, arguments):
 				return False, arguments
 
@@ -106,8 +114,7 @@ class TestExecuteToolCalls:
 			return ToolOutput.text("ok")
 
 		reg = ToolRegistry()
-		reg.register(ToolDefinition(name="t", execute=noop,
-			parameters={"type": "object", "properties": {}}))
+		reg.register(ToolDefinition(name="t", execute=noop, parameters={"type": "object", "properties": {}}))
 		ctx = ExecutionContext()
 		pm = PluginManager([RejectPlugin()])
 		results = await execute_tool_calls([{"name": "t", "arguments": {}, "id": "x"}], reg, pm.plugins, ctx)
@@ -117,11 +124,12 @@ class TestExecuteToolCalls:
 
 	@pytest.mark.asyncio
 	async def test_plugin_rejection_preserves_reason(self):
-		from axc_agent_engine.plugins.base import BasePlugin
 		from axc_agent_engine.core.plugin_manager import PreToolCallDecision
+		from axc_agent_engine.plugins.base import BasePlugin
 
 		class RejectPlugin(BasePlugin):
 			name = "reject_guard"
+
 			async def pre_tool_call(self, exec_ctx, tool_name, arguments):
 				return PreToolCallDecision(
 					allowed=False,
@@ -134,8 +142,7 @@ class TestExecuteToolCalls:
 			return ToolOutput.text("ok")
 
 		reg = ToolRegistry()
-		reg.register(ToolDefinition(name="t", execute=noop,
-			parameters={"type": "object", "properties": {}}))
+		reg.register(ToolDefinition(name="t", execute=noop, parameters={"type": "object", "properties": {}}))
 		ctx = ExecutionContext()
 		pm = PluginManager([RejectPlugin()])
 
@@ -159,8 +166,7 @@ class TestExecuteToolCalls:
 			return ToolOutput.text("ok")
 
 		reg = ToolRegistry()
-		reg.register(ToolDefinition(name="t", execute=capture_tool,
-			parameters={"type": "object", "properties": {}}))
+		reg.register(ToolDefinition(name="t", execute=capture_tool, parameters={"type": "object", "properties": {}}))
 		store = InMemoryArtifactStore()
 		services = ExecutionServices(artifact_store=store)
 		ctx = ExecutionContext(config=ExecutionConfig(), state=ExecutionState(), services=services)
@@ -178,11 +184,112 @@ class TestExecuteToolCalls:
 			return ToolOutput.text("ok")
 
 		reg = ToolRegistry()
-		reg.register(ToolDefinition(name="t", execute=capture_tool,
-			parameters={"type": "object", "properties": {}}))
+		reg.register(ToolDefinition(name="t", execute=capture_tool, parameters={"type": "object", "properties": {}}))
 		ctx = ExecutionContext(config=ExecutionConfig(), state=ExecutionState())
 		pm = PluginManager([])
 		results = await execute_tool_calls([{"name": "t", "arguments": {}, "id": "call-123"}], reg, pm.plugins, ctx)
 		assert results[0].success
 		assert received_context["tool_name"] == "t"
 		assert received_context["tool_call_id"] == "call-123"
+
+
+@pytest.mark.parametrize("parallel,limit,expected", [(False, 4, 1), (True, 1, 1), (True, 2, 2)])
+async def test_tool_concurrency_enforced_across_por_children(parallel, limit, expected):
+	import asyncio
+
+	ctx = ExecutionContext(config=ExecutionConfig(parallel_tool_calls=parallel, max_parallel_tool_calls=limit))
+	active = peak = 0
+	entered, release = asyncio.Event(), asyncio.Event()
+
+	async def read(args, context):
+		nonlocal active, peak
+		active += 1
+		peak = max(active, peak)
+		if active == expected:
+			entered.set()
+		try:
+			await release.wait()
+			await asyncio.sleep(0)
+			return ToolOutput.text(context["tool_call_id"])
+		finally:
+			active -= 1
+
+	registry = ToolRegistry()
+	registry.register(ToolDefinition(name="read", is_read_only=True, execute=read))
+	calls = [{"name": "read", "id": str(i), "arguments": {}} for i in range(8)]
+	async with asyncio.timeout(2):
+		tasks = [
+			asyncio.create_task(execute_tool_calls(batch, registry, [], ctx.fork_for_child()))
+			for batch in [calls[:4], calls[4:]]
+		]
+		try:
+			await entered.wait()
+		finally:
+			release.set()
+			batches = await asyncio.gather(*tasks)
+	assert peak == expected and active == 0
+	assert [r.tool_call_id for batch in batches for r in batch if r.success] == [c["id"] for c in calls]
+
+
+async def test_tool_chunk_preserves_write_barriers():
+	import asyncio
+
+	ctx = ExecutionContext(config=ExecutionConfig(max_parallel_tool_calls=2))
+	order = []
+
+	async def record(args, context):
+		order.append(("start", context["tool_call_id"]))
+		await asyncio.sleep(0)
+		order.append(("end", context["tool_call_id"]))
+		return ToolOutput.text("ok")
+
+	registry = ToolRegistry()
+	for name in ("read", "write"):
+		registry.register(ToolDefinition(name=name, is_read_only=name == "read", execute=record))
+	calls = [{"name": name, "id": str(i), "arguments": {}} for i, name in enumerate(["read"] * 3 + ["write", "read"])]
+	results = await execute_tool_calls(calls, registry, [], ctx)
+	assert all(result.success for result in results)
+	assert max(order.index(("end", str(i))) for i in range(3)) < order.index(("start", "3"))
+	assert order.index(("end", "3")) < order.index(("start", "4"))
+
+
+@pytest.mark.parametrize("limit", [0, -1, False, "2", 1.5])
+def test_runtime_rejects_invalid_tool_concurrency(limit):
+	from pydantic import ValidationError
+
+	from axc_agent_engine.core.schema import RuntimeConfig
+
+	with pytest.raises(ValidationError, match="max_parallel_tool_calls"):
+		RuntimeConfig(max_parallel_tool_calls=limit)
+
+
+async def test_failed_tool_batch_joins_sibling_and_releases_run_slots(monkeypatch):
+	import asyncio
+
+	from axc_agent_engine.tools.orchestrator import ToolExecutionPipeline
+
+	ctx = ExecutionContext(config=ExecutionConfig(max_parallel_tool_calls=2))
+	pipeline = ToolExecutionPipeline(ToolRegistry(), PluginManager([]), ctx)
+	pipeline.registry.register(ToolDefinition(name="read", is_read_only=True))
+	blocked, closed = asyncio.Event(), asyncio.Event()
+	seen = []
+
+	async def execute(call, registry, plugins, ctx):
+		seen.append(call["id"])
+		if call["id"] == "0":
+			await blocked.wait()
+			raise RuntimeError("fatal hook failure")
+		blocked.set()
+		try:
+			await asyncio.Event().wait()
+		finally:
+			closed.set()
+
+	monkeypatch.setattr("axc_agent_engine.tools.orchestrator._execute_single_with_timeout", execute)
+	calls = [{"name": "read", "id": str(i), "arguments": {}} for i in range(3)]
+	async with asyncio.timeout(2):
+		with pytest.raises(RuntimeError, match="fatal hook failure"):
+			await pipeline.execute(calls)
+		assert closed.is_set() and set(seen) == {"0", "1"}
+		async with ctx.tool_slots, ctx.tool_slots:
+			assert ctx.tool_slots.locked()

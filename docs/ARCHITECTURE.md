@@ -17,21 +17,23 @@ AgentTemplate.instantiate(models=AgentModels(...), mounts=..., metadata=..., ove
   → materialize AgentConfig with overrides
   → bind Agent-level model objects
   → create PluginContext (agent-level LLM, stores, dispatcher)
-  → load_plugins() from Engine PluginRegistry → topological sort → initialize()
-  → create ToolRegistry → freeze()
+  → validate plugin schemas and dependency graph → initialize dependencies first
   → create Agent with an internally scoped SessionManager
+  → select the strategy, register plugin tools, then freeze the tool registry
   → dispatcher.run_agent_consumer(agent)  ← auto-start consumer
   → return Agent
 
 Agent.chat/stream(message, session_id, llm_options)
-  → _create_executor(config, routing_mode, llm_options)
+  → _execution_context(request)
       → clone Engine-provided ExecutionServices into ExecutionContext
       → write agent_name/session_id metadata
+  → _create_executor(ctx) binds the selected strategy and its run-scoped runtime
   → restore session context
   → Executor.run_stream(user_message)
-      → _init_messages (system prompt + plugin context + user)
-      → PluginManager.on_execution_start()
-      → _react_loop:
+      → initialize input and system messages for a new run
+      → run start hooks and insert the collected plugin context
+      → create and run the selected loop (official ReAct/POR or host plugin)
+      → official ReAct path:
           ├─ transform_messages (plugins)
           ├─ check_should_stop (plugins)
           ├─ LLMCaller.call (stream or sync)
@@ -39,7 +41,7 @@ Agent.chat/stream(message, session_id, llm_options)
           │   ├─ primary LLM (retry + fallback)
           │   ├─ StreamAggregator (real-time on_delta → queue)
           │   └─ post_llm_call hooks
-          ├─ TransactionRouter.route(message)
+          ├─ POR auto mode only: TransactionRouter.route(message)
           │   └─ if action=por_plan → PORRunner
           ├─ if tool_calls:
           │   └─ execute_tool_calls (orchestrator)
@@ -78,17 +80,19 @@ reranking; the host owns any external client lifecycle.
 
 ## POR (Plan-Observe-Replan)
 
-POR is selected by TransactionRouter based on runtime routing policy:
-- `routing.mode: auto` — detect structured plan JSON in LLM response content
-- `routing.mode: por_first` — always attempt plan detection
-- `routing.mode: react_only` — never enter POR, pure ReAct
+The official POR plugin supports `plugins.por.mode` values `por_first` (default) and `auto`.
+New hosts register a strategy plugin and enable it in YAML. Only templates without a named or enabled strategy use `runtime.routing.mode` to select one of those same official implementations:
+- `runtime.routing.mode: auto` — detect structured plan JSON in LLM response content
+- `runtime.routing.mode: por_first` — generate a plan before the first ReAct round
+- `runtime.routing.mode: react_only` — never enter POR, pure ReAct
 
 `create_plan` is an internal function in `planner.py` that constructs a Plan
 dataclass from parsed JSON. It is NOT a tool in ToolRegistry.
 
-PORRunner receives a Plan object directly from TransactionRouter:
-- Steps execute sequentially (parallel for isolated contexts)
-- Each step: sub-ReAct loop with dynamic round budget
+In auto mode the router hands a detected plan to PORRunner. In por_first mode the strategy asks PlanningService for the initial plan.
+
+- POR dispatches at most `plugins.por.max_parallel_steps` ready steps per batch (default 4). Each step receives its declared prerequisite results.
+- Serial and isolated step loops charge the same run round counter. The step deadline covers model and tool waits. The executor applies the total timeout while waiting for strategy events and closes the producer on expiry.
 - Observer evaluates step results (LLM or heuristic fallback)
 - Replanner: topological step dependencies, max 3 replans
 
@@ -136,6 +140,8 @@ initialize(config, plugin_ctx)     # Engine-level, once per Agent load
 
 ## Tool Execution Pipeline
 
+`runtime.parallel_tool_calls: false` serializes tool execution even when a model or custom loop submits multiple calls. With parallel execution enabled, `runtime.max_parallel_tool_calls` sets a positive per-run limit (default 4), shared by POR steps. Adjacent read-only calls can overlap. Writes retain their position between read batches, and results follow request order.
+
 All tools return ToolOutput. Non-ToolOutput returns are rejected.
 Tools with a non-empty capability are rejected unless the capability is listed
 in `runtime.allowed_capabilities` or a custom policy evaluator allows them.
@@ -156,7 +162,12 @@ orchestrator.execute_tool_calls
 Large results stored via ArtifactStore, retrievable via artifact_read/artifact_search/artifact_page tools.
 HTTP tools block localhost/private/link-local/reserved destinations before
 request execution. Command tools use the configured CommandExecutor, falling
-back to LocalSubprocessExecutor for local development.
+back to LocalSubprocessExecutor for local development. Local output is captured on disk with at most 1 MiB per
+stream returned inline. A larger stream is retained as a complete file under the command working directory’s
+`.axc/logs/`; command tools register that path with the host artifact store. Retain the file for the lifetime of
+its artifact reference. `CommandResult.stdout_path` and `stderr_path` identify streams stored on disk. A host executor returning these fields supplies paths its artifact store can read. POSIX commands run in a dedicated process group, reclaimed on exit, timeout or cancellation.
+On Windows, timeout and cancellation request tree termination with `taskkill /T /F`. A host executor owns the
+lifecycle of remote jobs and any processes that detach from its control.
 
 ## Storage Protocols
 
@@ -177,3 +188,39 @@ name at call time.
 
 Engine injects stores, message bus, audit sink, checkpoint store, custom policy,
 and command executor services into every Agent-created ExecutionContext.
+
+
+## Resume and cleanup
+
+A resume request goes through the workflow runtime to recover a snapshot. The executor checks the strategy name, validates its state version, and applies any migration before starting execution hooks or constructing the loop. A failed migration leaves the source checkpoint available for inspection or retry.
+
+Memory and Burr share the transitions used for run, pause, resume and terminal events. Burr supplies its state representation and resume action. Both adapters track workflow status in process. Recovery in a fresh process requires a host checkpoint store that can read the saved snapshot. A closed, unfinished stream pauses the workflow. Agent session writes and release of concurrency slots finish before the caller receives a terminal event.
+
+A completed execution checkpoint contains the final reply. Resuming it with no pending input returns that reply after ownership and strategy validation. The replay leaves the checkpoint and any newer session history intact. New input starts another loop from the saved conversation. An interrupted snapshot with missing tool results stops before a model request and reports the outstanding call IDs.
+
+### Run-local control
+
+Each executor owns one FIFO inbox, message history and checkpoint writer. Input admission, consumption, plan revision and tool-write intent share the writer lock. A running POR graph publishes plan and step progress to its consumer. Closing the stream joins the graph and its outstanding step tasks. A dispatched agent has a separate run and checkpoint ID, with cancellation linked to its active parent. This permits independent recovery and keeps child receipts out of the parent inbox.
+
+The agent shares compression configuration across runs. It keeps buffers, observations and file caches in the execution context. A named run restores and saves its session boundary through the selected store. Anonymous runs start clean.
+
+The in-memory message bus keeps agent inbox subscriptions open while idle. Hosts can pass `max_idle_rounds` to set an idle timeout in minutes. Closing the bus wakes subscribers and pending request callers immediately. Each short-lived reply channel is removed when its last subscriber leaves.
+
+## Execution forks
+
+A host selects a retained checkpoint with `cp.forkable` from its own `CheckpointStore.list(run_id)`. A rejected position exposes its reason in `cp.fork_blocker`.
+`await agent.fork_run(run_id, cp.id, metadata=identity)` checks the exact cut and saves a single independent checkpoint.
+The returned `ForkedRun` contains fresh run and session IDs. The source may still be running.
+Resume the child through `agent.resume_stream(child.run_id, message, metadata=identity)`.
+The source can be deleted after creation. Every later child checkpoint records the immediate source run and cut in
+`metadata["forked_from"]`. A child can be forked by the same operation.
+
+A cut includes admitted messages, recorded tool results, the strategy cursor and portable session data.
+Queued input, receipts, current cancellation, and billing belong to the originating run. An unfinished branch
+inherits the round cursor. A completed branch replays its saved result without model calls and starts a fresh
+round budget when given new input. Its session history is written back when the child executes.
+Old or expired cuts, an incompatible strategy or plugin set, and unresolved writes fail explicitly.
+
+宿主负责调用授权、多进程单写、检查点保留期限，以及将切点与 Git 工作区、制品或外部系统版本关联。
+引擎从切点继续时不会重放历史工具调用。切点之后的工作可能由两个分支分别执行，文件和外部副作用由宿主隔离。
+分叉和分支恢复时传入原始租户与用户身份；同时提供记忆插件配置的其他作用域字段。

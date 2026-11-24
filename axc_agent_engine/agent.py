@@ -2,30 +2,41 @@
 
 English: User-facing chat entry point that wraps execution, sessions, tools, and plugins.
 """
+
 from __future__ import annotations
 
-import asyncio
 import logging
+from collections.abc import AsyncGenerator, AsyncIterator, Callable
+from contextlib import aclosing, asynccontextmanager
 from dataclasses import replace
-from contextlib import AsyncExitStack
-from typing import Any, AsyncIterator
+from typing import Any
+from uuid import uuid4
 
 from axc_agent_engine.core.context import ExecutionConfig, ExecutionContext, ExecutionServices
-from axc_agent_engine.core.events import Event, EventType
+from axc_agent_engine.core.errors import CancelledError, ProviderError
+from axc_agent_engine.core.events import TERMINAL_EVENTS, Event, EventType
 from axc_agent_engine.core.executor import Executor
 from axc_agent_engine.core.input_messages import extract_last_user_message, normalize_multimodal_messages
 from axc_agent_engine.core.llm_caller import LLMCaller
+from axc_agent_engine.core.message_store import MessageStore
 from axc_agent_engine.core.plugin_manager import PluginManager
-from axc_agent_engine.core.run_context import context_run_id, dict_or_empty
+from axc_agent_engine.core.run_context import checkpoint_owner, context_run_id, dict_or_empty
 from axc_agent_engine.core.run_request import RunRequest
+from axc_agent_engine.core.schema import RuntimeConfig
 from axc_agent_engine.core.session import Session
 from axc_agent_engine.core.session_manager import SessionManager
-from axc_agent_engine.core.schema import RuntimeConfig
 from axc_agent_engine.llm.provider import LLMProvider
-from axc_agent_engine.plugins.context import agent_info_from_runtime, model_info_from_models
 from axc_agent_engine.plugins.base import BasePlugin
+from axc_agent_engine.plugins.context import agent_info_from_runtime, model_info_from_models
+from axc_agent_engine.plugins.loader import close_plugins
+from axc_agent_engine.plugins.strategy_selection import select_strategy
+from axc_agent_engine.runtime.checkpoint import ForkedRun
 from axc_agent_engine.runtime.concurrency import ExecutionLimiter, SessionExecutionGate
+from axc_agent_engine.runtime.inbox import receipt
 from axc_agent_engine.runtime.input import InputProvider, InputProviderResult, PassthroughInputProvider
+from axc_agent_engine.runtime.policy import CapabilityPolicyEvaluator
+from axc_agent_engine.runtime.run_control import RunControlRegistry
+from axc_agent_engine.runtime.tasks import managed_stream
 from axc_agent_engine.tools.registry import ToolRegistry
 from axc_agent_engine.workflow import (
 	WorkflowResumePlan,
@@ -33,98 +44,21 @@ from axc_agent_engine.workflow import (
 	WorkflowRuntime,
 	create_workflow_runtime,
 )
+from axc_agent_engine.workflow.state import fork_checkpoint
 
 logger = logging.getLogger(__name__)
 
 
-class ExecutionContextFactory:
-	def __init__(self, agent: "Agent") -> None:
-		self.agent = agent
-
-	def create(
-		self,
-		request: RunRequest,
-	) -> ExecutionContext:
-		agent = self.agent
-		config = ExecutionConfig(
-			system_prompt=agent._system_prompt,
-			max_rounds=agent._runtime.max_rounds,
-			stream=request.stream,
-			thinking=agent._runtime.thinking,
-			parallel_tool_calls=agent._runtime.parallel_tool_calls,
-			human_in_the_loop=agent._runtime.human_in_the_loop,
-			stream_idle_timeout=request.options.stream_idle_timeout or agent._runtime.stream_idle_timeout,
-			workspace=agent._runtime.workspace,
-			step_timeout=agent._runtime.step_timeout,
-			total_timeout=agent._runtime.total_timeout,
-			allowed_capabilities=frozenset(agent._runtime.allowed_capabilities),
-		)
-		services = replace(agent._services)
-		ctx = ExecutionContext(config=config, services=services, utility_model=agent._utility_model)
-		model_info = model_info_from_models(agent._default_model, agent._fallback_model, agent._utility_model)
-		routing_mode = agent._runtime.routing.mode if agent._runtime.routing else "auto"
-		agent_info = agent_info_from_runtime(
-			name=agent.name,
-			description=agent.description,
-			workspace=agent._runtime.workspace,
-			session_id=request.session_id,
-			routing_mode=routing_mode,
-		)
-		ctx.runtime.model_info = model_info
-		ctx.runtime.agent_info = agent_info
-		ctx.state.metadata["model"] = model_info.to_dict()
-		ctx.state.metadata["agent"] = agent_info.to_dict()
-		if agent._metadata:
-			ctx.state.metadata.update(agent._metadata)
-		if request.metadata:
-			ctx.state.metadata.update(request.metadata)
-			try:
-				ctx.runtime.agent_call_depth = int(request.metadata.get("agent_call_depth", 0))
-			except (TypeError, ValueError):
-				ctx.runtime.agent_call_depth = 0
-		ctx.state.metadata["agent_name"] = agent.name
-		if request.session_id:
-			ctx.state.metadata["session_id"] = request.session_id
-		if request.llm_options:
-			ctx.runtime.llm_options = dict(request.llm_options)
-		ctx.runtime.approval_queue = request.options.approval_queue
-		ctx.runtime.response_queue = request.options.response_queue
-		return ctx
-
-
-class ExecutorFactory:
-	def __init__(self, agent: "Agent") -> None:
-		self.agent = agent
-		self.context_factory = ExecutionContextFactory(agent)
-
-	def create(
-		self,
-		request: RunRequest,
-	) -> Executor:
-		agent = self.agent
-		ctx = self.context_factory.create(request)
-		pm = PluginManager(agent._plugins)
-		llm_caller = LLMCaller(primary=agent._default_model, fallback=agent._fallback_model, plugin_manager=pm)
-		routing_mode = agent._runtime.routing.mode if agent._runtime.routing else "auto"
-		return Executor(
-			llm_caller=llm_caller,
-			registry=agent._registry,
-			plugin_manager=pm,
-			ctx=ctx,
-			routing_mode=routing_mode,
-		)
-
-
-class RunCoordinator:
-	def __init__(self, agent: "Agent") -> None:
-		self.agent = agent
-
-	async def slots(self, session_id: str):
-		stack = AsyncExitStack()
-		await stack.enter_async_context(self.agent._engine_limiter.slot())
-		await stack.enter_async_context(self.agent._agent_limiter.slot())
-		await stack.enter_async_context(self.agent._session_gate.slot(session_id))
-		return stack
+async def _final_text(events: AsyncIterator[Event]) -> str:
+	async with managed_stream(events):
+		async for event in events:
+			if event.type == EventType.DONE:
+				return event.content
+			if event.type == EventType.ERROR:
+				raise ProviderError(event.content)
+			if event.type == EventType.CANCELLED:
+				raise CancelledError(event.content)
+	raise RuntimeError("Execution ended without a terminal event")
 
 
 class Agent:
@@ -145,7 +79,7 @@ class Agent:
 		utility_model: LLMProvider | None = None,
 		session_manager: SessionManager | None = None,
 		registry: ToolRegistry | None = None,
-		artifact_store: "object | None" = None,
+		artifact_store: object | None = None,
 		services: ExecutionServices | None = None,
 		input_provider: InputProvider | None = None,
 		engine_limiter: ExecutionLimiter | None = None,
@@ -153,16 +87,20 @@ class Agent:
 		metadata: dict[str, Any] | None = None,
 	) -> None:
 		self.name = name
+		self._registered_name = name
 		self.description = description
 		self._system_prompt = system_prompt
 		self._runtime = runtime
-		self._plugins = plugins
+		self._plugin_manager = PluginManager(plugins)
+		self._strategy, self._strategy_reason = select_strategy(plugins, runtime.strategy, runtime.routing.mode)
 		self._default_model = default_model
 		self._fallback_model = fallback_model
 		self._utility_model = utility_model
 		self._session_manager = session_manager or SessionManager(name)
 		self._registry = registry or ToolRegistry()
 		self._services = services or ExecutionServices(artifact_store=artifact_store)
+		if self._services.run_control is None:
+			self._services = replace(self._services, run_control=RunControlRegistry())
 		self._input_provider = input_provider or PassthroughInputProvider()
 		self._workflow_runtime = workflow_runtime or create_workflow_runtime()
 		self._metadata = dict_or_empty(metadata, "metadata")
@@ -177,8 +115,6 @@ class Agent:
 			self._runtime.concurrency.max_session_concurrent_runs,
 			queue_timeout,
 		)
-		self._executor_factory = ExecutorFactory(self)
-		self._run_coordinator = RunCoordinator(self)
 		for plugin in plugins:
 			tools = plugin.get_tools()
 			self._registry.register_many(tools)
@@ -186,8 +122,61 @@ class Agent:
 		logger.info(f"Agent '{name}' loaded: {len(plugins)} plugins, {self._registry.count} tools")
 
 	@property
+	def registered_name(self) -> str:
+		"""Stable name used for routing and stored state. 路由与持久化状态使用的固定注册名。"""
+		return self._registered_name
+
+	def inspect(self) -> dict[str, Any]:
+		"""Describe the actual agent without executing a turn. 查看 Agent 的有效装配与当前工具。"""
+		policy = self._services.policy_evaluator
+		if policy is None:
+			policy = CapabilityPolicyEvaluator(set(self._runtime.allowed_capabilities))
+		return {
+			"agent": self.name,
+			"strategy": {
+				"name": self._strategy.name,
+				"reason": self._strategy_reason,
+				"state_version": self._strategy.state_version,
+				"settings": self._strategy.inspection_settings(),
+			},
+			"plugins": [plugin.name for plugin in self._plugin_manager.plugins],
+			"allowed_capabilities": list(self._runtime.allowed_capabilities),
+			"policy": type(policy).__name__,
+			"tools": [
+				{
+					"name": tool.name,
+					"capability": tool.capability,
+					"capability_allowed": policy.allows_capability(tool.capability)
+					if type(policy) is CapabilityPolicyEvaluator
+					else None,
+					"risk_level": tool.risk_level,
+					"deferred": tool.deferred,
+				}
+				for tool in self._registry.get_all()
+			],
+		}
+
+	@property
 	def registry(self) -> ToolRegistry:
 		return self._registry
+
+	async def send_message(self, run_id: str, text: str, *, message_id: str, session_id: str) -> str:
+		"""Submit user input to an active run. 将用户输入交给指定会话的活动运行。"""
+		control = self._services.run_control
+		token = control.token(run_id) if control else None
+		if token is not None:
+			for ctx in token.contexts:
+				if ctx.runtime.agent_owner is self and ctx.state.metadata.get("session_id", "") == session_id:
+					return await ctx.runtime.inbox.send(message_id, text)
+			return "closed"
+		store = self._services.checkpoint_store
+		checkpoint = await store.latest(run_id) if store else None
+		if checkpoint:
+			meta = checkpoint.state.get("metadata", {})
+			if meta.get("agent_name") == self.registered_name and meta.get("session_id", "") == session_id:
+				inbox = checkpoint.state.get("inbox", {})
+				return receipt(dict(inbox.get("entries", [])), inbox.get("consumed", 0), message_id, text, False)
+		return "closed"
 
 	async def chat(
 		self,
@@ -197,19 +186,16 @@ class Agent:
 		run_options: dict | None = None,
 		metadata: dict | None = None,
 	) -> str:
-		"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-非流式对话。
-
-		English: Run a non-streaming chat turn and return the final assistant text.
-		"""
-		return await self._execute(
-			user_message=message,
-			session_id=session_id,
-			stream=False,
-			llm_options=llm_options,
-			run_options=run_options,
-			metadata=metadata,
+		"""Run a turn and return the final reply. 执行一轮对话并返回最终回复。"""
+		return await _final_text(
+			self._execute_stream(
+				user_message=message,
+				session_id=session_id,
+				stream=False,
+				llm_options=llm_options,
+				run_options=run_options,
+				metadata=metadata,
+			)
 		)
 
 	async def chat_with_messages(
@@ -220,70 +206,84 @@ class Agent:
 		run_options: dict | None = None,
 		metadata: dict | None = None,
 	) -> str:
-		"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-接受结构化消息列表的非流式对话。
-
-		English: Run a non-streaming chat turn from a structured message list.
-		"""
+		"""Run a turn from structured messages. 使用结构化消息执行对话。"""
 		user_msg = extract_last_user_message(messages)
-		return await self._execute(
-			user_message=user_msg,
-			inject_messages=messages,
-			session_id=session_id,
-			stream=False,
-			llm_options=llm_options,
-			run_options=run_options,
-			metadata=metadata,
+		return await _final_text(
+			self._execute_stream(
+				user_message=user_msg,
+				inject_messages=messages,
+				session_id=session_id,
+				stream=False,
+				llm_options=llm_options,
+				run_options=run_options,
+				metadata=metadata,
+			)
 		)
 
-	async def stream(
+	def stream(
 		self,
 		message: str,
 		session_id: str = "",
 		llm_options: dict | None = None,
 		run_options: dict | None = None,
 		metadata: dict | None = None,
-	) -> AsyncIterator[Event]:
-		"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-流式对话。
-
-		English: Stream execution events for one chat turn.
-		"""
-		async for event in self._execute_stream(
+	) -> AsyncGenerator[Event, None]:
+		"""Stream the events of one turn. 逐个返回一轮对话的事件。"""
+		return self._execute_stream(
 			user_message=message,
 			session_id=session_id,
 			llm_options=llm_options,
 			run_options=run_options,
 			metadata=metadata,
-		):
-			yield event
+		)
 
-	async def stream_with_messages(
+	def stream_with_messages(
 		self,
 		messages: list[dict],
 		session_id: str = "",
 		llm_options: dict | None = None,
 		run_options: dict | None = None,
 		metadata: dict | None = None,
-	) -> AsyncIterator[Event]:
-		"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-接受结构化消息列表的流式对话。
-
-		English: Stream execution events from a structured message list.
-		"""
+	) -> AsyncGenerator[Event, None]:
+		"""Stream a turn from structured messages. 使用结构化消息执行流式对话。"""
 		user_msg = extract_last_user_message(messages)
-		async for event in self._execute_stream(
+		return self._execute_stream(
 			user_message=user_msg,
 			inject_messages=messages,
 			session_id=session_id,
 			llm_options=llm_options,
 			run_options=run_options,
 			metadata=metadata,
-		):
-			yield event
+		)
+
+	async def fork_run(self, run_id: str, checkpoint_id: str, *, metadata: dict | None = None) -> ForkedRun:
+		"""Create an independent run at an exact stored cut. 从指定的持久化切点创建独立运行。"""
+		store = self._services.checkpoint_store
+		if store is None:
+			raise ValueError("CheckpointStore is required for fork")
+		checkpoint = next((cp for cp in await store.list(run_id) if cp.id == checkpoint_id), None)
+		if checkpoint is None:
+			raise ValueError("Fork checkpoint not found in source run")
+		state = checkpoint.state
+		meta = state.get("metadata", {})
+		caller = {**self._metadata, **dict_or_empty(metadata, "metadata")}
+		owner = checkpoint_owner(caller)
+		if meta.get("agent_name") != self.registered_name or owner != state.get("owner", {}):
+			raise ValueError("Fork checkpoint belongs to another agent, tenant or user")
+		if reason := checkpoint.fork_blocker:
+			raise ValueError(reason)
+		MessageStore.validate_history(state["messages"])
+		continuation = self._strategy.restore_state(state)
+		branch = ForkedRun(uuid4().hex, uuid4().hex)
+		source = {**caller, **meta}
+		target = {**source, "session_id": branch.session_id, "run_id": branch.run_id}
+		scopes = self._plugin_manager.fork_scopes(state.get("plugin_scopes", {}), source, target, state["fork_state"])
+		seed = fork_checkpoint(checkpoint, branch, scopes, continuation, self._strategy.state_version)
+		with self._services.run_control.claim(branch.run_id):
+			if await store.latest(branch.run_id) is not None:
+				raise ValueError("Generated branch run ID already exists")
+			await store.save(seed)
+		return branch
 
 	async def resume(
 		self,
@@ -293,25 +293,10 @@ class Agent:
 		run_options: dict | None = None,
 		metadata: dict | None = None,
 	) -> str:
-		"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-非流式恢复执行级 checkpoint。"""
-		from axc_agent_engine.core.errors import ProviderError
-		result = ""
-		async for event in self.resume_stream(
-			run_id,
-			message=message,
-			llm_options=llm_options,
-			run_options=run_options,
-			metadata=metadata,
-		):
-			if event.type == EventType.DONE:
-				result = event.content
-			elif event.type == EventType.ERROR:
-				raise ProviderError(event.content)
-		return result
+		"""Resume a checkpoint and return the final reply. 从检查点恢复并返回最终回复。"""
+		return await _final_text(self.resume_stream(run_id, message, llm_options, run_options, metadata))
 
-	async def resume_stream(
+	def resume_stream(
 		self,
 		run_id: str,
 		message: str = "",
@@ -319,9 +304,7 @@ class Agent:
 		run_options: dict | None = None,
 		metadata: dict | None = None,
 	) -> AsyncIterator[Event]:
-		"""English: Bilingual documentation follows.
-	中文：以下为双语文档说明。
-	通过 WorkflowRuntime 恢复 execution/round 或 POR checkpoint。"""
+		"""Stream events from a resumed workflow. 逐个返回恢复执行产生的事件。"""
 		self._validate_resume_metadata(run_id, metadata, run_options)
 		request = WorkflowResumeRequest(
 			run_id=run_id,
@@ -330,8 +313,7 @@ class Agent:
 			checkpoint_store=self._services.checkpoint_store,
 			metadata=dict_or_empty(metadata, "metadata"),
 		)
-		async for event in self._workflow_runtime.resume(request):
-			yield event
+		return self._claimed_stream(run_id, lambda: self._workflow_runtime.resume(request))
 
 	async def _resume_from_workflow_plan(
 		self,
@@ -341,96 +323,85 @@ class Agent:
 		run_options: dict | None = None,
 		metadata: dict | None = None,
 	) -> AsyncIterator[Event]:
-		"""Resume from a WorkflowRuntime-owned plan.
-中文：此文档说明相关引擎组件的行为。"""
-		if plan.kind == "missing":
+		"""Restore the selected run and its session. 还原工作流选定的运行和会话。"""
+		if plan.kind in {"handler", "missing"} and not plan.snapshot:
 			yield Event.error("CheckpointStore is required for resume")
 			return
+		owner = plan.snapshot.get("metadata", {}).get("agent_name")
+		if owner and owner != self.registered_name:
+			raise ValueError("Checkpoint belongs to another agent")
 		run_id = plan.run_id
 		session_id = plan.session_id
-		stream = bool((run_options or {}).get("stream", True))
-		async with await self._run_coordinator.slots(session_id):
+		async with self._slots(session_id):
+			await self._check_resume_cut(plan)
 			request_metadata = {"run_id": run_id, **dict_or_empty(metadata, "metadata")}
 			request = RunRequest.create(
 				user_message=message,
 				session_id=session_id,
-				stream=stream,
 				llm_options=llm_options,
 				run_options=run_options,
 				metadata=request_metadata,
 			)
-			executor = self._create_executor(request)
-			executor.load_resume_snapshot(run_id, plan.snapshot)
-			executor._ctx.state.metadata.update(request.metadata)
-			async for event in executor.run_stream(message):
-				yield event
-			if session_id:
-				session = await self._session_manager.get_or_create(session_id)
-				session.messages = executor.message_store.get_all()
-				await self._session_manager.save(session_id)
+			ctx = self._execution_context(request)
+			executor = self._create_executor(ctx)
+			replay = executor.load_resume_snapshot(run_id, plan.snapshot, message=message, resume_metadata=metadata)
+			ctx.state.metadata.update(request.metadata, agent_name=self.registered_name, session_id=session_id)
+			if replay is not None:
+				event = replay
+			else:
+				if (seed := plan.snapshot.get("session_seed")) is not None:
+					await self._plugin_manager.restore_session(ctx, seed)
+				async with aclosing(executor.run_stream(message)) as events:
+					async for event in events:
+						if event.type in TERMINAL_EVENTS:
+							break
+						yield event
+				await self._save_session(session_id, executor)
+		yield event
+
+	async def _check_resume_cut(self, plan: WorkflowResumePlan) -> None:
+		store = self._services.checkpoint_store
+		if store and (snapshot_id := plan.metadata.get("checkpoint_id")):
+			current = await store.latest(plan.run_id)
+			if (
+				current is None
+				or current.id != snapshot_id
+				or current.sequence != plan.snapshot.get("sequence", current.sequence)
+			):
+				raise ValueError("Checkpoint changed while waiting for a slot. Retry resume")
 
 	async def get_session(self, session_id: str) -> Session | None:
 		return await self._session_manager.get(session_id)
 
 	async def reset_session(self, session_id: str = "") -> None:
-		"""English: This documentation describes the related engine component behavior.
-中文：重置指定会话，空字符串清除所有"""
-		if session_id:
-			await self._session_manager.remove(session_id)
-		else:
-			await self._session_manager.clear()
+		"""Reset one session, or all sessions for an empty ID. 重置指定会话，空 ID 清除全部会话。"""
+		async with self._session_gate.reset(session_id):
+			for plugin in self._plugin_manager.plugins:
+				await plugin.on_session_reset(self.registered_name, session_id)
+			if session_id:
+				await self._session_manager.remove(session_id)
+			else:
+				await self._session_manager.clear()
+
+	@asynccontextmanager
+	async def _slots(self, session_id: str) -> AsyncIterator[None]:
+		async with self._engine_limiter.slot(), self._agent_limiter.slot(), self._session_gate.slot(session_id):
+			yield
 
 	async def close(self) -> None:
-		"""English: This documentation describes the related engine component behavior.
-中文：并行释放所有插件资源，带超时。"""
-		async def _close_plugin(plugin: BasePlugin) -> None:
-			try:
-				await asyncio.wait_for(plugin.close(), timeout=5.0)
-			except asyncio.TimeoutError:
-				logger.warning(f"Plugin {plugin.name} close timed out")
-			except Exception as e:
-				logger.warning(f"Plugin {plugin.name} close error: {e}")
-		await asyncio.gather(*[_close_plugin(p) for p in self._plugins])
+		await close_plugins(self._plugin_manager.plugins)
 
-	async def _execute(
-		self, user_message: str, session_id: str = "",
-		inject_messages: list[dict] | None = None, stream: bool = False,
-		llm_options: dict | None = None,
-		run_options: dict | None = None,
-		metadata: dict | None = None,
-	) -> str:
-		"""English: This documentation describes the related engine component behavior.
-中文：统一非流式执行"""
-		from axc_agent_engine.core.errors import ProviderError
-		result = ""
-		async for event in self._execute_stream(
-			user_message=user_message,
-			session_id=session_id,
-			inject_messages=inject_messages,
-			stream=stream,
-			llm_options=llm_options,
-			run_options=run_options,
-			metadata=metadata,
-		):
-			if event.type == EventType.DONE:
-				result = event.content
-			elif event.type == EventType.CANCELLED:
-				from axc_agent_engine.core.errors import CancelledError
-				raise CancelledError(event.content)
-			elif event.type == EventType.ERROR:
-				raise ProviderError(event.content)
-		return result
-
-	async def _execute_stream(
-		self, user_message: str, session_id: str = "",
+	def _execute_stream(
+		self,
+		user_message: str,
+		session_id: str = "",
 		inject_messages: list[dict] | None = None,
 		stream: bool = True,
 		llm_options: dict | None = None,
 		run_options: dict | None = None,
 		metadata: dict | None = None,
-	) -> AsyncIterator[Event]:
-		"""English: This documentation describes the related engine component behavior.
-中文：统一流式执行。"""
+	) -> AsyncGenerator[Event, None]:
+		"""Process input and write back the session before delivering the terminal event. 处理输入，在终止事件前写回会话。"""
 		request = RunRequest.create(
 			user_message=user_message,
 			session_id=session_id,
@@ -440,54 +411,115 @@ class Agent:
 			run_options=run_options,
 			metadata=metadata,
 		)
-		async with await self._run_coordinator.slots(request.session_id):
-			executor = self._create_executor(request)
+		return self._claimed_stream(request.metadata["run_id"], lambda: self._execute_request(request))
+
+	async def _claimed_stream(
+		self, run_id: str, open_stream: Callable[[], AsyncIterator[Event]]
+	) -> AsyncGenerator[Event, None]:
+		with self._services.run_control.claim(run_id):
+			async with managed_stream(open_stream()) as events:
+				async for event in events:
+					if event.type in TERMINAL_EVENTS:
+						break
+					yield event
+				else:
+					return
+		yield event
+
+	async def _execute_request(self, request: RunRequest) -> AsyncGenerator[Event, None]:
+		async with self._slots(request.session_id):
+			ctx = self._execution_context(request)
+			executor = self._create_executor(ctx)
 			raw_messages = (
-				request.messages if request.messages is not None
+				request.messages
+				if request.messages is not None
 				else [{"role": "user", "content": request.user_message}]
 			)
 			processed = await self._process_input(raw_messages, request.session_id)
 			processed.messages = normalize_multimodal_messages(processed.messages)
 			effective_user_message = extract_last_user_message(processed.messages) or request.user_message
 			if processed.artifacts:
-				executor._ctx.state.metadata["input_artifacts"] = processed.artifacts
+				ctx.state.metadata["input_artifacts"] = processed.artifacts
 			if processed.metadata:
-				executor._ctx.state.metadata["input_metadata"] = processed.metadata
-			#English: Source note. 中文：恢复会话上下文
+				ctx.state.metadata["input_metadata"] = processed.metadata
 			if request.session_id:
 				session = await self._session_manager.get_or_create(request.session_id)
 				self._session_manager.restore_context(session, executor.message_store)
-			#English: Bilingual note. 中文：所有入口都走 InputProvider，因此统一注入标准 messages。
 			if processed.messages:
 				executor.message_store.extend(processed.messages)
 				executor.skip_user_init = True
-				executor._ctx.add_image_tokens(processed.messages)
-			async for event in executor.run_stream(effective_user_message):
-				yield event
-			#English: Source note. 中文：写回会话并持久化
-			if request.session_id:
-				session = await self._session_manager.get_or_create(request.session_id)
-				session.messages = executor.message_store.get_all()
-				await self._session_manager.save(request.session_id)
+				ctx.add_image_tokens(processed.messages)
+			async with aclosing(executor.run_stream(effective_user_message)) as events:
+				async for event in events:
+					if event.type in TERMINAL_EVENTS:
+						break
+					yield event
+			await self._save_session(request.session_id, executor)
+		yield event
 
-	def _create_executor(
-		self,
-		request: RunRequest | str = "",
-		stream: bool = True,
-		llm_options: dict | None = None,
-		run_options: dict | None = None,
-		metadata: dict | None = None,
-	) -> "Executor":
-		if not isinstance(request, RunRequest):
-			request = RunRequest.create(
-				user_message="",
-				session_id=str(request or ""),
-				stream=stream,
-				llm_options=llm_options,
-				run_options=run_options,
-				metadata=metadata,
-			)
-		return self._executor_factory.create(request)
+	async def _save_session(self, session_id: str, executor: Executor) -> None:
+		if session_id:
+			session = await self._session_manager.get_or_create(session_id)
+			session.messages = executor.message_store.get_all()
+			await self._session_manager.save(session_id)
+
+	def _execution_context(self, request: RunRequest) -> ExecutionContext:
+		config = ExecutionConfig(
+			system_prompt=self._system_prompt,
+			max_rounds=self._runtime.max_rounds,
+			stream=request.stream,
+			thinking=self._runtime.thinking,
+			parallel_tool_calls=self._runtime.parallel_tool_calls,
+			max_parallel_tool_calls=self._runtime.max_parallel_tool_calls,
+			human_in_the_loop=self._runtime.human_in_the_loop,
+			stream_idle_timeout=request.options.stream_idle_timeout or self._runtime.stream_idle_timeout,
+			workspace=self._runtime.workspace,
+			step_timeout=self._runtime.step_timeout,
+			total_timeout=self._runtime.total_timeout,
+			allowed_capabilities=frozenset(self._runtime.allowed_capabilities),
+		)
+		services = replace(self._services)
+		ctx = ExecutionContext(config=config, services=services, utility_model=self._utility_model)
+		model_info = model_info_from_models(self._default_model, self._fallback_model, self._utility_model)
+		routing_mode = self._runtime.routing.mode
+		agent_info = agent_info_from_runtime(
+			name=self.registered_name,
+			description=self.description,
+			workspace=self._runtime.workspace,
+			session_id=request.session_id,
+			routing_mode=routing_mode,
+		)
+		ctx.runtime.agent_owner = self
+		ctx.runtime.model_info = model_info
+		ctx.runtime.agent_info = agent_info
+		ctx.state.metadata["model"] = model_info.to_dict()
+		ctx.state.metadata["agent"] = agent_info.to_dict()
+		if self._metadata:
+			ctx.state.metadata.update(self._metadata)
+		if request.metadata:
+			ctx.state.metadata.update(request.metadata)
+		depth = ctx.state.metadata.get("agent_call_depth", 0)
+		if type(depth) is not int or depth < 0:
+			raise ValueError("agent_call_depth must be a nonnegative integer")
+		ctx.runtime.agent_call_depth = depth
+		ctx.state.metadata["agent_name"] = self.registered_name
+		ctx.state.metadata["session_id"] = request.session_id
+		if request.llm_options:
+			ctx.runtime.llm_options = dict(request.llm_options)
+		ctx.runtime.approval_queue = request.options.approval_queue
+		ctx.runtime.response_queue = request.options.response_queue
+		return ctx
+
+	def _create_executor(self, ctx: ExecutionContext) -> Executor:
+		pm = self._plugin_manager
+		llm_caller = LLMCaller(primary=self._default_model, fallback=self._fallback_model, plugin_manager=pm)
+		return Executor(
+			llm_caller=llm_caller,
+			registry=self._registry,
+			plugin_manager=pm,
+			ctx=ctx,
+			strategy=self._strategy,
+		)
 
 	@staticmethod
 	def _validate_resume_metadata(run_id: str, metadata: dict | None, run_options: dict | None) -> None:
@@ -500,7 +532,7 @@ class Agent:
 
 	async def _process_input(self, messages: list[dict[str, Any]], session_id: str) -> InputProviderResult:
 		context = {
-			"agent_name": self.name,
+			"agent_name": self.registered_name,
 			"session_id": session_id,
 			"workspace": self._runtime.workspace,
 		}

@@ -1,7 +1,5 @@
-"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
+"""Builtin plugin namespace.
 内置插件命名空间。
-Builtin plugin namespace.
 
 内置插件不会自动注册；宿主必须把需要的插件类注册到 Engine 的 PluginRegistry。
 Builtin plugins are not registered automatically; hosts must register selected
@@ -18,14 +16,17 @@ from axc_agent_engine.plugins.builtin.knowledge.plugin import KnowledgePlugin
 from axc_agent_engine.plugins.builtin.mcp.plugin import MCPPlugin
 from axc_agent_engine.plugins.builtin.memory.plugin import MemoryPlugin
 from axc_agent_engine.plugins.builtin.output_format.plugin import OutputFormatPlugin
+from axc_agent_engine.plugins.builtin.post_process.plugin import PostProcessPlugin
 from axc_agent_engine.plugins.builtin.reflexion.plugin import ReflexionPlugin
+from axc_agent_engine.plugins.builtin.registry import AVAILABLE_BUILTIN_PLUGINS
 from axc_agent_engine.plugins.builtin.repetition_guard.plugin import RepetitionGuardPlugin
 from axc_agent_engine.plugins.builtin.risk_guard.plugin import RiskGuardPlugin
 from axc_agent_engine.plugins.builtin.safety.plugin import SafetyPlugin
 from axc_agent_engine.plugins.builtin.skill.plugin import SkillPlugin
 from axc_agent_engine.plugins.builtin.swarm.plugin import SwarmPlugin
 from axc_agent_engine.plugins.builtin.tracing.plugin import TracingPlugin
-from axc_agent_engine.plugins.builtin.registry import AVAILABLE_BUILTIN_PLUGINS
+from axc_agent_engine.plugins.strategies.por import PORPlugin
+from axc_agent_engine.plugins.strategies.react import ReActPlugin
 
 __all__ = [
 	"AVAILABLE_BUILTIN_PLUGINS",
@@ -40,6 +41,9 @@ __all__ = [
 	"MCPPlugin",
 	"MemoryPlugin",
 	"OutputFormatPlugin",
+	"PORPlugin",
+	"PostProcessPlugin",
+	"ReActPlugin",
 	"ReflexionPlugin",
 	"RepetitionGuardPlugin",
 	"RiskGuardPlugin",

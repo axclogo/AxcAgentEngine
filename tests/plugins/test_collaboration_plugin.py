@@ -1,18 +1,21 @@
 """Tests for collaboration plugin tools."""
+
 from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
+
 from axc_agent_engine.core.dispatcher import AgentEnvelope
 from axc_agent_engine.plugins import PluginContext
-from axc_agent_engine.plugins.builtin.collaboration.plugin import CollaborationPlugin
 from axc_agent_engine.plugins.builtin.collaboration.plugin import (
+	CollaborationPlugin,
 	_agent_call_durable_summary,
-	_bounded_timeout,
 	_collaboration_metadata,
 	_task_status,
 	_task_to_dict,
 )
+from axc_agent_engine.plugins.builtin.common import bounded_timeout
 from axc_agent_engine.runtime.resources import ResourceRegistry
 
 
@@ -197,15 +200,17 @@ async def test_agent_call_forwards_child_events_to_exec_sink():
 		{"agent_name": "worker", "message": "do it"},
 		{"agent_name": "caller", "exec_ctx": exec_ctx, "tool_call_id": "parent-call"},
 	)
-	dispatcher.callbacks[0](AgentEnvelope(
-		type="sub_agent_step",
-		content="tool",
-		metadata={
-			"agent_name": "worker",
-			"parent_tool_call_id": "parent-call",
-			"step": {"type": "tool_call", "tool": "search"},
-		},
-	))
+	dispatcher.callbacks[0](
+		AgentEnvelope(
+			type="sub_agent_step",
+			content="tool",
+			metadata={
+				"agent_name": "worker",
+				"parent_tool_call_id": "parent-call",
+				"step": {"type": "tool_call", "tool": "search"},
+			},
+		)
+	)
 
 	assert events[0].type.value == "sub_agent_step"
 	assert events[0].metadata["parent_tool_call_id"] == "parent-call"
@@ -233,6 +238,7 @@ def test_agent_list_filters_visible_agents():
 	)
 
 	import asyncio
+
 	result = asyncio.run(plugin._tool_agent_list({}, {"agent_name": "caller"}))
 
 	assert result.content["agents"] == [{"name": "worker", "description": "ok"}]
@@ -309,12 +315,6 @@ async def test_collaboration_plugin_awaits_async_get_task():
 	assert status.content["task_id"] == "task-1"
 
 
-def test_collaboration_disabled_plugin_exposes_no_tools():
-	plugin = _plugin([], RecordingDispatcher(), {"enabled": False})
-
-	assert plugin.get_tools() == []
-
-
 async def test_agent_call_rejects_missing_fields_depth_and_missing_dispatcher():
 	plugin = _plugin([SimpleNamespace(name="worker", description="")], RecordingDispatcher(), {"max_depth": 1})
 	deep_ctx = SimpleNamespace(runtime=SimpleNamespace(agent_call_depth=1), state=SimpleNamespace(metadata={}))
@@ -353,7 +353,7 @@ async def test_agent_call_reply_error_value_error_and_exception_restore_depth():
 		plugin = _plugin([SimpleNamespace(name="worker", description="")], dispatcher)
 		exec_ctx = SimpleNamespace(runtime=SimpleNamespace(agent_call_depth=0), state=SimpleNamespace(metadata={}))
 		result = await plugin._tool_agent_call(
-			{"agent_name": "worker", "message": "x", "timeout": "bad"},
+			{"agent_name": "worker", "message": "x", "timeout": 1},
 			{"agent_name": "caller", "exec_ctx": exec_ctx},
 		)
 		assert result.is_error
@@ -371,8 +371,11 @@ async def test_orchestration_create_validates_service_args_and_exceptions():
 	no_service = _plugin([], RecordingDispatcher())
 
 	assert (await no_service._tool_orchestration_task_create({}, {})).is_error
-	assert (await plugin._tool_orchestration_task_create({"agent_names": "bad", "topic": "x"}, {})).is_error
-	result = await plugin._tool_orchestration_task_create({"agent_names": ["a"], "topic": "x", "persona": "bad"}, {})
+	with pytest.raises(TypeError, match="agent_names"):
+		await plugin._tool_orchestration_task_create({"agent_names": "bad", "topic": "x"}, {})
+	with pytest.raises(TypeError, match="persona"):
+		await plugin._tool_orchestration_task_create({"agent_names": ["a"], "topic": "x", "persona": "bad"}, {})
+	result = await plugin._tool_orchestration_task_create({"agent_names": ["a"], "topic": "x"}, {})
 
 	assert result.is_error
 	assert "create down" in result.content
@@ -384,7 +387,9 @@ async def test_orchestration_get_and_cancel_error_boundaries():
 
 	class SyncCancelService:
 		def __init__(self):
-			self.tasks = {"task": SimpleNamespace(task_id="task", status="running", agent_names=[], events=list(range(30)))}
+			self.tasks = {
+				"task": SimpleNamespace(task_id="task", status="running", agent_names=[], events=list(range(30)))
+			}
 
 		def get_task(self, task_id):
 			return self.tasks.get(task_id)
@@ -395,7 +400,9 @@ async def test_orchestration_get_and_cancel_error_boundaries():
 	plugin = CollaborationPlugin()
 	plugin.initialize({"enabled": True}, PluginContext(resources=ResourceRegistry({"orchestration": NoMethods()})))
 	sync = CollaborationPlugin()
-	sync.initialize({"enabled": True}, PluginContext(resources=ResourceRegistry({"orchestration": SyncCancelService()})))
+	sync.initialize(
+		{"enabled": True}, PluginContext(resources=ResourceRegistry({"orchestration": SyncCancelService()}))
+	)
 
 	assert (await plugin._tool_orchestration_task_get({"task_id": ""}, {})).is_error
 	assert (await plugin._tool_orchestration_task_get({"task_id": "x"}, {})).is_error
@@ -415,15 +422,17 @@ def test_collaboration_helper_boundaries():
 		status="done",
 		mode="m",
 		topic="t",
-		agent_names=("a", "b"),
+		agent_names=["a", "b"],
 		events=list(range(25)),
 		result={"ok": True},
 		error="",
 	)
 
-	assert _bounded_timeout("bad", 7) == 7
-	assert _bounded_timeout(0, 7) == 1.0
-	assert _bounded_timeout(9999, 7) == 3600.0
+	for value in ("bad", True, float("nan"), float("inf")):
+		with pytest.raises(ValueError, match="finite number"):
+			bounded_timeout(value)
+	assert bounded_timeout(0) == 1.0
+	assert bounded_timeout(9999) == 3600.0
 	assert _collaboration_metadata({"agent_name": "caller", "session_id": "s"}, exec_ctx, 2) == {
 		"trace_id": "t",
 		"tenant": "x",

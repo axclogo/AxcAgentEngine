@@ -1,4 +1,5 @@
 """Graph 插件 — 实体关系图谱检索、治理和 CRUD。"""
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
@@ -25,7 +26,7 @@ class GraphPlugin(BasePlugin):
 	version = "2.0.0"
 	config_schema = GRAPH_CONFIG_SCHEMA
 
-	def initialize(self, config: dict, plugin_ctx: "PluginContext") -> None:
+	def initialize(self, config: dict, plugin_ctx: PluginContext) -> None:
 		super().initialize(config, plugin_ctx)
 		self._config = GraphConfig.from_dict(config)
 		store_resource = "graph.store"
@@ -42,7 +43,7 @@ class GraphPlugin(BasePlugin):
 		self._load_errors = self._service.load_errors
 		self._source_stats = self._service.source_stats
 
-	def inject_context(self, exec_ctx: "ExecutionContext", topic: str = "") -> str:
+	def inject_context(self, exec_ctx: ExecutionContext, topic: str = "") -> str:
 		return self._service.inject_context(topic)
 
 	def get_tools(self) -> list[ToolDefinition]:

@@ -1,4 +1,5 @@
 """ConsensusStop — LLM 判断共识终止"""
+
 from axc_agent_engine.sidecar.multi_agent.stop_condition.llm_based import LLMBasedStop
 
 CONSENSUS_PROMPT = """请判断以下讨论是否已达成共识。

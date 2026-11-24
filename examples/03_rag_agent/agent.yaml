@@ -2,6 +2,7 @@ name: "rag-agent"
 description: "知识库问答示例"
 
 runtime:
+  strategy: por
   max_rounds: 20
   workspace: "."
 
@@ -10,6 +11,7 @@ system_prompt: |
   如果知识库中没有相关信息，请如实告知。
 
 plugins:
+  por: {enabled: true, mode: auto}
   knowledge:
     enabled: true
     sources: ["./docs/"]

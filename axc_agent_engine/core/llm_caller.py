@@ -1,18 +1,18 @@
 """LLMCaller — LLM 调用封装，负责 fallback、重试、计时和 hook 通知。"""
+
 from __future__ import annotations
 
 import asyncio
 import logging
 import random
 import time
+from collections.abc import Awaitable, Callable
 from copy import deepcopy
-from typing import Any, Awaitable, Callable, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import httpx
 
 from axc_agent_engine.core.context import ExecutionContext
-from axc_agent_engine.core.stream_aggregator import StreamAggregator
-from axc_agent_engine.core.stream_sink import StreamSink
 from axc_agent_engine.core.errors import (
 	LLMTimeoutError,
 	ProviderContractError,
@@ -20,8 +20,10 @@ from axc_agent_engine.core.errors import (
 	RetryableProviderError,
 )
 from axc_agent_engine.core.events import Event, EventType
-from axc_agent_engine.plugins.context import model_info_from_models
 from axc_agent_engine.core.schema import LLMResponse
+from axc_agent_engine.core.stream_aggregator import StreamAggregator
+from axc_agent_engine.core.stream_sink import StreamSink
+from axc_agent_engine.plugins.context import model_info_from_models
 
 if TYPE_CHECKING:
 	from axc_agent_engine.core.plugin_manager import PluginManager
@@ -33,8 +35,7 @@ RETRYABLE_LLM_ERRORS = (httpx.NetworkError, httpx.TimeoutException, RetryablePro
 
 
 class StreamEventEmitter:
-	"""Emits realtime stream events while preserving the existing queue callback contract.
-中文：此文档说明相关引擎组件的行为。"""
+	"""Emits realtime stream events while preserving the existing queue callback contract. 通过既有的队列回调发送实时事件。"""
 
 	def __init__(self, ctx: ExecutionContext, sink: StreamSink | None = None) -> None:
 		self._ctx = ctx
@@ -91,8 +92,7 @@ class StreamEventEmitter:
 
 
 class StreamUsageReporter:
-	"""Builds usage-related stream events without changing LLMCaller output shape.
-中文：此文档说明相关引擎组件的行为。"""
+	"""Builds usage-related stream events without changing LLMCaller output shape. 生成用量事件并保持模型调用器的输出格式。"""
 
 	def apply_usage(self, ctx: ExecutionContext, result) -> list[Event]:
 		if result.usage_input or result.usage_output:
@@ -103,23 +103,27 @@ class StreamUsageReporter:
 			metadata.update(getattr(result, "usage_metadata", {}) or {})
 			events.append(Event(type=EventType.CACHE_HIT, metadata=metadata))
 		if result.usage_input or result.usage_output:
-			events.append(Event(type=EventType.COST_UPDATE, metadata={
-				"input_tokens": ctx.state.total_input_tokens,
-				"output_tokens": ctx.state.total_output_tokens,
-			}))
+			events.append(
+				Event(
+					type=EventType.COST_UPDATE,
+					metadata={
+						"input_tokens": ctx.state.total_input_tokens,
+						"output_tokens": ctx.state.total_output_tokens,
+					},
+				)
+			)
 		return events
 
 
 class LLMCaller:
-	"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-封装 LLM 调用：fallback 切换、计时、pre/post hook。"""
+	"""Call the model with hooks, timing and fallback.
+	封装 LLM 调用：fallback 切换、计时、pre/post hook。"""
 
 	def __init__(
 		self,
-		primary: "LLMProvider",
-		fallback: "LLMProvider | None",
-		plugin_manager: "PluginManager",
+		primary: LLMProvider,
+		fallback: LLMProvider | None,
+		plugin_manager: PluginManager,
 	) -> None:
 		self._primary = primary
 		self._fallback = fallback
@@ -132,9 +136,8 @@ class LLMCaller:
 		tools: list[dict] | None,
 		stream_sink: StreamSink | None = None,
 	) -> tuple[dict, list[Event]]:
-		"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-统一入口：按 ctx.config.stream 分发到流式或非流式调用。"""
+		"""Choose streaming or buffered output from the run configuration.
+		统一入口：按 ctx.config.stream 分发到流式或非流式调用。"""
 		messages, tools = self._pm.apply_pre_llm_call(ctx, messages, tools)
 		messages = _provider_messages(messages)
 		before_input_tokens = ctx.state.total_input_tokens
@@ -145,24 +148,30 @@ class LLMCaller:
 		else:
 			result = await self._call_sync(ctx, messages, tools)
 		duration_ms = int((time.time() - start) * 1000)
-		response_summary = {"usage": {
-			"input_tokens": max(0, ctx.state.total_input_tokens - before_input_tokens),
-			"output_tokens": max(0, ctx.state.total_output_tokens - before_output_tokens),
-		}, "total_usage": {
-			"input_tokens": ctx.state.total_input_tokens,
-			"output_tokens": ctx.state.total_output_tokens,
-		}}
+		response_summary = {
+			"usage": {
+				"input_tokens": max(0, ctx.state.total_input_tokens - before_input_tokens),
+				"output_tokens": max(0, ctx.state.total_output_tokens - before_output_tokens),
+			},
+			"total_usage": {
+				"input_tokens": ctx.state.total_input_tokens,
+				"output_tokens": ctx.state.total_output_tokens,
+			},
+		}
 		await self._pm.post_llm_call(ctx, messages, response_summary, duration_ms)
 		return result
 
 	async def _call_sync(
-		self, ctx: ExecutionContext, messages: list[dict], tools: list[dict] | None,
+		self,
+		ctx: ExecutionContext,
+		messages: list[dict],
+		tools: list[dict] | None,
 	) -> tuple[dict, list[Event]]:
-		"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-带重试和 fallback 的非流式调用。"""
+		"""Run a buffered request with retries and fallback.
+		带重试和 fallback 的非流式调用。"""
 		kwargs = self._build_kwargs(ctx, tools)
-		async def run(client: "LLMProvider") -> tuple[dict, list[Event]]:
+
+		async def run(client: LLMProvider) -> tuple[dict, list[Event]]:
 			llm_resp: LLMResponse = await client.chat(messages, tools, **kwargs)
 			return self._process_sync_response(ctx, _ensure_llm_response(llm_resp))
 
@@ -175,13 +184,13 @@ class LLMCaller:
 		tools: list[dict] | None,
 		stream_sink: StreamSink | None = None,
 	) -> tuple[dict, list[Event]]:
-		"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-带重试和 fallback 的流式调用。"""
+		"""Run a streamed request with retries and fallback.
+		带重试和 fallback 的流式调用。"""
 		kwargs = self._build_kwargs(ctx, tools)
 		if ctx.config.thinking in ("always", "auto"):
 			kwargs["thinking"] = ctx.config.thinking
-		async def run(client: "LLMProvider") -> tuple[dict, list[Event]]:
+
+		async def run(client: LLMProvider) -> tuple[dict, list[Event]]:
 			return await self._aggregate_stream(ctx, client, messages, tools, stream_sink=stream_sink, **kwargs)
 
 		def fallback_allowed() -> bool:
@@ -192,7 +201,7 @@ class LLMCaller:
 	async def _call_with_retry(
 		self,
 		ctx: ExecutionContext,
-		call: Callable[["LLMProvider"], Awaitable[tuple[dict, list[Event]]]],
+		call: Callable[[LLMProvider], Awaitable[tuple[dict, list[Event]]]],
 		fallback_allowed: Callable[[], bool],
 	) -> tuple[dict, list[Event]]:
 		for attempt in range(2):
@@ -212,12 +221,16 @@ class LLMCaller:
 		raise ProviderError("LLM call failed after retries")
 
 	async def _aggregate_stream(
-		self, ctx: ExecutionContext, client: "LLMProvider",
-		messages: list[dict], tools: list[dict] | None, stream_sink: StreamSink | None = None, **kwargs,
+		self,
+		ctx: ExecutionContext,
+		client: LLMProvider,
+		messages: list[dict],
+		tools: list[dict] | None,
+		stream_sink: StreamSink | None = None,
+		**kwargs,
 	) -> tuple[dict[str, Any], list[Event]]:
-		"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-通过 StreamAggregator 聚合 LLMStreamChunk，并产生实时 delta 事件。"""
+		"""Aggregate provider chunks and forward stream events.
+		通过 StreamAggregator 聚合 LLMStreamChunk，并产生实时 delta 事件。"""
 		aggregator = StreamAggregator()
 		aiter = client.stream(messages, tools, **kwargs)
 		emitter = StreamEventEmitter(ctx, stream_sink)
@@ -239,11 +252,12 @@ class LLMCaller:
 		return result.message, events
 
 	def _process_sync_response(
-		self, ctx: ExecutionContext, llm_resp: LLMResponse,
+		self,
+		ctx: ExecutionContext,
+		llm_resp: LLMResponse,
 	) -> tuple[dict, list[Event]]:
-		"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-处理 provider 返回的标准化 LLMResponse。"""
+		"""Normalize a buffered provider response.
+		处理 provider 返回的标准化 LLMResponse。"""
 		if llm_resp.usage.input_tokens or llm_resp.usage.output_tokens:
 			ctx.add_usage(llm_resp.usage.input_tokens, llm_resp.usage.output_tokens)
 		events: list[Event] = []
@@ -254,22 +268,35 @@ class LLMCaller:
 				metadata["cache_type"] = raw["cache_type"]
 			events.append(Event(type=EventType.CACHE_HIT, metadata=metadata))
 		if llm_resp.usage.input_tokens or llm_resp.usage.output_tokens:
-			events.append(Event(type=EventType.COST_UPDATE, metadata={
-				"input_tokens": ctx.state.total_input_tokens,
-				"output_tokens": ctx.state.total_output_tokens,
-			}))
+			events.append(
+				Event(
+					type=EventType.COST_UPDATE,
+					metadata={
+						"input_tokens": ctx.state.total_input_tokens,
+						"output_tokens": ctx.state.total_output_tokens,
+					},
+				)
+			)
 		return llm_resp.message.to_dict(), events
 
 	def _build_kwargs(self, ctx: ExecutionContext, tools: list[dict] | None) -> dict:
-		"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-构建 LLM 调用参数。"""
+		"""Build provider call arguments.
+		构建 LLM 调用参数。"""
 		kwargs: dict[str, Any] = {}
 		if tools:
 			kwargs["parallel_tool_calls"] = ctx.config.parallel_tool_calls
 		llm_options = ctx.runtime.llm_options
-		for key in ("temperature", "max_tokens", "top_p", "stop",
-					"presence_penalty", "frequency_penalty", "seed", "user", "response_format"):
+		for key in (
+			"temperature",
+			"max_tokens",
+			"top_p",
+			"stop",
+			"presence_penalty",
+			"frequency_penalty",
+			"seed",
+			"user",
+			"response_format",
+		):
 			if key in llm_options:
 				kwargs[key] = llm_options[key]
 		return kwargs
@@ -278,14 +305,17 @@ class LLMCaller:
 		ctx.state.fallback_triggered = True
 		ctx.state.fallback_reason = reason
 		model_info = model_info_from_models(
-			self._primary, self._fallback, getattr(ctx, "utility_model", None), self._fallback)
+			self._primary, self._fallback, getattr(ctx, "utility_model", None), self._fallback
+		)
 		ctx.runtime.model_info = model_info
 		ctx.state.metadata["model"] = model_info.to_dict()
 
 
 def _provider_messages(messages: list[dict]) -> list[dict]:
 	"""English: Strip engine-only message fields. 中文：剥离仅供引擎内部使用的消息字段。"""
-	return [{key: deepcopy(value) for key, value in message.items() if key in PROVIDER_MESSAGE_KEYS} for message in messages]
+	return [
+		{key: deepcopy(value) for key, value in message.items() if key in PROVIDER_MESSAGE_KEYS} for message in messages
+	]
 
 
 def _ensure_llm_response(value: Any) -> LLMResponse:

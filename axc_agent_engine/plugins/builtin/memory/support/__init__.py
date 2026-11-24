@@ -1,5 +1,19 @@
-"""Memory subsystem primitives.
-中文：此文档说明相关引擎组件的行为。"""
+"""Memory subsystem primitives. 记忆子系统基础接口。"""
+
+from axc_agent_engine.plugins.builtin.memory.support.graph import (
+	DefaultEntityResolver,
+	EntityResolver,
+	GraphEntity,
+	GraphMemory,
+	GraphRelation,
+)
+from axc_agent_engine.plugins.builtin.memory.support.retrieval import (
+	BM25Index,
+	MemoryDocument,
+	RetrievalResult,
+	rrf_merge,
+	tokenize,
+)
 from axc_agent_engine.plugins.builtin.memory.support.service import (
 	Deduplicator,
 	FactExtractor,
@@ -13,33 +27,19 @@ from axc_agent_engine.plugins.builtin.memory.support.service import (
 	MemoryStore,
 	SimilarityDeduplicator,
 )
-from axc_agent_engine.plugins.builtin.memory.support.retrieval import (
-	BM25Index,
-	MemoryDocument,
-	RetrievalResult,
-	rrf_merge,
-	tokenize,
-)
-from axc_agent_engine.plugins.builtin.memory.support.graph import (
-	DefaultEntityResolver,
-	EntityResolver,
-	GraphMemory,
-	GraphEntity,
-	GraphRelation,
-)
 
 __all__ = [
+	"BM25Index",
+	"Deduplicator",
 	"DefaultEntityResolver",
 	"EntityResolver",
+	"FactExtractor",
 	"GraphEntity",
 	"GraphMemory",
 	"GraphMemoryStore",
 	"GraphRelation",
-	"Deduplicator",
-	"FactExtractor",
 	"InMemoryMemoryStore",
 	"JsonFactExtractor",
-	"BM25Index",
 	"MemoryDocument",
 	"MemoryItem",
 	"MemoryLayer",

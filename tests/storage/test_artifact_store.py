@@ -41,7 +41,7 @@ class TestInMemoryArtifactStore:
 		ref = await store.put_file_ref(str(path), {"logical_path": "large.log"}, run_id="run-file")
 		path.write_text("changed\nneedle after register", encoding="utf-8")
 
-		assert ref.size == len("line one\nneedle line\nlast".encode())
+		assert ref.size == len(b"line one\nneedle line\nlast")
 		assert (await store.read(ref.id, limit=7)).content == "changed"
 		matches = await store.search(ref.id, "needle")
 		assert matches[0].text == "needle after register"

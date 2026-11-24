@@ -1,5 +1,7 @@
 """End-to-end routing tests through Engine, Agent, ReAct, and POR."""
+
 import json
+from typing import ClassVar
 
 from axc_agent_engine.core.events import EventType
 from axc_agent_engine.core.schema import LLMStreamChunk, LLMUsage, ToolDefinition
@@ -9,16 +11,19 @@ from axc_agent_engine.plugins.config_schema import config_schema
 from axc_agent_engine.plugins.registry import PluginRegistry
 from axc_agent_engine.tools.tool_output import ToolOutput
 
-
-PLAN_CONTENT = json.dumps({
-	"goal": "complete routed task",
-	"steps": [{
-		"step_id": 1,
-		"description": "execute the routed step",
-		"depends_on": [],
-		"tools_needed": [],
-	}],
-})
+PLAN_CONTENT = json.dumps(
+	{
+		"goal": "complete routed task",
+		"steps": [
+			{
+				"step_id": 1,
+				"description": "execute the routed step",
+				"depends_on": [],
+				"tools_needed": [],
+			}
+		],
+	}
+)
 
 
 class RoutingProvider:
@@ -51,22 +56,24 @@ class RoutingProvider:
 class RoutingToolPlugin(BasePlugin):
 	name = "routing_tool"
 	config_schema = config_schema("routing_tool", "Routing Tool", "Routing precedence test tool.", [])
-	invocations: list[dict] = []
+	invocations: ClassVar[list[dict]] = []
 
 	def get_tools(self):
 		async def echo(arguments, context):
 			type(self).invocations.append(dict(arguments))
 			return ToolOutput.text(f"echo:{arguments['value']}")
 
-		return [ToolDefinition(
-			name="routing_echo",
-			parameters={
-				"type": "object",
-				"properties": {"value": {"type": "string"}},
-				"required": ["value"],
-			},
-			execute=echo,
-		)]
+		return [
+			ToolDefinition(
+				name="routing_echo",
+				parameters={
+					"type": "object",
+					"properties": {"value": {"type": "string"}},
+					"required": ["value"],
+				},
+				execute=echo,
+			)
+		]
 
 
 def _agent(tmp_path, provider, routing_mode: str, with_tool: bool = False):
@@ -99,11 +106,13 @@ runtime:
 
 
 async def test_auto_mode_hands_structured_plan_to_real_por_runtime(tmp_path):
-	provider = RoutingProvider([
-		{"content": PLAN_CONTENT},
-		{"content": "routed step result"},
-		{"content": "routed final summary"},
-	])
+	provider = RoutingProvider(
+		[
+			{"content": PLAN_CONTENT},
+			{"content": "routed step result"},
+			{"content": "routed final summary"},
+		]
+	)
 	engine, agent = _agent(tmp_path, provider, "auto")
 	try:
 		events = [event async for event in agent.stream("route this task", session_id="por-auto")]
@@ -126,24 +135,28 @@ async def test_react_only_treats_structured_plan_as_final_answer(tmp_path):
 	finally:
 		await engine.close()
 
-	assert not any(event.type in {EventType.PLAN_CREATED, EventType.STEP_START, EventType.STEP_COMPLETED} for event in events)
+	assert not any(
+		event.type in {EventType.PLAN_CREATED, EventType.STEP_START, EventType.STEP_COMPLETED} for event in events
+	)
 	assert events[-1].type == EventType.DONE
 	assert events[-1].content == PLAN_CONTENT
 	assert len(provider.requests) == 1
 
 
 async def test_tool_call_takes_precedence_over_plan_like_content(tmp_path):
-	provider = RoutingProvider([
-		{
-			"content": PLAN_CONTENT,
-			"tool_call": {
-				"index": 0,
-				"id": "mixed-tool-call",
-				"function": {"name": "routing_echo", "arguments": '{"value":"mixed"}'},
+	provider = RoutingProvider(
+		[
+			{
+				"content": PLAN_CONTENT,
+				"tool_call": {
+					"index": 0,
+					"id": "mixed-tool-call",
+					"function": {"name": "routing_echo", "arguments": '{"value":"mixed"}'},
+				},
 			},
-		},
-		{"content": "react continued after tool"},
-	])
+			{"content": "react continued after tool"},
+		]
+	)
 	engine, agent = _agent(tmp_path, provider, "auto", with_tool=True)
 	try:
 		events = [event async for event in agent.stream("use the requested tool")]

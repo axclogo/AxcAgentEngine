@@ -2,16 +2,18 @@
 
 English: Command-line entry point for local chat and API serving.
 """
+
 import argparse
 import asyncio
+import json
 import os
 import sys
 
-from axc_agent_engine.llm.config import LLMConfig
+from axc_agent_engine.core.events import EventType
 from axc_agent_engine.engine import AgentModels, Engine
 from axc_agent_engine.llm.client import OpenAIClient
+from axc_agent_engine.llm.config import LLMConfig
 from axc_agent_engine.llm.rate_limited import RateLimitedProvider
-from axc_agent_engine.core.events import EventType
 from axc_agent_engine.observability.logging import setup_logging
 from axc_agent_engine.plugins.builtin.registry import AVAILABLE_BUILTIN_PLUGINS
 from axc_agent_engine.plugins.registry import PluginRegistry
@@ -25,7 +27,8 @@ def main() -> None:
 	# chat 子命令
 	chat_parser = sub.add_parser("chat", help="交互式对话")
 	chat_parser.add_argument("--agent", required=True, help="Agent YAML 路径")
-	# serve 子命令（预留）
+	inspect_parser = sub.add_parser("inspect", help="显示有效执行策略、插件顺序、工具和权限")
+	inspect_parser.add_argument("--agent", required=True, help="Agent YAML 路径")
 	serve_parser = sub.add_parser("serve", help="启动 REST API 服务")
 	serve_parser.add_argument("--agent", required=True, help="Agent YAML 路径")
 	serve_parser.add_argument("--agents-dir", default="", help="Agent YAML 目录（可选）")
@@ -35,28 +38,18 @@ def main() -> None:
 	setup_logging(args.log_level, args.json_logs)
 	if args.command == "chat":
 		asyncio.run(_chat(args.agent))
+	elif args.command == "inspect":
+		asyncio.run(_inspect(args.agent))
 	elif args.command == "serve":
-		_serve(args.agent, args.port, getattr(args, "agents_dir", ""))
+		_serve(args.agent, args.port, args.agents_dir, host=args.host)
 	else:
 		parser.print_help()
 
 
 async def _chat(agent_path: str) -> None:
-	"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-交互式对话循环。
-
-	English: Run an interactive terminal chat loop.
-	"""
-	llm_config = LLMConfig(
-		base_url=os.environ.get("AXC_LLM_BASE_URL", ""),
-		api_key=os.environ.get("AXC_LLM_API_KEY", ""),
-		model=os.environ.get("AXC_LLM_MODEL", "gpt-4o"),
-	)
-	if not llm_config.base_url or not llm_config.api_key:
-		print("错误: 请设置 AXC_LLM_BASE_URL 和 AXC_LLM_API_KEY 环境变量")
-		sys.exit(1)
-	provider = _provider_from_config(llm_config)
+	"""Run an interactive terminal chat loop.
+	交互式对话循环。"""
+	provider = _provider_from_env()
 	engine = Engine(plugin_registry=_cli_plugin_registry())
 	template = engine.load_agent_template(agent_path)
 	agent = template.instantiate(models=AgentModels(default=provider))
@@ -91,36 +84,48 @@ async def _chat(agent_path: str) -> None:
 		await engine.close()
 
 
-def _serve(agent_path: str, port: int, agents_dir: str = "") -> None:
-	"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-启动 REST API 服务。
-
-	English: Start the REST API server.
-	"""
+def _serve(agent_path: str, port: int, agents_dir: str = "", *, host: str = "0.0.0.0") -> None:
+	"""Start the REST API server.
+	启动 REST API 服务。"""
 	try:
 		import uvicorn
+
 		from axc_agent_engine.api.app import create_app
 	except ImportError:
 		print("需要安装 API 依赖：pip install axc-agent-engine[api]")
 		sys.exit(1)
+	provider = _provider_from_env()
+	engine = Engine(plugin_registry=_cli_plugin_registry())
+	# Preload the configured agent. 中文：预加载指定的 Agent
+	models = AgentModels(default=provider)
+	engine.load_agent_template(agent_path).instantiate(models=models)
+	app = create_app(engine, models=models, agents_dir=agents_dir or os.path.dirname(os.path.abspath(agent_path)))
+	print(f"API 服务启动: http://{host}:{port}")
+	print(f"Agent: {agent_path}")
+	uvicorn.run(app, host=host, port=port, log_level="info")
+
+
+async def _inspect(agent_path: str) -> None:
+	engine = Engine(plugin_registry=_cli_plugin_registry())
+	provider = _provider_from_env(require_credentials=False)
+	try:
+		agent = engine.load_agent_template(agent_path).instantiate(models=AgentModels(default=provider))
+		print(json.dumps(agent.inspect(), ensure_ascii=False, indent=2))
+	finally:
+		await engine.close()
+		await provider.close()
+
+
+def _provider_from_env(require_credentials: bool = True):
 	llm_config = LLMConfig(
 		base_url=os.environ.get("AXC_LLM_BASE_URL", ""),
 		api_key=os.environ.get("AXC_LLM_API_KEY", ""),
 		model=os.environ.get("AXC_LLM_MODEL", "gpt-4o"),
 	)
-	if not llm_config.base_url or not llm_config.api_key:
+	if require_credentials and not (llm_config.base_url and llm_config.api_key):
 		print("错误: 请设置 AXC_LLM_BASE_URL 和 AXC_LLM_API_KEY 环境变量")
 		sys.exit(1)
-	provider = _provider_from_config(llm_config)
-	engine = Engine(plugin_registry=_cli_plugin_registry())
-	#English: Bilingual note. 中文：预加载指定的 Agent
-	models = AgentModels(default=provider)
-	engine.load_agent_template(agent_path).instantiate(models=models)
-	app = create_app(engine, models=models, agents_dir=agents_dir or os.path.dirname(agent_path))
-	print(f"API 服务启动: http://0.0.0.0:{port}")
-	print(f"Agent: {agent_path}")
-	uvicorn.run(app, host="0.0.0.0", port=port, log_level="info")
+	return _provider_from_config(llm_config)
 
 
 def _cli_plugin_registry() -> PluginRegistry:

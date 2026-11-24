@@ -3,7 +3,8 @@
 The chunker is storage-neutral and intentionally has no dependency on the
 Knowledge plugin. It preserves heading context for Markdown documents and
 falls back to sentence-aware splitting for plain text.
-中文：此文档说明相关引擎组件的行为。"""
+文档语义分块。"""
+
 from __future__ import annotations
 
 import hashlib
@@ -16,8 +17,8 @@ DEFAULT_CHUNK_OVERLAP = 200
 
 @dataclass(frozen=True)
 class Chunk:
-	"""A semantically bounded text chunk.
-中文：此文档说明相关引擎组件的行为。"""
+	"""A semantically bounded text chunk. 具有语义边界的文本块。"""
+
 	content: str
 	content_with_context: str
 	source: str = ""
@@ -39,17 +40,16 @@ class Chunk:
 
 
 class SemanticChunker:
-	"""Markdown heading-aware and sentence-boundary chunker.
-中文：此文档说明相关引擎组件的行为。"""
+	"""Markdown heading-aware and sentence-boundary chunker. 按 Markdown 标题和句子边界切分文档。"""
 
-	def __init__(self, max_chunk_size: int = DEFAULT_MAX_CHUNK_SIZE,
-				 chunk_overlap: int = DEFAULT_CHUNK_OVERLAP) -> None:
+	def __init__(
+		self, max_chunk_size: int = DEFAULT_MAX_CHUNK_SIZE, chunk_overlap: int = DEFAULT_CHUNK_OVERLAP
+	) -> None:
 		self.max_chunk_size = max(128, int(max_chunk_size))
 		self.chunk_overlap = max(0, int(chunk_overlap))
 
 	def chunk_document(self, content: str, source: str = "", title: str = "") -> list[Chunk]:
-		"""Split one document into semantic chunks.
-中文：此文档说明相关引擎组件的行为。"""
+		"""Split one document into semantic chunks. 按语义边界拆分文档。"""
 		if not content or not content.strip():
 			return []
 		sections = self._parse_markdown_sections(content)
@@ -79,7 +79,7 @@ class SemanticChunker:
 		sections: list[tuple[list[str], str]] = []
 		header_stack: list[tuple[int, str]] = []
 		if headers[0][0] > 0:
-			preamble = content[:headers[0][0]].strip()
+			preamble = content[: headers[0][0]].strip()
 			if preamble:
 				sections.append(([], preamble))
 		for i, (start, end, level, header_line) in enumerate(headers):
@@ -112,7 +112,9 @@ class SemanticChunker:
 				if len(chunk_text) > max_size * 1.5:
 					chunk_text = buf
 				merged.append(chunk_text.strip())
-				prev_tail = buf[-self.chunk_overlap:] + "\n" if self.chunk_overlap and len(buf) > self.chunk_overlap else ""
+				prev_tail = (
+					buf[-self.chunk_overlap :] + "\n" if self.chunk_overlap and len(buf) > self.chunk_overlap else ""
+				)
 				buf = piece
 			else:
 				buf = candidate
@@ -139,8 +141,7 @@ class SemanticChunker:
 				result.extend(self._recursive_split(piece, remaining, max_size))
 		return result
 
-	def _make_chunk(self, content: str, context_prefix: str, heading_path: str,
-					idx: int, source: str) -> Chunk:
+	def _make_chunk(self, content: str, context_prefix: str, heading_path: str, idx: int, source: str) -> Chunk:
 		content = content.strip()
 		content_with_context = f"{context_prefix}\n{content}" if context_prefix else content
 		return Chunk(

@@ -1,5 +1,5 @@
-"""Structured audit events for security-sensitive engine operations.
-中文：此文档说明相关引擎组件的行为。"""
+"""Structured audit events for security-sensitive engine operations. 记录敏感操作的结构化审计事件。"""
+
 from __future__ import annotations
 
 import asyncio
@@ -13,8 +13,8 @@ from typing import Any, Protocol, runtime_checkable
 
 
 class AuditEventType(StrEnum):
-	"""Audit event categories.
-中文：此文档说明相关引擎组件的行为。"""
+	"""Audit event categories. 审计事件类别。"""
+
 	TOOL_CALL_STARTED = "tool_call_started"
 	TOOL_CALL_COMPLETED = "tool_call_completed"
 	TOOL_CALL_REJECTED = "tool_call_rejected"
@@ -23,8 +23,8 @@ class AuditEventType(StrEnum):
 
 @dataclass(frozen=True)
 class AuditEvent:
-	"""Machine-readable audit event.
-中文：此文档说明相关引擎组件的行为。"""
+	"""Machine-readable audit event. 机器可读的审计事件。"""
+
 	event_id: str = field(default_factory=lambda: uuid.uuid4().hex[:16])
 	type: str = ""
 	timestamp: float = field(default_factory=time.time)
@@ -63,14 +63,13 @@ class AuditEvent:
 
 @runtime_checkable
 class AuditSink(Protocol):
-	"""Stores audit events.
-中文：此文档说明相关引擎组件的行为。"""
+	"""Stores audit events. 存储审计事件。"""
+
 	async def record(self, event: AuditEvent) -> None: ...
 
 
 class InMemoryAuditSink:
-	"""Bounded in-memory audit sink for tests and local development.
-中文：此文档说明相关引擎组件的行为。"""
+	"""Bounded in-memory audit sink for tests and local development. 用于测试和本地开发的有界内存审计存储。"""
 
 	def __init__(self, max_events: int = 10000) -> None:
 		self._events: deque[AuditEvent] = deque(maxlen=max_events)

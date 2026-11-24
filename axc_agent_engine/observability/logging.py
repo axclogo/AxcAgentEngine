@@ -1,27 +1,24 @@
-"""English: This documentation describes the related engine component behavior.
-中文：结构化日志配置，自动脱敏敏感数据。"""
+"""Structured logging with automatic redaction. 结构化日志配置，自动脱敏敏感数据。"""
+
 import json
 import logging
 import re
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 _SENSITIVE_PATTERN = re.compile(
-	r'(api_key|secret|password|token|credential)\s*[=:]\s*\S+',
+	r"(api_key|secret|password|token|credential)\s*[=:]\s*\S+",
 	re.IGNORECASE,
 )
 
 
 class SanitizeFilter(logging.Filter):
-	"""English: This documentation describes the related engine component behavior.
-中文：从所有日志消息中脱敏敏感值的过滤器。"""
+	"""Redact sensitive values from log messages. 从所有日志消息中脱敏敏感值的过滤器。"""
 
 	def filter(self, record: logging.LogRecord) -> bool:
 		if record.args:
 			record.msg = str(record.msg)
 			record.args = None
-		record.msg = _SENSITIVE_PATTERN.sub(
-			lambda m: m.group(1) + '=***', record.msg
-		)
+		record.msg = _SENSITIVE_PATTERN.sub(lambda m: m.group(1) + "=***", record.msg)
 		return True
 
 
@@ -30,7 +27,7 @@ class JsonFormatter(logging.Formatter):
 
 	def format(self, record: logging.LogRecord) -> str:
 		entry = {
-			"time": datetime.now(timezone.utc).isoformat(),
+			"time": datetime.now(UTC).isoformat(),
 			"level": record.levelname,
 			"logger": record.name,
 			"message": record.getMessage(),
@@ -41,9 +38,8 @@ class JsonFormatter(logging.Formatter):
 
 
 def setup_logging(level: str = "INFO", json_format: bool = False) -> None:
-	"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-配置日志格式；json_format=True 时输出适合日志聚合的 JSON。"""
+	"""Configure plain text or JSON logging.
+	配置日志格式；json_format=True 时输出适合日志聚合的 JSON。"""
 	root = logging.getLogger()
 	root.setLevel(getattr(logging, level.upper(), logging.INFO))
 	if root.handlers:

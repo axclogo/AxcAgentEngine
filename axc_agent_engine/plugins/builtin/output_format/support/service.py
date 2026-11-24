@@ -1,5 +1,5 @@
-"""Output validation and repair service.
-中文：此文档说明相关引擎组件的行为。"""
+"""Output validation and repair service. 输出校验与修复服务。"""
+
 from __future__ import annotations
 
 import json
@@ -7,6 +7,8 @@ import re
 import time
 from dataclasses import dataclass, field
 from typing import Any
+
+from axc_agent_engine.core.errors import LLMError
 
 
 @dataclass(frozen=True)
@@ -72,32 +74,30 @@ class OutputValidator:
 		return self._result(True, content=content)
 
 	def _validate_json_schema(self, content: str) -> ValidationResult:
-		json_str = extract_json(content)
-		if not json_str:
-			return self._result(False, ["output contains no JSON"], content)
 		try:
-			data = json.loads(json_str)
+			data = json.loads(content)
 		except json.JSONDecodeError as e:
 			return self._result(False, [f"JSON parse failed: {e}"], content)
 		schema = self.config.get("schema", {})
 		if not schema:
-			return self._result(True, content=json_str)
+			return self._result(True, content=content)
 		try:
 			import jsonschema
+
 			validator_cls = jsonschema.validators.validator_for(schema)
 			validator_cls.check_schema(schema)
 			validator = validator_cls(schema)
 			errors = sorted(validator.iter_errors(data), key=lambda item: list(item.path))
 			if errors:
-				return self._result(False, [_schema_error_message(error) for error in errors[:20]], json_str)
+				return self._result(False, [_schema_error_message(error) for error in errors[:20]], content)
 		except ImportError:
 			errors = _fallback_json_schema_errors(data, schema)
 			if errors:
-				return self._result(False, errors, json_str, degraded=True)
-			return self._result(True, content=json_str, degraded=True)
-		except Exception as e:
-			return self._result(False, [f"schema validation failed: {e}"], json_str)
-		return self._result(True, content=json_str)
+				return self._result(False, errors, content, degraded=True)
+			return self._result(True, content=content, degraded=True)
+		except (jsonschema.exceptions.SchemaError, ValueError, TypeError) as e:
+			return self._result(False, [f"schema validation failed: {e}"], content)
+		return self._result(True, content=content)
 
 	def _validate_markdown(self, content: str) -> ValidationResult:
 		template = self.config.get("template", "")
@@ -154,7 +154,9 @@ class OutputValidator:
 			return f"output exceeds max_output_chars: {len(content)}/{self.max_output_chars}"
 		return ""
 
-	def _result(self, valid: bool, errors: list[str] | None = None, content: str = "", degraded: bool = False) -> ValidationResult:
+	def _result(
+		self, valid: bool, errors: list[str] | None = None, content: str = "", degraded: bool = False
+	) -> ValidationResult:
 		return ValidationResult(
 			valid=valid,
 			errors=errors or [],
@@ -190,15 +192,16 @@ class RepairPromptBuilder:
 				requirements.append(f"长度必须不超过 {self.config['max_length']} 个字符。")
 			requirements.extend(f"必须包含：{kw}" for kw in self.config.get("must_contain", []))
 			requirements.extend(f"不得包含：{kw}" for kw in self.config.get("must_not_contain", []))
-			return (
-				"请重写以下内容，使其满足要求，并保留核心含义。\n\n"
-				f"内容：\n{content}\n\n要求：\n" + "\n".join(requirements)
+			return f"请重写以下内容，使其满足要求，并保留核心含义。\n\n内容：\n{content}\n\n要求：\n" + "\n".join(
+				requirements
 			)
 		return ""
 
 
 class OutputRepairer:
-	def __init__(self, format_type: str, utility_model: Any, prompt_builder: RepairPromptBuilder, repair_timeout: float) -> None:
+	def __init__(
+		self, format_type: str, utility_model: Any, prompt_builder: RepairPromptBuilder, repair_timeout: float
+	) -> None:
 		self.format_type = format_type
 		self.utility_model = utility_model
 		self.prompt_builder = prompt_builder
@@ -212,6 +215,7 @@ class OutputRepairer:
 			return self.local_repair(content)
 		if self.repair_timeout:
 			import asyncio
+
 			result = await asyncio.wait_for(self.utility_model.ask(prompt), timeout=self.repair_timeout)
 		else:
 			result = await self.utility_model.ask(prompt)
@@ -224,12 +228,16 @@ class OutputRepairer:
 
 
 class OutputFormatService:
-	"""Validate and optionally repair final model output.
-中文：此文档说明相关引擎组件的行为。"""
+	"""Validate and optionally repair final model output. 校验并按需修复最终模型输出。"""
 
-	def __init__(self, format_type: str = "", config: dict[str, Any] | None = None,
-				 utility_model: Any = None,
-				 repair_timeout: float = 30.0, max_output_chars: int = 0) -> None:
+	def __init__(
+		self,
+		format_type: str = "",
+		config: dict[str, Any] | None = None,
+		utility_model: Any = None,
+		repair_timeout: float = 30.0,
+		max_output_chars: int = 0,
+	) -> None:
 		self.format_type = format_type
 		self.config = config or {}
 		self.utility_model = utility_model
@@ -243,8 +251,7 @@ class OutputFormatService:
 		return self._validator.validate(content)
 
 	async def repair(self, content: str) -> str:
-		"""Repair content with a utility LLM if available.
-中文：此文档说明相关引擎组件的行为。"""
+		"""Repair content with a utility LLM if available. 有辅助模型时用其修复内容。"""
 		return await self._repairer.repair(content)
 
 	async def validate_and_repair(self, content: str, max_attempts: int = 1) -> tuple[str, ValidationResult]:
@@ -254,28 +261,25 @@ class OutputFormatService:
 	async def repair_with_result(self, content: str, max_attempts: int = 1) -> RepairResult:
 		start = time.monotonic()
 		current = content
-		result = self.validate(current)
-		if result.valid and result.content and result.content != current:
-			return RepairResult(
-				content=result.content,
-				validation=result,
-				attempts=0,
-				repaired=True,
-				duration_ms=_duration_ms(start),
-			)
 		attempts = 0
 		errors: list[str] = []
-		while not result.valid and attempts < max_attempts:
+		while True:
+			result = self.validate(current)
+			if result.valid:
+				break
+			local = self._repairer.local_repair(current)
+			if local != current:
+				local_result = self.validate(local)
+				if local_result.valid:
+					current, result = local, local_result
+					break
+			if attempts >= max_attempts or not self.utility_model:
+				break
 			attempts += 1
 			try:
 				current = await self.repair(current)
-			except Exception as e:
+			except (LLMError, OSError, RuntimeError, ValueError) as e:
 				errors.append(f"repair attempt {attempts} failed: {e}")
-				break
-			result = self.validate(current)
-			if result.valid and result.content:
-				current = result.content
-			elif current == content and not self.utility_model:
 				break
 		return RepairResult(
 			content=current,
@@ -297,11 +301,11 @@ def extract_json(content: str) -> str:
 	start = content.find("{")
 	end = content.rfind("}")
 	if start >= 0 and end > start:
-		return content[start:end + 1]
+		return content[start : end + 1]
 	start = content.find("[")
 	end = content.rfind("]")
 	if start >= 0 and end > start:
-		return content[start:end + 1]
+		return content[start : end + 1]
 	return ""
 
 

@@ -1,4 +1,5 @@
 """GoalReachedStop — LLM 判断目标路径是否完整"""
+
 from axc_agent_engine.sidecar.multi_agent.stop_condition.llm_based import LLMBasedStop
 
 GOAL_CHECK_PROMPT = """请判断以下讨论是否已形成完整可行的行动路径。

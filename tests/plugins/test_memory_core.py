@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from axc_agent_engine.plugins.builtin.memory.support import (
 	InMemoryMemoryStore,
@@ -24,7 +24,7 @@ def test_memory_service_builds_layered_context():
 def test_memory_service_removes_decayed_episodic_memory():
 	service = MemoryService(decay_half_life_days=1)
 	item = service.add("Old transient event", layer=MemoryLayer.EPISODIC, importance=0.1)
-	item.last_accessed_at = (datetime.now(timezone.utc) - timedelta(days=20)).isoformat()
+	item.last_accessed_at = (datetime.now(UTC) - timedelta(days=20)).isoformat()
 	removed = service.remove_decayed(threshold=0.05)
 	assert item.id in removed
 

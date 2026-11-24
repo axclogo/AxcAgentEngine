@@ -1,12 +1,12 @@
-"""LLM-backed tool-use summaries for compressed context.
-中文：此文档说明相关引擎组件的行为。"""
+"""LLM-backed tool-use summaries for compressed context. 由模型生成压缩上下文中的工具调用摘要。"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any
 
+from axc_agent_engine.core.errors import LLMError
 from axc_agent_engine.tools.tool_output import ToolOutput
-
 
 TOOL_SUMMARY_PROMPT = """请总结下面的工具活动，供后续上下文使用。
 
@@ -20,8 +20,7 @@ TOOL_SUMMARY_PROMPT = """请总结下面的工具活动，供后续上下文使�
 
 @dataclass
 class ToolObservation:
-	"""One completed tool invocation ready for summarization.
-中文：此文档说明相关引擎组件的行为。"""
+	"""One completed tool invocation ready for summarization. 等待摘要的已完成工具调用。"""
 
 	name: str
 	arguments: dict[str, Any]
@@ -37,24 +36,25 @@ class ToolObservation:
 
 
 class ToolSummaryService:
-	"""Summarizes completed tools with utility_model, with deterministic fallback.
-中文：此文档说明相关引擎组件的行为。"""
+	"""Summarizes completed tools with utility_model, with deterministic fallback. 使用辅助模型总结已完成的工具调用并提供确定性后备摘要。"""
 
 	def __init__(self, max_chars: int = 1200, max_observations: int = 20) -> None:
 		self.max_chars = max(200, int(max_chars))
 		self.max_observations = max(1, int(max_observations))
 
 	async def summarize(self, utility_model: Any, observations: list[ToolObservation]) -> str:
-		items = observations[-self.max_observations:]
+		items = observations[-self.max_observations :]
 		if not items:
 			return ""
 		activity = "\n".join(item.compact() for item in items)
 		if utility_model:
 			try:
-				summary = await utility_model.ask(TOOL_SUMMARY_PROMPT.format(activity=activity, max_chars=self.max_chars))
+				summary = await utility_model.ask(
+					TOOL_SUMMARY_PROMPT.format(activity=activity, max_chars=self.max_chars)
+				)
 				return str(summary).strip()
-			except Exception:
-				pass
+			except (LLMError, OSError, RuntimeError, ValueError):
+				return activity
 		return activity
 
 

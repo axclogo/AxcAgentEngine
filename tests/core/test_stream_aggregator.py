@@ -1,9 +1,12 @@
 """Tests for StreamAggregator with LLMStreamChunk."""
+
 import asyncio
+
 import pytest
-from axc_agent_engine.core.stream_aggregator import StreamAggregator
+
 from axc_agent_engine.core.errors import CancelledError
 from axc_agent_engine.core.schema import LLMStreamChunk, LLMUsage
+from axc_agent_engine.core.stream_aggregator import StreamAggregator
 
 
 async def _make_stream(chunks: list[LLMStreamChunk]):
@@ -46,14 +49,18 @@ class TestStreamAggregator:
 	@pytest.mark.asyncio
 	async def test_tool_calls_aggregation(self):
 		chunks = [
-			LLMStreamChunk(tool_call_delta={"index": 0, "id": "tc-1", "function": {"name": "file_read", "arguments": ""}}),
+			LLMStreamChunk(
+				tool_call_delta={"index": 0, "id": "tc-1", "function": {"name": "file_read", "arguments": ""}}
+			),
 			LLMStreamChunk(tool_call_delta={"index": 0, "function": {"arguments": '{"path":'}}),
 			LLMStreamChunk(tool_call_delta={"index": 0, "function": {"arguments": '"a.txt"}'}}),
 		]
 		previews = []
+
 		async def on_delta(event_type, content, metadata):
 			if event_type == "tool_args_delta":
 				previews.append((content, metadata))
+
 		agg = StreamAggregator()
 		result = await agg.aggregate(_make_stream(chunks), idle_timeout=10, on_delta=on_delta)
 		assert "tool_calls" in result.message
@@ -66,10 +73,14 @@ class TestStreamAggregator:
 	@pytest.mark.asyncio
 	async def test_multiple_tool_calls(self):
 		chunks = [
-			LLMStreamChunk(tool_call_delta={"tool_calls": [
-				{"index": 0, "id": "tc-1", "function": {"name": "a", "arguments": "{}"}},
-				{"index": 1, "id": "tc-2", "function": {"name": "b", "arguments": "{}"}},
-			]}),
+			LLMStreamChunk(
+				tool_call_delta={
+					"tool_calls": [
+						{"index": 0, "id": "tc-1", "function": {"name": "a", "arguments": "{}"}},
+						{"index": 1, "id": "tc-2", "function": {"name": "b", "arguments": "{}"}},
+					]
+				}
+			),
 		]
 		agg = StreamAggregator()
 		result = await agg.aggregate(_make_stream(chunks), idle_timeout=10)
@@ -114,6 +125,7 @@ class TestStreamAggregator:
 			yield LLMStreamChunk(content_delta="a")
 			await asyncio.sleep(10)
 			yield LLMStreamChunk(content_delta="b")
+
 		agg = StreamAggregator()
 		result = await agg.aggregate(slow_stream(), idle_timeout=0.1)
 		assert result.message["content"] == "a"
@@ -124,6 +136,7 @@ class TestStreamAggregator:
 		async def empty_slow_stream():
 			await asyncio.sleep(10)
 			yield LLMStreamChunk(content_delta="b")
+
 		agg = StreamAggregator()
 		with pytest.raises(CancelledError):
 			await agg.aggregate(empty_slow_stream(), idle_timeout=0.1)
@@ -133,6 +146,7 @@ class TestStreamAggregator:
 		async def many_chunks():
 			while True:
 				yield LLMStreamChunk(content_delta="x")
+
 		agg = StreamAggregator()
 		result = await agg.aggregate(many_chunks(), idle_timeout=60)
 		assert result.partial is True

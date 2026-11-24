@@ -1,0 +1,7 @@
+name: single-reply-demo
+system_prompt: 请用一句话回答。
+runtime:
+  strategy: single_reply
+plugins:
+  single_reply: {enabled: true}
+  por: {enabled: true, mode: auto}

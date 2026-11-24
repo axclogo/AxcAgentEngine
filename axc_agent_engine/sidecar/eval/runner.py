@@ -1,12 +1,14 @@
 """EvalRunner — 评估执行器"""
+
 from __future__ import annotations
 
 import logging
 import time
 import uuid
+from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Callable
+from typing import TYPE_CHECKING, Any
 
 from axc_agent_engine.core.events import EventType
 from axc_agent_engine.core.run_context import (
@@ -22,17 +24,15 @@ logger = logging.getLogger(__name__)
 CaseOptionsFactory = Callable[["EvalCase", int], dict]
 
 if TYPE_CHECKING:
-	from axc_agent_engine.sidecar.eval.store import AnnotationStore, EvalStore
 	from axc_agent_engine.sidecar.eval.judge import LLMJudge
+	from axc_agent_engine.sidecar.eval.store import AnnotationStore, EvalStore
 
 
 @dataclass
 class EvalCase:
-	"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-评估用例。
-	Evaluation case.
-	"""
+	"""Evaluation case.
+	评估用例。"""
+
 	input: str
 	expected_output: str | None = None
 	expected_tools: list[str] = field(default_factory=list)
@@ -42,11 +42,9 @@ class EvalCase:
 
 @dataclass
 class EvalResult:
-	"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-评估结果。
-	Evaluation result.
-	"""
+	"""Evaluation result.
+	评估结果。"""
+
 	case_id: str
 	input: str
 	actual_output: str
@@ -61,22 +59,17 @@ class EvalResult:
 
 @dataclass
 class EvalDataset:
-	"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-带名称的评测用例集合。
-	Named collection of evaluation cases.
-	"""
+	"""Named collection of evaluation cases.
+	带名称的评测用例集合。"""
+
 	suite_id: str
 	cases: list[EvalCase] = field(default_factory=list)
 	metadata: dict[str, Any] = field(default_factory=dict)
 
 
 class EvalCaseExecutor:
-	"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-运行一个评测用例，并记录输出、工具、usage 和错误。
-	Runs one eval case and records output, tools, usage, and error.
-	"""
+	"""Runs one eval case and records output, tools, usage, and error.
+	运行一个评测用例，并记录输出、工具、usage 和错误。"""
 
 	async def run(
 		self,
@@ -109,28 +102,30 @@ class EvalCaseExecutor:
 				elif event.type == EventType.ERROR:
 					error = event.content
 		except Exception as e:
+			logging.getLogger(__name__).exception("Agent execution failed")
 			error = str(e)
 		duration_ms = int((time.time() - start) * 1000)
 		return EvalResult(
-			case_id=case_id, input=case.input,
-			actual_output=actual_output, actual_tools=actual_tools,
-			input_tokens=input_tokens, output_tokens=output_tokens,
-			duration_ms=duration_ms, error=error,
+			case_id=case_id,
+			input=case.input,
+			actual_output=actual_output,
+			actual_tools=actual_tools,
+			input_tokens=input_tokens,
+			output_tokens=output_tokens,
+			duration_ms=duration_ms,
+			error=error,
 		)
 
 
 class EvalScorer:
-	"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-使用自定义、LLM 或确定性匹配为评测结果打分。
-	Scores eval results with custom, LLM, or deterministic matching.
-	"""
+	"""Scores eval results with custom, LLM, or deterministic matching.
+	使用自定义、LLM 或确定性匹配为评测结果打分。"""
 
 	async def score(
 		self,
 		case: EvalCase,
 		result: EvalResult,
-		judge: "LLMJudge | None" = None,
+		judge: LLMJudge | None = None,
 		custom_judge: Callable[[EvalCase, EvalResult], float] | None = None,
 	) -> None:
 		if custom_judge:
@@ -163,18 +158,15 @@ class EvalScorer:
 
 
 class EvalRunner:
-	"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-评估执行器。
-	Evaluation runner.
-	"""
+	"""Evaluation runner.
+	评估执行器。"""
 
 	def __init__(
 		self,
 		engine: Any,
 		agent_name: str,
-		store: "EvalStore | None" = None,
-		annotation_store: "AnnotationStore | None" = None,
+		store: EvalStore | None = None,
+		annotation_store: AnnotationStore | None = None,
 	) -> None:
 		self._engine = engine
 		self._agent_name = agent_name
@@ -194,15 +186,13 @@ class EvalRunner:
 		case_run_options: CaseOptionsFactory | None = None,
 		case_metadata: CaseOptionsFactory | None = None,
 	) -> list[EvalResult]:
-		"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-执行评估用例。
-		Run evaluation cases.
-		"""
+		"""Run evaluation cases.
+		执行评估用例。"""
 		agent = self._engine.get_agent(self._agent_name)
 		if not agent:
 			raise ValueError(f"Agent '{self._agent_name}' 未找到")
 		from axc_agent_engine.sidecar.eval.judge import LLMJudge
+
 		judge = LLMJudge(judge_llm) if judge_llm else None
 		base_run_options = dict_or_empty(run_options, "run_options")
 		base_metadata = dict_or_empty(metadata, "metadata")
@@ -290,20 +280,14 @@ class EvalRunner:
 		run_options: dict,
 		metadata: dict,
 	) -> EvalResult:
-		"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-执行单个用例。
-		Run one evaluation case.
-		"""
+		"""Run one evaluation case.
+		执行单个用例。"""
 		return await self._case_executor.run(agent, case, case_id, run_options=run_options, metadata=metadata)
 
 	@staticmethod
 	def _auto_score(case: EvalCase, result: EvalResult) -> float:
-		"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-自动评分：精确匹配 + 工具匹配。
-		Automatic scoring: exact match plus tool match.
-		"""
+		"""Automatic scoring: exact match plus tool match.
+		自动评分：精确匹配 + 工具匹配。"""
 		return EvalScorer().auto_score(case, result)
 
 	async def _apply_annotation(self, case: EvalCase, case_id: str) -> EvalCase:

@@ -1,7 +1,9 @@
 """Tests for constants module."""
+
 from axc_agent_engine.core.constants import (
+	COMPRESS_MARKER_MICRO,
+	COMPRESS_MARKER_SNIP,
 	PLUGIN_CONTEXT_TAG,
-	COMPRESS_MARKER_SNIP, COMPRESS_MARKER_MICRO,
 	STREAM_MAX_CHUNKS,
 )
 

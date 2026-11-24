@@ -1,6 +1,7 @@
 """SupervisorScheduler — 管理者调度。
 SupervisorScheduler — supervisor-driven scheduling.
 """
+
 from __future__ import annotations
 
 import re
@@ -12,11 +13,8 @@ if TYPE_CHECKING:
 
 
 class SupervisorScheduler:
-	"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-管理者决定谁发言。
-	The supervisor decides which worker speaks.
-	"""
+	"""The supervisor decides which worker speaks.
+	管理者决定谁发言。"""
 
 	def __init__(self, supervisor: Agent, workers: list[Agent]) -> None:
 		if supervisor is None:
@@ -32,37 +30,28 @@ class SupervisorScheduler:
 		"""
 		return 2
 
-	def select_speakers(self, ctx: SharedContext, agents: list,
-						step: int) -> list:
-		#English: Bilingual note. 中文：奇数轮（0, 2, 4...）：supervisor 发言。
-		#English: Even-numbered steps (0, 2, 4...) are supervisor turns. 中文：源码说明。
+	def select_speakers(self, ctx: SharedContext, agents: list, step: int) -> list:
+		# Even-numbered steps (0, 2, 4...) are supervisor turns. 偶数步由调度者执行。
 		if step % 2 == 0:
 			return [self._supervisor]
-		#English: Bilingual note. 中文：偶数轮（1, 3, 5...）：解析 supervisor 上一轮回复，找 Worker。
-		#English: Odd-numbered steps (1, 3, 5...) parse the supervisor reply to find a worker. 中文：源码说明。
+		# Odd-numbered steps (1, 3, 5...) parse the supervisor reply to find a worker. 在奇数步解析调度者回复，选择工作 Agent。
 		last_msg = ctx.get_last_message(exclude_agent="")
 		if last_msg and last_msg["agent"] == self._supervisor.name:
 			worker = self._parse_worker(last_msg["content"])
 			if worker:
 				return [worker]
-		#English: Bilingual note. 中文：解析失败，轮流选 Worker。
-		#English: If parsing fails, choose workers by fallback rotation. 中文：源码说明。
+		# If parsing fails, choose workers by fallback rotation. 解析失败时按轮询顺序选择工作 Agent。
 		return [self._fallback_worker()]
 
 	def _parse_worker(self, content: str) -> Agent | None:
-		"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-从 supervisor 回复中解析 Worker 名称。
-		Parse a worker name from the supervisor reply.
-		"""
-		#English: Bilingual note. 中文：尝试 ASSIGN:name:task 格式。
-		#English: Try the ASSIGN:name:task format. 中文：源码说明。
-		match = re.search(r'ASSIGN:(\S+?):', content)
+		"""Parse a worker name from the supervisor reply.
+		从 supervisor 回复中解析 Worker 名称。"""
+		# Try the ASSIGN:name:task format. 尝试解析 ASSIGN:name:task 格式。
+		match = re.search(r"ASSIGN:(\S+?):", content)
 		if match:
 			name = match.group(1)
 			return self._find_worker(name)
-		#English: Bilingual note. 中文：尝试匹配任何已知 Worker 名称。
-		#English: Try matching any known worker name. 中文：源码说明。
+		# Try matching any known worker name. 尝试匹配已知的工作 Agent 名称。
 		for worker in self._workers:
 			if worker.name in content:
 				return worker
@@ -75,11 +64,8 @@ class SupervisorScheduler:
 		return None
 
 	def _fallback_worker(self) -> Agent:
-		"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-降级：轮流选 Worker。
-		Fallback: rotate through workers.
-		"""
+		"""Fallback: rotate through workers.
+		降级：轮流选 Worker。"""
 		worker = self._workers[self._worker_index % len(self._workers)]
 		self._worker_index += 1
 		return worker

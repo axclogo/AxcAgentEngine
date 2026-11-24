@@ -1,23 +1,31 @@
 """示例：红蓝对抗模式 — 攻防演练"""
+
 import asyncio
 import os
 
-from axc_agent_engine import AgentModels, Engine, LLMConfig
+from axc_agent_engine import AgentModels, Engine, LLMConfig, PluginRegistry
 from axc_agent_engine.llm.client import OpenAIClient
+from axc_agent_engine.plugins.builtin import PORPlugin
 from axc_agent_engine.sidecar.multi_agent import MultiAgentSession, SessionMode
 from axc_agent_engine.storage.in_memory import InMemoryMessageBus
 
 
 def _agent_models() -> AgentModels:
-	return AgentModels(default=OpenAIClient(LLMConfig(
-		base_url=os.environ["AXC_LLM_BASE_URL"],
-		api_key=os.environ["AXC_LLM_API_KEY"],
-		model=os.environ.get("AXC_LLM_MODEL", "gpt-4o"),
-	)))
+	return AgentModels(
+		default=OpenAIClient(
+			LLMConfig(
+				base_url=os.environ["AXC_LLM_BASE_URL"],
+				api_key=os.environ["AXC_LLM_API_KEY"],
+				model=os.environ.get("AXC_LLM_MODEL", "gpt-4o"),
+			)
+		)
+	)
 
 
 async def main():
-	engine = Engine(message_bus=InMemoryMessageBus())
+	registry = PluginRegistry()
+	registry.register(PORPlugin)
+	engine = Engine(message_bus=InMemoryMessageBus(), plugin_registry=registry)
 	models = _agent_models()
 	base = os.path.dirname(__file__)
 	red = engine.load_agent_template(os.path.join(base, "agent_red.yaml")).instantiate(models=models)

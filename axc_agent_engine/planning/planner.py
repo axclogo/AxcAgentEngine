@@ -1,17 +1,16 @@
 """POR 计划创建"""
-import logging
+
 from dataclasses import dataclass, field
+from graphlib import CycleError, TopologicalSorter
 
 from axc_agent_engine.core.errors import SchemaError
 from axc_agent_engine.core.schema import StepStatus
 
-logger = logging.getLogger(__name__)
-
 
 @dataclass
 class PlanStep:
-	"""English: This documentation describes the related engine component behavior.
-中文：计划步骤"""
+	"""Plan step. 计划步骤"""
+
 	step_id: int
 	description: str
 	depends_on: list[int] = field(default_factory=list)
@@ -23,42 +22,48 @@ class PlanStep:
 
 @dataclass
 class Plan:
-	"""English: This documentation describes the related engine component behavior.
-中文：执行计划"""
+	"""Execution plan. 执行计划"""
+
 	goal: str
 	steps: list[PlanStep] = field(default_factory=list)
 	replan_count: int = 0
 
 
 def create_plan(goal: str, steps_raw: list[dict]) -> Plan:
-	"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-从结构化规划数据创建 Plan。"""
+	"""Build a plan from structured data.
+	从结构化规划数据创建 Plan。"""
 	steps = []
 	for s in steps_raw:
-		steps.append(PlanStep(
-			step_id=s.get("step_id", 0),
-			description=s.get("description", ""),
-			depends_on=s.get("depends_on", []) or [],
-			tools_needed=s.get("tools_needed", []) or [],
-		))
+		if not isinstance(s, dict):
+			raise SchemaError("Plan steps must be objects")
+		steps.append(
+			PlanStep(
+				step_id=s.get("step_id", 0),
+				description=s.get("description", ""),
+				depends_on=s.get("depends_on", []),
+				tools_needed=s.get("tools_needed", []),
+			)
+		)
 	return Plan(goal=goal, steps=steps)
 
 
 def validate_plan(plan: Plan) -> None:
-	"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-校验计划是否为可调度 DAG。"""
-	if not plan.goal:
+	"""Check that the plan is a schedulable DAG.
+	校验计划是否为可调度 DAG。"""
+	if not isinstance(plan.goal, str) or not plan.goal.strip():
 		raise SchemaError("Plan goal cannot be empty")
 	seen: set[int] = set()
 	for step in plan.steps:
-		if step.step_id <= 0:
+		if type(step.step_id) is not int or step.step_id <= 0:
 			raise SchemaError(f"Plan step_id must be positive: {step.step_id}")
 		if step.step_id in seen:
 			raise SchemaError(f"Duplicate plan step_id: {step.step_id}")
-		if not step.description:
+		if not isinstance(step.description, str) or not step.description.strip():
 			raise SchemaError(f"Plan step {step.step_id} description cannot be empty")
+		if not isinstance(step.depends_on, list) or any(type(dep) is not int for dep in step.depends_on):
+			raise SchemaError(f"Plan step {step.step_id} requires integer dependency IDs")
+		if not isinstance(step.tools_needed, list) or any(not isinstance(tool, str) for tool in step.tools_needed):
+			raise SchemaError(f"Plan step {step.step_id} requires a list of tool names")
 		seen.add(step.step_id)
 	for step in plan.steps:
 		for dep_id in step.depends_on:
@@ -66,24 +71,7 @@ def validate_plan(plan: Plan) -> None:
 				raise SchemaError(f"Plan step {step.step_id} cannot depend on itself")
 			if dep_id not in seen:
 				raise SchemaError(f"Plan step {step.step_id} depends on missing step {dep_id}")
-	_validate_acyclic(plan)
-
-
-def _validate_acyclic(plan: Plan) -> None:
-	steps_by_id = {step.step_id: step for step in plan.steps}
-	visiting: set[int] = set()
-	visited: set[int] = set()
-
-	def visit(step_id: int) -> None:
-		if step_id in visited:
-			return
-		if step_id in visiting:
-			raise SchemaError(f"Plan dependency cycle detected at step {step_id}")
-		visiting.add(step_id)
-		for dep_id in steps_by_id[step_id].depends_on:
-			visit(dep_id)
-		visiting.remove(step_id)
-		visited.add(step_id)
-
-	for step in plan.steps:
-		visit(step.step_id)
+	try:
+		TopologicalSorter({step.step_id: step.depends_on for step in plan.steps}).prepare()
+	except CycleError as exc:
+		raise SchemaError(f"Plan dependency cycle detected: {exc.args[1]}") from exc

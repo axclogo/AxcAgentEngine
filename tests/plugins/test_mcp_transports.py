@@ -1,325 +1,60 @@
-import sys
-import types
-from contextlib import asynccontextmanager
-
 import pytest
 
-from axc_agent_engine.plugins.builtin.mcp.support.models import MCPApplicationError
-from axc_agent_engine.plugins.builtin.mcp.support.connection import MCPConnection
-from axc_agent_engine.plugins.builtin.mcp.support.models import MCPTransportError
-from axc_agent_engine.plugins.builtin.mcp.support.normalization import (
-	normalize_call_result,
-	sdk_call_result_to_dict,
-	sdk_tool_to_dict,
-	tool_from_payload,
-)
-from axc_agent_engine.plugins.builtin.mcp.support.transports import build_transport
-from axc_agent_engine.plugins.builtin.mcp.support.transports import sdk as sdk_transport
-from axc_agent_engine.plugins.builtin.mcp.support.transports.base import (
-	call_transport_client,
-	client_session_class,
-	merge_env,
-	module_exists,
-	timeout,
-)
-from axc_agent_engine.plugins.builtin.mcp.support.transports.http import JsonRpcHttpTransport
-from axc_agent_engine.plugins.builtin.mcp.support.transports.sdk import OfficialSDKTransport
+from axc_agent_engine.plugins.builtin.mcp.support import MCPConnection
 
 
-def test_transport_base_helpers(monkeypatch):
-	assert timeout({"x": "2"}, "x", 1.0) == 2.0
-	assert timeout({"x": "-1"}, "x", 1.0) == 1.0
-	assert timeout({"x": "bad"}, "x", 1.0) == 1.0
-	assert module_exists("sys")
-	assert not module_exists("definitely_missing_axc_module")
-	assert call_transport_client(lambda url, headers=None: (url, headers), "u", {"h": "v"}) == ("u", {"h": "v"})
-	assert call_transport_client(lambda url: url, "u", {"h": "v"}) == "u"
-	env = merge_env({"X": 1})
-	assert env["X"] == "1"
-	assert merge_env(None) is None
+def test_rejects_removed_transport():
+	with pytest.raises(ValueError, match="standard MCP"):
+		MCPConnection({"use_sdk": False})
 
 
-def test_client_session_class_fallback(monkeypatch):
-	mcp = types.ModuleType("mcp")
-	session_mod = types.ModuleType("mcp.client.session")
-	class Session: pass
-	session_mod.ClientSession = Session
-	monkeypatch.setitem(sys.modules, "mcp", mcp)
-	monkeypatch.setitem(sys.modules, "mcp.client.session", session_mod)
-	assert client_session_class() is Session
+@pytest.mark.parametrize("transport,path", [("sse", "/sse"), ("streamable_http", "/mcp")])
+async def test_real_official_transports_handle_calls_timeout_cancellation_and_close(transport, path):
+	import asyncio
+	import socket
+	from contextlib import suppress
 
+	import uvicorn
+	from mcp.server.fastmcp import FastMCP
 
-def test_official_sdk_transport_available_branches(monkeypatch):
-	monkeypatch.setattr(sdk_transport.importlib, "import_module", lambda name: object())
-	monkeypatch.setattr(sdk_transport, "module_exists", lambda name: name.endswith("stdio"))
-	assert OfficialSDKTransport.available({"transport": "command"})
-	assert not OfficialSDKTransport.available({"transport": "sse"})
+	from axc_agent_engine.plugins.builtin.mcp.support.models import MCPTransportError
 
-	def missing(name):
-		raise ImportError(name)
+	server = FastMCP("release")
+	entered = asyncio.Event()
+	release = asyncio.Event()
 
-	monkeypatch.setattr(sdk_transport.importlib, "import_module", missing)
-	assert not OfficialSDKTransport.available({"transport": "stdio"})
+	@server.tool()
+	async def echo(text: str) -> str:
+		if text == "wait":
+			entered.set()
+			await release.wait()
+		return text
 
-
-async def test_json_rpc_http_transport_success_error_and_close(monkeypatch):
-	class Response:
-		def __init__(self, payload):
-			self.payload = payload
-		def raise_for_status(self):
-			return None
-		def json(self):
-			return self.payload
-	class Client:
-		def __init__(self, timeout=None, headers=None):
-			self.closed = False
-			self.payloads = [Response({"result": {"ok": True}}), Response({"error": {"message": "bad"}})]
-		async def post(self, url, json):
-			self.last = (url, json)
-			return self.payloads.pop(0)
-		async def aclose(self):
-			self.closed = True
-	class Httpx:
-		AsyncClient = Client
-	monkeypatch.setitem(sys.modules, "httpx", Httpx)
-	transport = JsonRpcHttpTransport("http://mcp", headers={"a": "b"})
-	await transport.connect()
-	result = await transport.request("tools/list")
-	assert result == {"ok": True}
-	with pytest.raises(MCPApplicationError):
-		await transport.request("tools/list")
-	client = transport._client
-	await transport.close()
-	assert client.closed is True
-	with pytest.raises(ValueError):
-		await JsonRpcHttpTransport("").connect()
-
-
-def test_build_transport_selects_http_and_rejects_empty(monkeypatch):
-	monkeypatch.setattr(OfficialSDKTransport, "available", classmethod(lambda cls, config: False))
-	assert isinstance(build_transport({"url": "http://x"}), JsonRpcHttpTransport)
-	with pytest.raises(ValueError):
-		build_transport({})
-
-
-async def test_official_sdk_transport_request_paths(monkeypatch):
-	class Tool:
-		name = "tool"
-		description = "desc"
-		inputSchema = {"type": "object"}
-	class ListResult:
-		tools = [Tool()]
-	class CallResult:
-		content = []
-		isError = False
-	class Session:
-		def __init__(self):
-			self.initialized = False
-		async def initialize(self):
-			self.initialized = True
-		async def list_tools(self):
-			return ListResult()
-		async def call_tool(self, name, arguments):
-			self.called = (name, arguments)
-			return CallResult()
-	transport = OfficialSDKTransport({"transport": "stdio", "command": "x"})
-	transport._session = Session()
-	assert await transport.request("initialize") == {}
-	assert await transport.request("notifications/initialized") == {}
-	assert (await transport.request("tools/list"))["tools"][0]["name"] == "tool"
-	assert "content" in await transport.request("tools/call", {"name": "tool", "arguments": {"a": 1}})
-	with pytest.raises(RuntimeError):
-		await transport.request("unknown")
-	await transport.close()
-	assert transport._session is None
-
-
-async def test_official_sdk_transport_open_streams_and_connect_errors(monkeypatch):
-	entered = []
-
-	class DummySession:
-		def __init__(self, read_stream, write_stream):
-			self.streams = (read_stream, write_stream)
-
-		async def __aenter__(self):
-			return self
-
-		async def __aexit__(self, *args):
-			return False
-
-		async def initialize(self):
-			return None
-
-	@asynccontextmanager
-	async def ctx(value):
-		entered.append(value)
-		yield value
-
-	class ParamsWithCwd:
-		def __init__(self, **kwargs):
-			self.kwargs = kwargs
-
-	class ParamsNoCwd:
-		def __init__(self, **kwargs):
-			if "cwd" in kwargs:
-				raise TypeError("cwd unsupported")
-			self.kwargs = kwargs
-
-	stdio_mod = types.SimpleNamespace(
-		StdioServerParameters=ParamsWithCwd,
-		stdio_client=lambda params: ctx(("stdio-read", params.kwargs)),
-	)
-	sse_mod = types.SimpleNamespace(sse_client=lambda url, headers=None: ctx(("sse-read", "sse-write")))
-	http_mod = types.SimpleNamespace(streamable_http_client=lambda url, headers=None: ctx(("http-read", "http-write")))
-
-	def fake_import(name):
-		if name == "mcp.client.stdio":
-			return stdio_mod
-		if name == "mcp.client.sse":
-			return sse_mod
-		if name == "mcp.client.streamable_http":
-			return http_mod
-		raise ImportError(name)
-
-	monkeypatch.setattr(sdk_transport.importlib, "import_module", fake_import)
-	monkeypatch.setattr(sdk_transport, "client_session_class", lambda: DummySession)
-
-	stdio = OfficialSDKTransport({"transport": "stdio", "command": "cmd", "args": ["a"], "env": {"X": "1"}, "cwd": "/tmp"})
-	await stdio.connect()
-	assert stdio._session.streams[0] == "stdio-read"
-	assert "cwd" in stdio._session.streams[1]
-	await stdio.connect()
-	await stdio.close()
-
-	stdio_mod.StdioServerParameters = ParamsNoCwd
-	no_cwd = OfficialSDKTransport({"transport": "command", "command": "cmd"})
-	await no_cwd.connect()
-	assert "cwd" not in no_cwd._session.streams[1]
-	await no_cwd.close()
-
-	sse = OfficialSDKTransport({"transport": "sse", "url": "http://sse", "headers": {"h": "v"}})
-	await sse.connect()
-	assert sse._session.streams[0] == "sse-read"
-	await sse.close()
-
-	http = OfficialSDKTransport({"transport": "http", "url": "http://http"})
-	await http.connect()
-	assert http._session.streams[0] == "http-read"
-	await http.close()
-
-	with pytest.raises(ValueError):
-		await OfficialSDKTransport({"transport": "bad"})._open_streams(types.SimpleNamespace())
-
-	@asynccontextmanager
-	async def broken_ctx(value):
-		raise RuntimeError("open failed")
-		yield value
-
-	stdio_mod.stdio_client = lambda params: broken_ctx(("x", "y"))
-	broken = OfficialSDKTransport({"transport": "stdio", "command": "cmd"})
-	with pytest.raises(RuntimeError):
-		await broken.connect()
-	assert broken._session is None
-
-
-def test_mcp_normalization_helpers_cover_payload_shapes():
-	tool = tool_from_payload({"name": "t"})
-	assert tool.name == "t"
-	assert tool.input_schema == {"type": "object", "properties": {}}
-	assert normalize_call_result({"content": [{"type": "text", "text": "a"}, {"type": "text", "text": "b"}]}) == "a\nb"
-	assert normalize_call_result({"content": [{"type": "image", "data": "x"}]}) == [{"type": "image", "data": "x"}]
-	assert normalize_call_result({"other": True}) == {"other": True}
-
-	class SDKTool:
-		name = "sdk"
-		description = None
-		input_schema = {"type": "object"}
-		annotations = None
-
-	class Text:
-		type = "text"
-		text = "hello"
-
-	class Result:
-		content = [{"type": "text", "text": "dict"}, Text()]
-
-	assert sdk_tool_to_dict(SDKTool())["inputSchema"] == {"type": "object"}
-	assert sdk_call_result_to_dict(Result()) == {"content": [{"type": "text", "text": "dict"}, {"type": "text", "text": "hello"}]}
-
-
-async def test_mcp_connection_connect_list_call_reconnect_and_close(monkeypatch):
-	class Transport:
-		def __init__(self):
-			self.connected = 0
-			self.closed = 0
-			self.requests = []
-			self.fail_next = False
-
-		async def connect(self):
-			self.connected += 1
-
-		async def request(self, method, params=None):
-			self.requests.append((method, params or {}))
-			if method == "notifications/initialized":
-				raise RuntimeError("ignored")
-			if self.fail_next:
-				self.fail_next = False
-				raise MCPTransportError("broken")
-			if method == "tools/list":
-				return {"tools": [{"name": "tool", "description": "desc"}]}
-			if method == "tools/call":
-				return {"content": [{"type": "text", "text": "ok"}]}
-			return {}
-
-		async def close(self):
-			self.closed += 1
-
-	transport = Transport()
-	monkeypatch.setattr("axc_agent_engine.plugins.builtin.mcp.support.connection.build_transport", lambda config: transport)
-	conn = MCPConnection({"name": "server", "timeout": 1})
-
-	await conn.connect()
-	await conn.connect()
-	tools = await conn.list_tools()
-	transport.fail_next = True
-	result = await conn.call_tool("tool", {"a": 1}, retryable=True)
-	await conn.close()
-
-	assert transport.connected == 2
-	assert transport.closed == 2
-	assert tools[0].name == "tool"
-	assert result == "ok"
-	assert transport.requests[0][0] == "initialize"
-
-
-async def test_mcp_connection_application_error_and_non_retryable_transport_error(monkeypatch):
-	class AppTransport:
-		async def connect(self):
-			pass
-		async def request(self, method, params=None):
-			if method == "initialize":
-				return {}
-			raise MCPApplicationError({"message": "bad"})
-		async def close(self):
-			pass
-
-	class BrokenTransport:
-		async def connect(self):
-			pass
-		async def request(self, method, params=None):
-			if method == "initialize":
-				return {}
-			raise MCPTransportError("broken")
-		async def close(self):
-			self.closed = True
-
-	monkeypatch.setattr("axc_agent_engine.plugins.builtin.mcp.support.connection.build_transport", lambda config: AppTransport())
-	app = MCPConnection({"name": "app", "timeout": 1})
-	with pytest.raises(MCPApplicationError):
-		await app.list_tools()
-
-	broken_transport = BrokenTransport()
-	monkeypatch.setattr("axc_agent_engine.plugins.builtin.mcp.support.connection.build_transport", lambda config: broken_transport)
-	broken = MCPConnection({"name": "broken", "timeout": 1})
-	with pytest.raises(MCPTransportError):
-		await broken.call_tool("tool", {}, retryable=False)
+	app = server.sse_app() if transport == "sse" else server.streamable_http_app()
+	with socket.socket() as sock:
+		sock.bind(("127.0.0.1", 0))
+		port = sock.getsockname()[1]
+		http = uvicorn.Server(uvicorn.Config(app, log_level="error"))
+		task = asyncio.create_task(http.serve(sockets=[sock]))
+		conn = MCPConnection({"transport": transport, "url": f"http://127.0.0.1:{port}{path}", "call_timeout": 1})
+		try:
+			async with asyncio.timeout(10):
+				while not http.started:
+					await asyncio.sleep(0.01)
+				assert [tool.name for tool in await conn.list_tools()] == ["echo"]
+				assert await conn.call_tool("echo", {"text": "ok"}) == "ok"
+				waiting = asyncio.create_task(conn.call_tool("echo", {"text": "wait"}))
+				await entered.wait()
+				waiting.cancel()
+				with pytest.raises(asyncio.CancelledError):
+					await waiting
+				with pytest.raises(MCPTransportError):
+					await conn.call_tool("echo", {"text": "wait"})
+				release.set()
+				assert await conn.call_tool("echo", {"text": "reconnected"}) == "reconnected"
+		finally:
+			release.set()
+			await conn.close()
+			http.should_exit = True
+			with suppress(asyncio.CancelledError):
+				await asyncio.wait_for(task, 10)

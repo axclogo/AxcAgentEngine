@@ -9,7 +9,8 @@ of OpenAI-compatible Chat Completions providers through a provider protocol.
 ## Key Features
 
 - POR execution engine: plan, schedule by dependency, observe, and replan.
-- ReAct executor for direct iterative tool use.
+- ReAct and POR are official execution strategy plugins. Hosts can register a custom
+  ExecutionStrategyPlugin and select its name with runtime.strategy.
 - Plugin architecture with YAML-driven loading and phase/priority ordering.
 - OpenAI-compatible HTTP client plus provider protocol.
 - OpenAI Chat Completions compatible HTTP API subset.
@@ -39,18 +40,19 @@ pip install axc-agent-engine
 ## Quick Start
 
 ```python
-from axc_agent_engine import Engine, LLMConfig
+from axc_agent_engine import AgentModels, Engine, LLMConfig, PluginRegistry
+from axc_agent_engine.llm.client import OpenAIClient
+from axc_agent_engine.plugins.builtin import BuiltinToolsPlugin, PORPlugin
 
-engine = Engine(
-    default_llm=LLMConfig(
-        base_url="https://api.openai.com/v1",
-        api_key="sk-xxx",
-        model="gpt-4o",
-    ),
-)
-
-agent = engine.load_agent("./agents/my_agent.yaml")
-result = await agent.chat("hello")
+registry = PluginRegistry()
+registry.register_many([PORPlugin, BuiltinToolsPlugin])
+engine = Engine(plugin_registry=registry)
+models = AgentModels(default=OpenAIClient(LLMConfig(base_url=base_url, api_key=api_key, model=model)))
+try:
+    template = engine.load_agent_template("examples/01_basic_chat/agent.yaml")
+    result = await template.instantiate(models=models).chat("hello")
+finally:
+    await engine.close()
 ```
 
 ## API Compatibility
@@ -68,7 +70,7 @@ audit events. Clients should call `/v1/capabilities` before assuming API parity.
 
 ## Architecture Notes
 
-- Engine core: `Executor`, `LLMCaller`, planning/POR, context, events, and recovery.
+- Engine core: `Executor`, `LLMCaller`, context, events, and recovery.
 - Extension boundary: plugins implement hooks and return `ToolDefinition` objects.
 - Tool boundary: every tool returns `ToolOutput`; large results can be externalized.
 - Provider boundary: model I/O and model-safe function-name mapping live in providers.

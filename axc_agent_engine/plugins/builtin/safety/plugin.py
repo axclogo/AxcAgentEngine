@@ -1,6 +1,7 @@
 """Safety 插件 — 输入注入检测 + 输出脱敏 + 输入清洗"""
-import re
+
 import logging
+import re
 from typing import Any
 
 from axc_agent_engine.plugins.base import BasePlugin
@@ -34,9 +35,9 @@ INPUT_MAX_LENGTH = 30000
 
 
 class SafetyPlugin(BasePlugin):
-	"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-安全防护 — 输入清洗(transform_messages) + 注入检测(pre_llm_call) + 输出脱敏(post_tool_call)"""
+	"""Clean input and detect prompt injections.
+	安全防护 — 输入清洗(transform_messages) + 注入检测(pre_llm_call) + 输出脱敏(post_tool_call)"""
+
 	name = "safety"
 	display_name = "安全防护"
 	priority = 10
@@ -49,15 +50,15 @@ class SafetyPlugin(BasePlugin):
 		self._input_sanitize = config.get("input_sanitize", True)
 
 	def transform_messages(self, messages: list, exec_ctx: Any = None, current_message: str = "") -> list:
-		"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-只做输入清洗，不做注入检测（注入检测在 pre_llm_call 中）"""
+		"""Clean model input before the request hooks run.
+		只做输入清洗，不做注入检测（注入检测在 pre_llm_call 中）"""
 		if not messages or not self._input_sanitize:
 			return messages
 		return self._sanitize_latest_user(messages)
 
-	def pre_llm_call(self, exec_ctx: Any = None, messages: list[dict] = None,
-					 tools: list[dict] | None = None) -> tuple[list[dict], list[dict] | None]:
+	def pre_llm_call(
+		self, exec_ctx: Any = None, messages: list[dict] | None = None, tools: list[dict] | None = None
+	) -> tuple[list[dict], list[dict] | None]:
 		"""LLM 调用前做注入检测"""
 		if not self._prompt_injection or not messages:
 			return messages, tools
@@ -75,12 +76,19 @@ class SafetyPlugin(BasePlugin):
 				break
 		return messages, tools
 
-	async def post_tool_call(self, exec_ctx: Any = None, tool_name: str = "", arguments: dict = None,
-					   result: Any = None, duration_ms: int = 0) -> Any:
+	async def post_tool_call(
+		self,
+		exec_ctx: Any = None,
+		tool_name: str = "",
+		arguments: dict | None = None,
+		result: Any = None,
+		duration_ms: int = 0,
+	) -> Any:
 		if not self._pii_masking:
 			return result
-		#English: PII masking on ToolOutput content 中文：源码说明。
+		# PII masking on ToolOutput content 遮蔽工具结果中的个人信息。
 		from axc_agent_engine.tools.tool_output import ToolOutput
+
 		if isinstance(result, ToolOutput):
 			if isinstance(result.content, str):
 				result.content = _mask_pii(result.content)
@@ -102,16 +110,15 @@ class SafetyPlugin(BasePlugin):
 
 
 def sanitize_input(text: str) -> str:
-	"""English: This documentation describes the related engine component behavior.
-中文：清洗用户输入"""
+	"""Sanitize user input. 清洗用户输入"""
 	if not text:
 		return text
-	text = re.sub(r'<at\s+user_id="[^"]*">([^<]*)</at>', r'@\1', text)
-	text = re.sub(r'<@\w+>', '', text)
-	text = re.sub(r'<br\s*/?>', '\n', text, flags=re.IGNORECASE)
-	text = re.sub(r'<[^>]+>', '', text)
-	text = re.sub(r':\w+:', '', text)
-	text = re.sub(r'\n{3,}', '\n\n', text)
+	text = re.sub(r'<at\s+user_id="[^"]*">([^<]*)</at>', r"@\1", text)
+	text = re.sub(r"<@\w+>", "", text)
+	text = re.sub(r"<br\s*/?>", "\n", text, flags=re.IGNORECASE)
+	text = re.sub(r"<[^>]+>", "", text)
+	text = re.sub(r":\w+:", "", text)
+	text = re.sub(r"\n{3,}", "\n\n", text)
 	return text
 
 
@@ -123,6 +130,6 @@ def _detect_injection(content: str) -> bool:
 
 
 def _mask_pii(text: str) -> str:
-	for pii_type, (pattern, masker) in PII_PATTERNS.items():
-		text = re.sub(pattern, lambda m: masker(m.group()), text)
+	for pattern, masker in PII_PATTERNS.values():
+		text = re.sub(pattern, lambda m, mask=masker: mask(m.group()), text)
 	return text

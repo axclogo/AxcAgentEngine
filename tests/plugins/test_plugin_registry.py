@@ -1,10 +1,13 @@
 """Tests for explicit PluginRegistry behavior."""
+
 from __future__ import annotations
+
+from pathlib import Path
 
 import pytest
 
 from axc_agent_engine.core.errors import PluginInitError
-from axc_agent_engine.plugins import PluginContext
+from axc_agent_engine.plugins import PluginContext, builtin
 from axc_agent_engine.plugins.base import BasePlugin
 from axc_agent_engine.plugins.builtin import AVAILABLE_BUILTIN_PLUGINS
 from axc_agent_engine.plugins.builtin.safety.plugin import SafetyPlugin
@@ -86,7 +89,7 @@ def test_list_plugin_config_schemas_adds_common_fields():
 	field_names = [field.key for field in schemas["safety"].fields]
 	assert field_names[0] == "enabled"
 	assert "required" not in field_names
-	assert schemas["safety"].fields[0].default is True
+	assert schemas["safety"].fields[0].default is False
 
 
 def test_get_plugin_config_schema_returns_builtin_schema():
@@ -95,3 +98,13 @@ def test_get_plugin_config_schema_returns_builtin_schema():
 	schema = registry.get_plugin_config_schema("safety")
 	assert schema.plugin_name == "safety"
 	assert any(field.key == "prompt_injection" for field in schema.fields)
+
+
+def test_builtin_catalog_includes_shipped_plugins_and_public_exports():
+	builtin_dir = Path(builtin.__file__).parent
+	shipped = {path.parent.name for path in builtin_dir.glob("*/plugin.py")}
+	assert set(AVAILABLE_BUILTIN_PLUGINS) == shipped | {"react", "por"}
+	for name, plugin in AVAILABLE_BUILTIN_PLUGINS.items():
+		assert plugin.name == name
+		assert plugin.__name__ in builtin.__all__
+		assert getattr(builtin, plugin.__name__) is plugin

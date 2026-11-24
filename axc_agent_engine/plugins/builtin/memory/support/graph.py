@@ -1,5 +1,5 @@
-"""In-memory entity relationship graph for memory retrieval.
-中文：此文档说明相关引擎组件的行为。"""
+"""In-memory entity relationship graph for memory retrieval. 用于记忆检索的内存实体关系图。"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -30,8 +30,8 @@ class GraphRelation:
 
 @runtime_checkable
 class EntityResolver(Protocol):
-	"""Resolves whether a mention should merge with an existing entity.
-中文：此文档说明相关引擎组件的行为。"""
+	"""Resolves whether a mention should merge with an existing entity. 判断提及对象是否应与现有实体合并。"""
+
 	def resolve(
 		self,
 		name: str,
@@ -42,8 +42,7 @@ class EntityResolver(Protocol):
 
 
 class DefaultEntityResolver:
-	"""Type-aware alias resolver for graph entity disambiguation.
-中文：此文档说明相关引擎组件的行为。"""
+	"""Type-aware alias resolver for graph entity disambiguation. 按实体类型解析别名并消除歧义。"""
 
 	def resolve(
 		self,
@@ -67,16 +66,14 @@ class DefaultEntityResolver:
 
 
 class GraphMemory:
-	"""Entity disambiguation and relation storage.
-中文：此文档说明相关引擎组件的行为。"""
+	"""Entity disambiguation and relation storage. 实体消歧与关系存储。"""
 
 	def __init__(self, resolver: EntityResolver | None = None) -> None:
 		self.entities: dict[str, GraphEntity] = {}
 		self.relations: dict[str, GraphRelation] = {}
 		self.resolver = resolver or DefaultEntityResolver()
 
-	def upsert_entity(self, name: str, entity_type: str = "concept",
-					  aliases: list[str] | None = None) -> GraphEntity:
+	def upsert_entity(self, name: str, entity_type: str = "concept", aliases: list[str] | None = None) -> GraphEntity:
 		name = name.strip()
 		if not name:
 			raise ValueError("entity name cannot be empty")
@@ -96,13 +93,22 @@ class GraphMemory:
 	def resolve_entity(self, name: str, entity_type: str = "", aliases: list[str] | None = None) -> GraphEntity | None:
 		return self.resolver.resolve(name, entity_type, aliases or [], self.entities)
 
-	def upsert_relation(self, source_name: str, target_name: str, relation_type: str = "RELATED_TO",
-						description: str = "", source_memory_id: str = "") -> GraphRelation:
+	def upsert_relation(
+		self,
+		source_name: str,
+		target_name: str,
+		relation_type: str = "RELATED_TO",
+		description: str = "",
+		source_memory_id: str = "",
+	) -> GraphRelation:
 		source = self.upsert_entity(source_name, "concept")
 		target = self.upsert_entity(target_name, "concept")
 		for relation in self.relations.values():
-			if (relation.source_id == source.id and relation.target_id == target.id
-					and relation.relation_type == relation_type):
+			if (
+				relation.source_id == source.id
+				and relation.target_id == target.id
+				and relation.relation_type == relation_type
+			):
 				if len(description) > len(relation.description):
 					relation.description = description
 				relation.confidence = min(relation.confidence + 0.05, 1.0)
@@ -132,14 +138,16 @@ class GraphMemory:
 				words = [w for w in query_lower.split() if w]
 				if not any(w in haystack for w in words):
 					continue
-			matches.append({
-				"source": source.name,
-				"target": target.name,
-				"relation_type": relation.relation_type,
-				"description": relation.description,
-				"source_memory_id": relation.source_memory_id,
-				"confidence": relation.confidence,
-			})
+			matches.append(
+				{
+					"source": source.name,
+					"target": target.name,
+					"relation_type": relation.relation_type,
+					"description": relation.description,
+					"source_memory_id": relation.source_memory_id,
+					"confidence": relation.confidence,
+				}
+			)
 		return matches[:limit]
 
 

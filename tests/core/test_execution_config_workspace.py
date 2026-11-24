@@ -1,5 +1,9 @@
 """Tests for ExecutionConfig workspace field addition."""
+
+from dataclasses import FrozenInstanceError
+
 import pytest
+
 from axc_agent_engine.core.context import ExecutionConfig, ExecutionContext
 
 
@@ -14,7 +18,7 @@ class TestExecutionConfigWorkspace:
 
 	def test_config_is_frozen(self):
 		config = ExecutionConfig(workspace="/ws")
-		with pytest.raises(Exception):
+		with pytest.raises(FrozenInstanceError):
 			config.workspace = "/other"
 
 	def test_context_with_workspace(self):

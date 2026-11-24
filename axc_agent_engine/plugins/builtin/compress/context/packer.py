@@ -1,5 +1,5 @@
-"""L5 context window packing.
-中文：此文档说明相关引擎组件的行为。"""
+"""L5 context window packing. 第五层上下文窗口组装。"""
+
 from __future__ import annotations
 
 from typing import Any
@@ -13,8 +13,7 @@ def pack_context(
 	max_input_tokens: int,
 	reserve_output_tokens: int,
 ) -> PackedContext:
-	"""Pack messages into the configured input window.
-中文：此文档说明相关引擎组件的行为。"""
+	"""Pack messages into the configured input window. 按配置的输入窗口装入消息。"""
 	try:
 		max_input = int(max_input_tokens)
 		reserve_output = int(reserve_output_tokens)
@@ -46,7 +45,7 @@ def pack_context(
 
 def _message_groups(messages: list[dict[str, Any]]) -> list[list[int]]:
 	"""Group assistant tool calls with their tool results.
-中文：将 assistant 工具调用与对应 tool 结果分组。"""
+	中文：将 assistant 工具调用与对应 tool 结果分组。"""
 	grouped = _tool_call_groups(messages)
 	groups: list[list[int]] = []
 	emitted: set[int] = set()

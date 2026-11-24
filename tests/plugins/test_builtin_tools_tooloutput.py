@@ -1,6 +1,12 @@
 """Tests for builtin tools returning ToolOutput — file_read, file_write, shell, etc."""
+
+from typing import ClassVar
+
 import pytest
-from axc_agent_engine.plugins.builtin.builtin_tools.plugin import BuiltinToolsPlugin
+
+from axc_agent_engine import AgentModels, Engine, PluginRegistry
+from axc_agent_engine.core.context import ExecutionContext
+from axc_agent_engine.llm.provider import LLMProvider
 from axc_agent_engine.plugins.builtin import AVAILABLE_BUILTIN_PLUGINS
 from axc_agent_engine.plugins.builtin.builtin_tools.command_tools import (
 	BuiltinCommandTools,
@@ -16,21 +22,30 @@ from axc_agent_engine.plugins.builtin.builtin_tools.file_tools import (
 	_file_list_llm_view,
 	_resolve_line_ranges,
 )
-from axc_agent_engine.plugins.builtin.builtin_tools.path_policy import BuiltinPathPolicy, PathValidationError
-from axc_agent_engine.plugins.builtin.builtin_tools.support import bounded_int
-from axc_agent_engine.plugins.builtin.builtin_tools.tool_definitions import (
-	_file_read, _file_write, _file_append, _file_edit, _file_list, _file_glob, _file_info, _get_time,
-	_file_tree,
-	_http_request, _pip_install, _python_exec, _shell,
-	_artifact_read, _artifact_search, _artifact_page,
-)
 from axc_agent_engine.plugins.builtin.builtin_tools.http_tools import BuiltinHttpPolicy, is_blocked_ip
-from axc_agent_engine.core.context import ExecutionContext
+from axc_agent_engine.plugins.builtin.builtin_tools.path_policy import BuiltinPathPolicy, PathValidationError
+from axc_agent_engine.plugins.builtin.builtin_tools.plugin import BuiltinToolsPlugin
+from axc_agent_engine.plugins.builtin.builtin_tools.tool_definitions import (
+	_artifact_page,
+	_artifact_read,
+	_artifact_search,
+	_file_append,
+	_file_edit,
+	_file_glob,
+	_file_info,
+	_file_list,
+	_file_read,
+	_file_tree,
+	_file_write,
+	_get_time,
+	_http_request,
+	_pip_install,
+	_python_exec,
+	_shell,
+)
 from axc_agent_engine.runtime.sandbox_models import CommandResult
-from axc_agent_engine.tools.tool_output import ToolOutput
 from axc_agent_engine.storage.artifact_store import InMemoryArtifactStore
-from axc_agent_engine import Engine, PluginRegistry, AgentModels
-from axc_agent_engine.llm.provider import LLMProvider
+from axc_agent_engine.tools.tool_output import ToolOutput
 
 
 class TestGetTime:
@@ -428,7 +443,9 @@ class TestFileEdit:
 	async def test_basic_edit(self, tmp_path):
 		f = tmp_path / "edit.txt"
 		f.write_text("hello world")
-		result = await _file_edit({"path": "edit.txt", "old_string": "world", "new_string": "earth"}, {"workspace": str(tmp_path)})
+		result = await _file_edit(
+			{"path": "edit.txt", "old_string": "world", "new_string": "earth"}, {"workspace": str(tmp_path)}
+		)
 		assert not result.is_error
 		assert f.read_text() == "hello earth"
 
@@ -436,7 +453,9 @@ class TestFileEdit:
 	async def test_no_match(self, tmp_path):
 		f = tmp_path / "edit2.txt"
 		f.write_text("hello")
-		result = await _file_edit({"path": "edit2.txt", "old_string": "xyz", "new_string": "abc"}, {"workspace": str(tmp_path)})
+		result = await _file_edit(
+			{"path": "edit2.txt", "old_string": "xyz", "new_string": "abc"}, {"workspace": str(tmp_path)}
+		)
 		assert result.is_error
 		assert "No matching" in result.content
 
@@ -444,7 +463,9 @@ class TestFileEdit:
 	async def test_multiple_matches_no_replace_all(self, tmp_path):
 		f = tmp_path / "multi.txt"
 		f.write_text("aaa bbb aaa")
-		result = await _file_edit({"path": "multi.txt", "old_string": "aaa", "new_string": "ccc"}, {"workspace": str(tmp_path)})
+		result = await _file_edit(
+			{"path": "multi.txt", "old_string": "aaa", "new_string": "ccc"}, {"workspace": str(tmp_path)}
+		)
 		assert result.is_error
 		assert "2 处匹配" in result.content
 
@@ -469,22 +490,30 @@ class TestFileEdit:
 
 	@pytest.mark.asyncio
 	async def test_file_not_found(self):
-		result = await _file_edit({"path": "no-such-file.txt", "old_string": "a", "new_string": "b"}, {"workspace": "/tmp"})
+		result = await _file_edit(
+			{"path": "no-such-file.txt", "old_string": "a", "new_string": "b"}, {"workspace": "/tmp"}
+		)
 		assert result.is_error
 
 	@pytest.mark.asyncio
-	async def test_edit_rejects_empty_path_and_normalizes_smart_quotes(self, tmp_path):
+	async def test_edit_requires_exact_quotes_and_preserves_unmatched_bytes(self, tmp_path):
 		empty = await _file_edit({"path": "", "old_string": "a", "new_string": "b"}, {"workspace": str(tmp_path)})
 		f = tmp_path / "smart.txt"
-		f.write_text("say \u201chello\u201d")
+		original = "say “hello”\r\nkeep ‘these’\n".encode()
+		f.write_bytes(original)
 		normalized = await _file_edit(
 			{"path": "smart.txt", "old_string": '"hello"', "new_string": '"hi"'},
 			{"workspace": str(tmp_path)},
 		)
 
 		assert empty.is_error
-		assert not normalized.is_error
-		assert f.read_text() == 'say "hi"'
+		assert normalized.is_error
+		assert f.read_bytes() == original
+		result = await _file_edit(
+			{"path": "smart.txt", "old_string": "“hello”", "new_string": "hi"}, {"workspace": str(tmp_path)}
+		)
+		assert not result.is_error
+		assert f.read_bytes() == "say hi\r\nkeep ‘these’\n".encode()
 
 
 class TestPythonExec:
@@ -603,7 +632,7 @@ class TestHttpRequest:
 		class FakeResponse:
 			status_code = 200
 			text = "abcdef"
-			headers = {"content-type": "text/plain"}
+			headers: ClassVar[dict[str, str]] = {"content-type": "text/plain"}
 
 		class FakeClient:
 			def __init__(self, timeout):
@@ -619,7 +648,11 @@ class TestHttpRequest:
 				return FakeResponse()
 
 		import axc_agent_engine.plugins.builtin.builtin_tools.tool_definitions as builtin_tools
+
 		monkeypatch.setattr(builtin_tools.httpx, "AsyncClient", FakeClient)
+		monkeypatch.setattr(
+			"axc_agent_engine.plugins.builtin.builtin_tools.http_tools.resolve_host_ips", lambda host: ["93.184.216.34"]
+		)
 		result = await _http_request({"url": "https://example.com", "max_bytes": 3, "timeout": 5}, {})
 		assert not result.is_error
 		assert result.content["body"] == "abcdef"
@@ -640,7 +673,7 @@ class TestHttpRequest:
 		class FakeResponse:
 			status_code = 201
 			text = "x" * (10 * 1024 * 1024 + 1)
-			headers = {"content-type": "text/plain"}
+			headers: ClassVar[dict[str, str]] = {"content-type": "text/plain"}
 
 		class FakeClient:
 			def __init__(self, timeout):
@@ -658,9 +691,15 @@ class TestHttpRequest:
 				return FakeResponse()
 
 		import axc_agent_engine.plugins.builtin.builtin_tools.tool_definitions as builtin_tools
+
 		store = InMemoryArtifactStore()
 		monkeypatch.setattr(builtin_tools.httpx, "AsyncClient", FakeClient)
-		result = await _http_request({"url": "https://example.com", "method": "post", "body": {"x": 1}}, {"artifact_store": store})
+		monkeypatch.setattr(
+			"axc_agent_engine.plugins.builtin.builtin_tools.http_tools.resolve_host_ips", lambda host: ["93.184.216.34"]
+		)
+		result = await _http_request(
+			{"url": "https://example.com", "method": "post", "body": {"x": 1}}, {"artifact_store": store}
+		)
 
 		assert not result.is_error
 		assert result.content["externalized"] is True
@@ -673,7 +712,7 @@ class TestHttpRequest:
 		class FakeResponse:
 			status_code = 200
 			text = "x" * (10 * 1024 * 1024 + 1)
-			headers = {"content-type": "text/plain"}
+			headers: ClassVar[dict[str, str]] = {"content-type": "text/plain"}
 
 		class FakeClient:
 			def __init__(self, timeout):
@@ -689,7 +728,11 @@ class TestHttpRequest:
 				return FakeResponse()
 
 		import axc_agent_engine.plugins.builtin.builtin_tools.tool_definitions as builtin_tools
+
 		monkeypatch.setattr(builtin_tools.httpx, "AsyncClient", FakeClient)
+		monkeypatch.setattr(
+			"axc_agent_engine.plugins.builtin.builtin_tools.http_tools.resolve_host_ips", lambda host: ["93.184.216.34"]
+		)
 		result = await _http_request({"url": "https://example.com"}, {})
 
 		assert result.content["externalized"] is False
@@ -697,7 +740,8 @@ class TestHttpRequest:
 
 	@pytest.mark.asyncio
 	async def test_http_policy_dns_errors_and_unsafe_resolution(self, monkeypatch):
-		import axc_agent_engine.plugins.builtin.builtin_tools.http_tools as http_tools
+		from axc_agent_engine.plugins.builtin.builtin_tools import http_tools
+
 		policy = BuiltinHttpPolicy()
 
 		def raise_gaierror(hostname):
@@ -974,8 +1018,10 @@ class TestBuiltinCommandHelpers:
 				raise RuntimeError("shell down")
 
 		no_workspace = await BuiltinCommandTools(path_policy=Policy()).shell({"command": "echo x"}, {})
+		with pytest.raises(ValueError, match="integer"):
+			await _shell({"command": "echo x", "timeout": "bad"}, {"allow_unsafe_workspace": True})
 		failing = await _shell(
-			{"command": "echo x", "shell_type": "powershell", "timeout": "bad"},
+			{"command": "echo x", "shell_type": "powershell", "timeout": 1},
 			{"allow_unsafe_workspace": True, "command_executor": FailingExecutor()},
 		)
 
@@ -1006,8 +1052,6 @@ class TestBuiltinCommandHelpers:
 		assert content["stdout_artifact_id"]
 		assert content["stderr_artifact_id"]
 		assert len(artifacts) == 2
-		assert bounded_int("bad", 1, 3, 2) == 2
-		assert bounded_int(9, 1, 3, 2) == 3
 
 
 class TestBuiltinFileToolExceptionBranches:
@@ -1031,10 +1075,16 @@ class TestBuiltinFileToolExceptionBranches:
 
 		file_path = tmp_path / "readonly.txt"
 		file_path.write_text("a", encoding="utf-8")
-		monkeypatch.setattr("axc_agent_engine.plugins.builtin.builtin_tools.file_tools.os.replace", lambda src, dst: (_ for _ in ()).throw(RuntimeError("replace failed")))
-		result = await _file_edit({"path": "readonly.txt", "old_string": "a", "new_string": "b"}, {"workspace": str(tmp_path)})
+		monkeypatch.setattr(
+			"axc_agent_engine.plugins.builtin.builtin_tools.file_tools.os.replace",
+			lambda src, dst: (_ for _ in ()).throw(OSError("replace failed")),
+		)
+		result = await _file_edit(
+			{"path": "readonly.txt", "old_string": "a", "new_string": "b"}, {"workspace": str(tmp_path)}
+		)
 		assert result.is_error
-		assert not (tmp_path / "readonly.txt.tmp").exists()
+		assert list(tmp_path.iterdir()) == [file_path]
+		assert file_path.read_text() == "a"
 
 	def test_file_view_helpers_cover_empty_and_depth_branches(self, tmp_path):
 		assert "（无条目）" in _file_list_llm_view(".", [], False)
@@ -1043,6 +1093,73 @@ class TestBuiltinFileToolExceptionBranches:
 		assert _resolve_line_ranges({}, 0) == [(1, 1)]
 
 		(tmp_path / "ignored").mkdir()
-		lines, entries = _build_tree(str(tmp_path), ".", 0, {"ignored"}, BuiltinPathPolicy(), {"workspace": str(tmp_path)})
+		lines, entries = _build_tree(
+			str(tmp_path), ".", 0, {"ignored"}, BuiltinPathPolicy(), {"workspace": str(tmp_path)}
+		)
 		assert lines == ["."]
 		assert entries == []
+
+
+@pytest.mark.parametrize("tool", [_file_write, _file_edit, _file_append])
+async def test_file_mutation_checks_whole_file_version(tmp_path, tool):
+	import hashlib
+
+	path = tmp_path / "guarded"
+	path.write_bytes(b"target\r\nowner")
+	ctx = {"workspace": str(tmp_path)}
+	read = await _file_read({"path": path.name, "end_line": 1}, ctx)
+	digest = read.content["sha256"]
+	assert digest == hashlib.sha256(path.read_bytes()).hexdigest()
+	assert digest in read.context_view()
+	args = {"path": path.name, "expected_sha256": digest}
+	args.update({"old_string": "target", "new_string": "done"} if tool is _file_edit else {"content": "done"})
+	path.write_bytes(b"target\r\nuser edit")
+	assert (await tool(args, ctx)).is_error
+	assert path.read_bytes() == b"target\r\nuser edit"
+	args["expected_sha256"] = (await _file_read({"path": path.name}, ctx)).content["sha256"]
+	assert not (await tool(args, ctx)).is_error
+
+
+async def test_concurrent_guarded_updates_only_accept_one(tmp_path):
+	import asyncio
+
+	path = tmp_path / "shared"
+	path.write_text("initial")
+	ctx = {"workspace": str(tmp_path)}
+	digest = (await _file_read({"path": path.name}, ctx)).content["sha256"]
+	replies = await asyncio.gather(
+		*[_file_write({"path": path.name, "content": value, "expected_sha256": digest}, ctx) for value in ("A", "B")]
+	)
+	assert sum(not reply.is_error for reply in replies) == 1
+	assert path.read_text() in {"A", "B"}
+
+
+async def test_file_grep_runtime_scope_and_output(tmp_path, artifact_store, monkeypatch):
+	import shutil
+
+	if not shutil.which("rg"):
+		pytest.skip("requires ripgrep")
+	workspace = tmp_path / "repo"
+	workspace.mkdir()
+	(workspace / "source.txt").write_text("keep\n-needle\n")
+	(tmp_path / "private.txt").write_text("-needle")
+	(workspace / "link.txt").symlink_to(tmp_path / "private.txt")
+	plugin = BuiltinToolsPlugin()
+	plugin.initialize({"load": ["file_grep"]}, None)
+	(tool,) = plugin.get_tools()
+	assert tool.is_read_only and tool.capability == "file_read"
+	ctx = {"workspace": str(workspace), "artifact_store": artifact_store}
+	assert (await tool.execute({"pattern": "-needle"}, {})).is_error
+	result = await tool.execute({"pattern": "-needle"}, ctx)
+	assert not result.is_error and result.content.splitlines() == ["./source.txt:2:-needle"]
+	assert (await tool.execute({"pattern": "absent"}, ctx)).content == "无匹配行"
+	assert (await tool.execute({"pattern": "["}, ctx)).is_error
+	monkeypatch.setattr("axc_agent_engine.runtime.sandbox_local.INLINE_OUTPUT_BYTES", 8)
+	result = await tool.execute({"pattern": "-needle"}, ctx)
+	(ref,) = result.artifacts
+	assert ref.id in result.context_view() and "artifact_read" in result.context_view()
+	assert (await artifact_store.read(ref.id)).content == "./source.txt:2:-needle\n"
+	missing_store = await tool.execute({"pattern": "-needle"}, {"workspace": str(workspace)})
+	assert missing_store.is_error and "ArtifactStore" in missing_store.content
+	monkeypatch.setenv("PATH", str(tmp_path))
+	assert (await tool.execute({"pattern": "x"}, ctx)).is_error

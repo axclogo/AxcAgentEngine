@@ -1,9 +1,11 @@
-"""Graph source ingestion.
-中文：此文档说明相关引擎组件的行为。"""
+"""Graph source ingestion. 图数据源导入。"""
+
 import logging
 import os
 from collections.abc import Callable
 from typing import Any
+
+from axc_agent_engine.plugins.builtin.common import string_array
 
 from .config import GraphConfig
 from .policy import GraphPolicy
@@ -51,7 +53,11 @@ class GraphSourceLoader:
 				entity = self._store.upsert_entity(
 					clean_text(item.get("name", ""), self._config.max_name_length),
 					entity_type,
-					[clean_text(alias, self._config.max_name_length) for alias in item.get("aliases", []) if str(alias).strip()],
+					[
+						clean_text(alias, self._config.max_name_length)
+						for alias in string_array(item.get("aliases", []), "aliases")
+						if alias.strip()
+					],
 					description=clean_text(item.get("description", ""), self._config.max_description_length),
 					external_id=str(item.get("id", "")),
 					namespace=self._config.namespace,
@@ -67,22 +73,34 @@ class GraphSourceLoader:
 				type_error = self._policy.validate_relation_type(relation_type)
 				if type_error:
 					self._fail({"source": source, "relation": item.get("id", ""), "error": type_error})
-				source_name = str(item.get("source") or item.get("source_name") or external_names.get(str(item.get("source_id", "")), item.get("source_id", "")))
-				target_name = str(item.get("target") or item.get("target_name") or external_names.get(str(item.get("target_id", "")), item.get("target_id", "")))
+				source_name = str(
+					item.get("source")
+					or item.get("source_name")
+					or external_names.get(str(item.get("source_id", "")), item.get("source_id", ""))
+				)
+				target_name = str(
+					item.get("target")
+					or item.get("target_name")
+					or external_names.get(str(item.get("target_id", "")), item.get("target_id", ""))
+				)
 				if not source_name or not target_name:
 					self._fail({"source": source, "relation": item.get("id", ""), "error": "source/target missing"})
-					self._store.upsert_relation(
-						source_name,
-						target_name,
-						relation_type,
-						clean_text(item.get("description", ""), self._config.max_description_length),
-						source_memory_id=str(item.get("source_memory_id", "")),
-						external_id=str(item.get("id", "")),
-						namespace=self._config.namespace,
-						data_source=source,
-					)
+				self._store.upsert_relation(
+					source_name,
+					target_name,
+					relation_type,
+					clean_text(item.get("description", ""), self._config.max_description_length),
+					source_memory_id=str(item.get("source_memory_id", "")),
+					external_id=str(item.get("id", "")),
+					namespace=self._config.namespace,
+					data_source=source,
+				)
 				loaded_relations += 1
-		source_stats = {"entities": loaded_entities, "relations": loaded_relations, "sources": len(self._config.sources)}
+		source_stats = {
+			"entities": loaded_entities,
+			"relations": loaded_relations,
+			"sources": len(self._config.sources),
+		}
 		logger.info("[graph] Loaded %s entities, %s relations", loaded_entities, loaded_relations)
 		return source_stats
 

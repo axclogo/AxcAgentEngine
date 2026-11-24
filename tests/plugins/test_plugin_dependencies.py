@@ -1,22 +1,27 @@
 """Tests for #2 Plugin dependency declaration."""
+
+from typing import ClassVar
+
 import pytest
-from axc_agent_engine.plugins.base import BasePlugin
-from axc_agent_engine.plugins.loader import load_plugins, _validate_dependencies
-from axc_agent_engine.plugins.registry import PluginRegistry
-from axc_agent_engine.plugins import PluginContext
+
 from axc_agent_engine.core.errors import PluginInitError
+from axc_agent_engine.plugins import PluginContext
+from axc_agent_engine.plugins.base import BasePlugin
+from axc_agent_engine.plugins.loader import _validate_dependencies, load_plugins
+from axc_agent_engine.plugins.registry import PluginRegistry
 
 
 class TestPluginDependsOn:
 	def test_base_plugin_has_depends_on(self):
 		p = BasePlugin()
-		assert hasattr(p, 'depends_on')
+		assert hasattr(p, "depends_on")
 		assert p.depends_on == []
 
 	def test_custom_plugin_with_dependency(self):
 		class PluginA(BasePlugin):
 			name = "plugin_a"
-			depends_on = ["plugin_b"]
+			depends_on: ClassVar[list[str]] = ["plugin_b"]
+
 		a = PluginA()
 		assert a.depends_on == ["plugin_b"]
 
@@ -24,10 +29,12 @@ class TestPluginDependsOn:
 		class PluginA(BasePlugin):
 			name = "a"
 			priority = 10
-			depends_on = ["b"]
+			depends_on: ClassVar[list[str]] = ["b"]
+
 		class PluginB(BasePlugin):
 			name = "b"
 			priority = 20
+
 		plugins = [PluginA(), PluginB()]
 		_validate_dependencies(plugins)
 		names = [p.name for p in plugins]
@@ -37,9 +44,11 @@ class TestPluginDependsOn:
 		class PluginA(BasePlugin):
 			name = "a"
 			priority = 10
+
 		class PluginB(BasePlugin):
 			name = "b"
 			priority = 20
+
 		plugins = [PluginA(), PluginB()]
 		_validate_dependencies(plugins)
 		assert plugins[0].name == "a"
@@ -48,7 +57,8 @@ class TestPluginDependsOn:
 	def test_validate_dependencies_missing_dep_raises(self):
 		class PluginA(BasePlugin):
 			name = "a"
-			depends_on = ["nonexistent"]
+			depends_on: ClassVar[list[str]] = ["nonexistent"]
+
 		plugins = [PluginA()]
 		with pytest.raises(PluginInitError, match="depends on nonexistent"):
 			_validate_dependencies(plugins)
@@ -57,10 +67,12 @@ class TestPluginDependsOn:
 		class PluginA(BasePlugin):
 			name = "a"
 			priority = 20
-			depends_on = ["b"]
+			depends_on: ClassVar[list[str]] = ["b"]
+
 		class PluginB(BasePlugin):
 			name = "b"
 			priority = 10
+
 		plugins = [PluginB(), PluginA()]
 		_validate_dependencies(plugins)
 		assert plugins[0].name == "b"

@@ -1,5 +1,5 @@
-"""Language-specific sandbox executors.
-中文：此文档说明相关引擎组件的行为。"""
+"""Language-specific sandbox executors. 按语言区分的沙箱执行器。"""
+
 from __future__ import annotations
 
 import os
@@ -12,8 +12,7 @@ from axc_agent_engine.runtime.sandbox_workspace import WorkspaceCommandExecutor
 
 
 class PythonSandboxExecutor:
-	"""Run Python snippets as workspace-scoped temporary scripts.
-中文：此文档说明相关引擎组件的行为。"""
+	"""Run Python snippets as workspace-scoped temporary scripts. 在工作区内通过临时脚本执行 Python 片段。"""
 
 	def __init__(
 		self,
@@ -36,11 +35,13 @@ class PythonSandboxExecutor:
 		try:
 			with os.fdopen(fd, "w", encoding="utf-8") as f:
 				f.write(code)
-			return await self.command_executor.run(CommandSpec(
-				argv=[self.python, script_path],
-				cwd=self.workspace,
-				timeout=timeout,
-			))
+			return await self.command_executor.run(
+				CommandSpec(
+					argv=[self.python, script_path],
+					cwd=self.workspace,
+					timeout=timeout,
+				)
+			)
 		finally:
 			try:
 				os.remove(script_path)
@@ -49,8 +50,7 @@ class PythonSandboxExecutor:
 
 
 class PowerShellSandboxExecutor:
-	"""Run PowerShell snippets as workspace-scoped temporary scripts.
-中文：此文档说明相关引擎组件的行为。"""
+	"""Run PowerShell snippets as workspace-scoped temporary scripts. 在工作区内通过临时脚本执行 PowerShell 片段。"""
 
 	def __init__(
 		self,
@@ -73,11 +73,13 @@ class PowerShellSandboxExecutor:
 		try:
 			with os.fdopen(fd, "w", encoding="utf-8-sig") as f:
 				f.write(code)
-			return await self.command_executor.run(CommandSpec(
-				argv=[self.executable, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script_path],
-				cwd=self.workspace,
-				timeout=timeout,
-			))
+			return await self.command_executor.run(
+				CommandSpec(
+					argv=[self.executable, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script_path],
+					cwd=self.workspace,
+					timeout=timeout,
+				)
+			)
 		finally:
 			try:
 				os.remove(script_path)

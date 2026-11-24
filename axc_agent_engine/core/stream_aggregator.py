@@ -1,10 +1,12 @@
 """StreamAggregator — 把 LLMStreamChunk 聚合成完整消息。"""
+
 from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import Any, AsyncIterator, Awaitable, Callable
+from typing import Any
 
 from axc_agent_engine.core.constants import STREAM_MAX_CHUNKS, STREAM_MAX_CONTENT_LENGTH
 from axc_agent_engine.core.errors import CancelledError
@@ -18,8 +20,8 @@ StreamCallback = Callable[[str, str, dict[str, Any]], Awaitable[None]]
 
 @dataclass
 class AggregatedMessage:
-	"""English: This documentation describes the related engine component behavior.
-中文：流式聚合后的结果。"""
+	"""Result of aggregating a streamed response. 流式聚合后的结果。"""
+
 	message: dict[str, Any] = field(default_factory=dict)
 	thinking_content: str = ""
 	usage_input: int = 0
@@ -83,7 +85,11 @@ class StreamAggregateState:
 			return
 		self._merge_tool_call(tool_call_delta)
 		if on_delta:
-			await on_delta("tool_args_delta", _tool_args_delta(tool_call_delta), _tool_preview_meta(self.tool_calls_map, tool_call_delta))
+			await on_delta(
+				"tool_args_delta",
+				_tool_args_delta(tool_call_delta),
+				_tool_preview_meta(self.tool_calls_map, tool_call_delta),
+			)
 
 	def build_message(self) -> AggregatedMessage:
 		content = "".join(self.content_parts)
@@ -105,8 +111,7 @@ class StreamAggregateState:
 		return bool(self.content_parts or self.tool_calls_map)
 
 	def _merge_tool_call(self, tc_delta: dict) -> None:
-		"""Merge one tool_call delta into accumulated OpenAI tool_call shape.
-中文：此文档说明相关引擎组件的行为。"""
+		"""Merge one tool_call delta into accumulated OpenAI tool_call shape. 将工具调用的增量合入对应的 OpenAI 格式调用记录。"""
 		idx = tc_delta.get("index", 0)
 		if idx not in self.tool_calls_map:
 			self.tool_calls_map[idx] = {"id": tc_delta.get("id", ""), "function": {"name": "", "arguments": ""}}
@@ -121,17 +126,17 @@ class StreamAggregateState:
 
 
 class StreamAggregator:
-	"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-把 LLMStreamChunk 聚合成完整 message dict。"""
+	"""Assemble streamed chunks into one message.
+	把 LLMStreamChunk 聚合成完整 message dict。"""
 
 	async def aggregate(
-		self, aiter: AsyncIterator[LLMStreamChunk], idle_timeout: int,
+		self,
+		aiter: AsyncIterator[LLMStreamChunk],
+		idle_timeout: int,
 		on_delta: StreamCallback | None = None,
 	) -> AggregatedMessage:
-		"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-把流式 chunk 聚合成 AggregatedMessage。"""
+		"""Combine streamed chunks and report deltas.
+		把流式 chunk 聚合成 AggregatedMessage。"""
 		state = StreamAggregateState()
 		iterator = aiter.__aiter__()
 		while True:
@@ -143,7 +148,7 @@ class StreamAggregator:
 				chunk: LLMStreamChunk = await asyncio.wait_for(iterator.__anext__(), timeout=idle_timeout)
 			except StopAsyncIteration:
 				break
-			except asyncio.TimeoutError:
+			except TimeoutError:
 				if state.has_partial_payload():
 					logger.warning(f"Stream idle timeout ({idle_timeout}s), returning partial")
 					state.partial = True

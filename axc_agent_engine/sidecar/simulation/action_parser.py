@@ -1,7 +1,6 @@
-"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-把 LLM 文本解析成结构化仿真动作。
-Parse LLM text into structured simulation actions."""
+"""Parse LLM text into structured simulation actions.
+把 LLM 文本解析成结构化仿真动作。"""
+
 from __future__ import annotations
 
 from typing import Any
@@ -11,11 +10,8 @@ from axc_agent_engine.utils.json_utils import extract_json_object
 
 
 class ActionParseError(ValueError):
-	"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-当文本无法转换为 AgentAction 时抛出。
-	Raised when text cannot be converted to an AgentAction.
-	"""
+	"""Raised when text cannot be converted to an AgentAction.
+	当文本无法转换为 AgentAction 时抛出。"""
 
 
 class ActionParser:
@@ -24,19 +20,16 @@ class ActionParser:
 	"""
 
 	def parse(self, text: str, default_actor: str = "") -> AgentAction:
-		"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-解析文本并返回 AgentAction。
-		Parse text and return an AgentAction.
+		"""Parse text and return an AgentAction.
+		解析文本并返回 AgentAction。
 
-		输入可以是 JSON 对象，也可以被 Markdown JSON fence 包裹。
-		Accepted input is a JSON object, optionally wrapped in a Markdown JSON
-		fence.
+		                输入可以是 JSON 对象，也可以被 Markdown JSON fence 包裹。
+		                Accepted input is a JSON object, optionally wrapped in a Markdown JSON
+		                fence.
 
-		对象必须包含动作 `type`，如果提供了 default_actor 则可以省略 `actor`。
-		The object must contain an action `type` and may omit `actor` when
-		default_actor is provided.
-		"""
+		                对象必须包含动作 `type`，如果提供了 default_actor 则可以省略 `actor`。
+		                The object must contain an action `type` and may omit `actor` when
+		                default_actor is provided."""
 		data = extract_json_object(text)
 		if not data:
 			raise ActionParseError("No JSON object found in action response")

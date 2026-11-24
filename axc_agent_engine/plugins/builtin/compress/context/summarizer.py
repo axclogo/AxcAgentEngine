@@ -1,14 +1,14 @@
-"""L3 session summary management.
-中文：此文档说明相关引擎组件的行为。"""
+"""L3 session summary management. 第三层会话摘要管理。"""
+
 from __future__ import annotations
 
+from axc_agent_engine.core.errors import LLMError
 from axc_agent_engine.plugins.builtin.compress.context.models import ContextSummary
 from axc_agent_engine.plugins.builtin.compress.prompts import SUMMARY_PROMPT
 
 
 class SessionSummarizer:
-	"""Circuit-broken summary generator using utility_model.
-中文：此文档说明相关引擎组件的行为。"""
+	"""Circuit-broken summary generator using utility_model. 通过辅助模型生成摘要并实施熔断。"""
 
 	def __init__(self, max_tokens: int = 800, max_failures: int = 3) -> None:
 		self.state = ContextSummary()
@@ -22,7 +22,7 @@ class SessionSummarizer:
 		try:
 			self.state.content = await utility_model.ask(prompt)
 			self.state.failures = 0
-		except Exception:
+		except (LLMError, OSError, RuntimeError, ValueError):
 			self.state.failures += 1
 			if self.state.failures >= self.max_failures:
 				self.state.broken = True

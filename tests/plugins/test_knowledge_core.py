@@ -1,27 +1,30 @@
 import pytest
-from axc_agent_engine.plugins.builtin.knowledge.support.ingestion import PdfDocumentParser, SourceDocument, TextDocumentParser
-from axc_agent_engine.plugins.builtin.knowledge.support import (
-	CascadeReranker,
-	LLMQueryRewriter,
-	LLMReranker,
-	HashEmbeddingClient,
-	HybridRetriever,
-	InMemoryKnowledgeIndexStore,
-	KnowledgeFilter,
-	KnowledgeDocument,
-	KnowledgeSearchRequest,
-	LocalFileIngestionPipeline,
-	RetrievalResult,
-	SemanticChunker,
-	ScoreReranker,
-)
+
 from axc_agent_engine.plugins import PluginContext
 from axc_agent_engine.plugins.builtin.knowledge.plugin import (
 	KnowledgePlugin,
-	_filter_from_config,
 	_merge_filters,
-	_resource_name,
 	_tool_filters,
+)
+from axc_agent_engine.plugins.builtin.knowledge.support import (
+	CascadeReranker,
+	HashEmbeddingClient,
+	HybridRetriever,
+	InMemoryKnowledgeIndexStore,
+	KnowledgeDocument,
+	KnowledgeFilter,
+	KnowledgeSearchRequest,
+	LLMQueryRewriter,
+	LLMReranker,
+	LocalFileIngestionPipeline,
+	RetrievalResult,
+	ScoreReranker,
+	SemanticChunker,
+)
+from axc_agent_engine.plugins.builtin.knowledge.support.ingestion import (
+	PdfDocumentParser,
+	SourceDocument,
+	TextDocumentParser,
 )
 from axc_agent_engine.plugins.builtin.knowledge.support.retrieval import (
 	BM25Index,
@@ -32,9 +35,9 @@ from axc_agent_engine.plugins.builtin.knowledge.support.retrieval import (
 	_parse_llm_scores,
 	_parse_query_array,
 	_parse_rerank_scores,
-	rrf_merge,
 	normalize_filter,
 	normalize_search_request,
+	rrf_merge,
 	tokenize,
 )
 
@@ -82,10 +85,12 @@ def test_hybrid_retriever_bm25_returns_ranked_results():
 @pytest.mark.asyncio
 async def test_in_memory_knowledge_index_hybrid_search_and_delete():
 	store = InMemoryKnowledgeIndexStore(embedding_client=HashEmbeddingClient(), reranker=ScoreReranker())
-	await store.add_documents([
-		KnowledgeDocument(id="1", text="Python supports semantic chunking and vector retrieval"),
-		KnowledgeDocument(id="2", text="Gardening notes about tomatoes"),
-	])
+	await store.add_documents(
+		[
+			KnowledgeDocument(id="1", text="Python supports semantic chunking and vector retrieval"),
+			KnowledgeDocument(id="2", text="Gardening notes about tomatoes"),
+		]
+	)
 	results = await store.search("semantic vector retrieval", top_k=1)
 	assert results[0].id == "1"
 	assert "rerank" in results[0].retrieval
@@ -117,10 +122,14 @@ async def test_llm_query_rewriter_adds_original_and_rewrites():
 @pytest.mark.asyncio
 async def test_llm_reranker_scores_candidates():
 	reranker = LLMReranker(FakeLLM('[{"index": 1, "score": 0.9}, {"index": 0, "score": 0.1}]'))
-	results = await reranker.rerank("query", [
-		RetrievalResult(id="a", text="alpha", score=0.1, retrieval="bm25"),
-		RetrievalResult(id="b", text="beta", score=0.2, retrieval="bm25"),
-	], top_k=1)
+	results = await reranker.rerank(
+		"query",
+		[
+			RetrievalResult(id="a", text="alpha", score=0.1, retrieval="bm25"),
+			RetrievalResult(id="b", text="beta", score=0.2, retrieval="bm25"),
+		],
+		top_k=1,
+	)
 	assert results[0].id == "b"
 	assert "llm_rerank" in results[0].retrieval
 
@@ -133,36 +142,44 @@ async def test_cascade_reranker_raises_on_configured_failure():
 
 	reranker = CascadeReranker([FailingReranker(), ScoreReranker()])
 	with pytest.raises(RuntimeError, match="down"):
-		await reranker.rerank("python retrieval", [
-			RetrievalResult(id="1", text="python retrieval", score=0.1, retrieval="bm25"),
-			RetrievalResult(id="2", text="cooking", score=0.2, retrieval="bm25"),
-		], top_k=1)
+		await reranker.rerank(
+			"python retrieval",
+			[
+				RetrievalResult(id="1", text="python retrieval", score=0.1, retrieval="bm25"),
+				RetrievalResult(id="2", text="cooking", score=0.2, retrieval="bm25"),
+			],
+			top_k=1,
+		)
 
 
 @pytest.mark.asyncio
 async def test_knowledge_search_request_filters_trace_and_citations():
 	store = InMemoryKnowledgeIndexStore(embedding_client=HashEmbeddingClient())
-	await store.add_documents([
-		KnowledgeDocument(
-			id="public",
-			text="Password reset instructions for employees",
-			source="docs/public.md",
-			metadata={"namespace": "tenant-a", "chunk_id": 7, "acl_tags": ["employee"], "title": "Public"},
-		),
-		KnowledgeDocument(
-			id="private",
-			text="Password reset admin backdoor",
-			source="docs/private.md",
-			metadata={"namespace": "tenant-b", "chunk_id": 2, "acl_tags": ["admin"], "title": "Private"},
-		),
-	])
+	await store.add_documents(
+		[
+			KnowledgeDocument(
+				id="public",
+				text="Password reset instructions for employees",
+				source="docs/public.md",
+				metadata={"namespace": "tenant-a", "chunk_id": 7, "acl_tags": ["employee"], "title": "Public"},
+			),
+			KnowledgeDocument(
+				id="private",
+				text="Password reset admin backdoor",
+				source="docs/private.md",
+				metadata={"namespace": "tenant-b", "chunk_id": 2, "acl_tags": ["admin"], "title": "Private"},
+			),
+		]
+	)
 
-	response = await store.search_with_trace(KnowledgeSearchRequest(
-		query="password reset employees",
-		top_k=3,
-		filters=KnowledgeFilter(namespace="tenant-a", allowed_acl_tags=["employee"]),
-		include_trace=True,
-	))
+	response = await store.search_with_trace(
+		KnowledgeSearchRequest(
+			query="password reset employees",
+			top_k=3,
+			filters=KnowledgeFilter(namespace="tenant-a", allowed_acl_tags=["employee"]),
+			include_trace=True,
+		)
+	)
 
 	assert [item.id for item in response.results] == ["public"]
 	assert response.trace is not None
@@ -174,10 +191,22 @@ async def test_knowledge_search_request_filters_trace_and_citations():
 @pytest.mark.asyncio
 async def test_retrieval_filter_vector_hybrid_and_helpers():
 	docs = [
-		KnowledgeDocument(id="1", text="alpha vector retrieval", source="docs/a.md", metadata={"namespace": "n", "tags": ["a"], "acl_tags": "user", "chunk_id": 0}),
-		KnowledgeDocument(id="2", text="beta cooking", source="docs/b.md", metadata={"namespace": "n", "tags": ["b"], "acl_tags": ["admin"], "chunk_id": 1}),
+		KnowledgeDocument(
+			id="1",
+			text="alpha vector retrieval",
+			source="docs/a.md",
+			metadata={"namespace": "n", "tags": ["a"], "acl_tags": ["user"], "chunk_id": 0},
+		),
+		KnowledgeDocument(
+			id="2",
+			text="beta cooking",
+			source="docs/b.md",
+			metadata={"namespace": "n", "tags": ["b"], "acl_tags": ["admin"], "chunk_id": 1},
+		),
 	]
-	assert KnowledgeFilter(namespace="n", source_prefix="docs/", metadata={"tags": ["a"]}, allowed_acl_tags=["user"]).matches(docs[0])
+	assert KnowledgeFilter(
+		namespace="n", source_prefix="docs/", metadata={"tags": ["a"]}, allowed_acl_tags=["user"]
+	).matches(docs[0])
 	assert not KnowledgeFilter(source="other").matches(docs[0])
 	assert normalize_filter({"namespace": "n", "acl_tags": ["user"], "custom": "x"}).metadata["custom"] == "x"
 	assert normalize_search_request("alpha", top_k=2).query == "alpha"
@@ -191,7 +220,11 @@ async def test_retrieval_filter_vector_hybrid_and_helpers():
 	assert len(await store.list_documents()) == 1
 
 	async def vector_search(query, top_k, filters):
-		return [RetrievalResult(id="1", text="alpha vector retrieval", score=0.9, retrieval="vector", metadata={"chunk_id": 0})]
+		return [
+			RetrievalResult(
+				id="1", text="alpha vector retrieval", score=0.9, retrieval="vector", metadata={"chunk_id": 0}
+			)
+		]
 
 	async def reranker(query, results, top_k):
 		return []
@@ -201,9 +234,13 @@ async def test_retrieval_filter_vector_hybrid_and_helpers():
 
 	retriever = HybridRetriever(docs, vector_search=vector_search, reranker=reranker, query_rewriter=bad_rewriter)
 	with pytest.raises(RuntimeError, match="rewrite failed"):
-		await retriever.search_with_trace(KnowledgeSearchRequest("alpha retrieval", top_k=1, candidate_k=2, include_trace=True))
+		await retriever.search_with_trace(
+			KnowledgeSearchRequest("alpha retrieval", top_k=1, candidate_k=2, include_trace=True)
+		)
 	retriever = HybridRetriever(docs, vector_search=vector_search, reranker=reranker)
-	response = await retriever.search_with_trace(KnowledgeSearchRequest("alpha retrieval", top_k=1, candidate_k=2, include_trace=True))
+	response = await retriever.search_with_trace(
+		KnowledgeSearchRequest("alpha retrieval", top_k=1, candidate_k=2, include_trace=True)
+	)
 	assert response.results
 	assert response.trace.candidate_count >= 1
 
@@ -225,9 +262,9 @@ def test_parse_helpers():
 	assert _parse_rerank_scores({"scores": [1]}, 2) == [(0, 1.0)]
 	assert _parse_rerank_scores("bad", 2) == []
 	assert _parse_rerank_scores([{"id": "bad", "score": "x"}, {"id": 0, "relevance": 0.3}], 2) == [(0, 0.3)]
-	assert _parse_llm_scores("```json\n[{\"index\":0,\"score\":0.7}]\n```", 1) == [(0, 0.7)]
+	assert _parse_llm_scores('```json\n[{"index":0,"score":0.7}]\n```', 1) == [(0, 0.7)]
 	assert _parse_llm_scores("bad", 1) == []
-	assert _parse_query_array("```json\n[\"a\", \"\"]\n```") == ["a"]
+	assert _parse_query_array('```json\n["a", ""]\n```') == ["a"]
 	assert _parse_query_array("{}") == []
 	assert _dedupe_queries([" A ", "a", "", "B"], 2) == ["A", "B"]
 
@@ -237,23 +274,28 @@ async def test_query_rewriters_and_knowledge_plugin_helpers(tmp_path):
 	assert await NoopQueryRewriter().rewrite("") == []
 	assert await LLMQueryRewriter(None).rewrite("query", max_queries=1) == ["query"]
 	assert await LLMQueryRewriter(FakeLLM("not-json")).rewrite("query", max_queries=3) == ["query"]
-	assert _resource_name({"resource": "r"}, "d") == "d"
-	assert _resource_name(12, "d") == "d"
-	base = _filter_from_config(KnowledgeFilter(metadata={"a": 1}), namespace="n")
+	base = normalize_filter(KnowledgeFilter(metadata={"a": 1}), namespace="n")
 	assert base.namespace == "n"
-	assert _filter_from_config("bad", namespace="n").namespace == "n"
+	with pytest.raises(TypeError, match="filters must be an object"):
+		normalize_filter("bad", namespace="n")
 	merged = _merge_filters(KnowledgeFilter(namespace="base", metadata={"a": 1}), {"metadata": {"b": 2}, "source": "s"})
 	assert merged.namespace == "base" and merged.metadata == {"a": 1, "b": 2}
-	assert _tool_filters({"namespace": "n", "allowed_acl_tags": ["u"], "filters": {"source": "s"}}).allowed_acl_tags == ["u"]
+	assert _tool_filters(
+		{"namespace": "n", "allowed_acl_tags": ["u"], "filters": {"source": "s"}}
+	).allowed_acl_tags == ["u"]
 
 	doc = tmp_path / "doc.md"
 	doc.write_text("alpha plugin search", encoding="utf-8")
 	plugin = KnowledgePlugin()
-	plugin.initialize({"sources": ["doc.md"], "namespace": "n", "include_trace": True}, PluginContext(workspace=str(tmp_path)))
+	plugin.initialize(
+		{"sources": ["doc.md"], "namespace": "n", "include_trace": True}, PluginContext(workspace=str(tmp_path))
+	)
 	assert plugin.get_tools()[0].name == "knowledge_search"
 	assert plugin.inject_context(None, "alpha").startswith("[相关知识]")
 	assert (await plugin._tool_knowledge_search({"query": ""}, {})).is_error
-	result = await plugin._tool_knowledge_search({"query": "alpha", "include_trace": True, "filters": {"namespace": "n"}}, {})
+	result = await plugin._tool_knowledge_search(
+		{"query": "alpha", "include_trace": True, "filters": {"namespace": "n"}}, {}
+	)
 	assert result.content["results"]
 	assert result.content["trace"]["query"] == "alpha"
 
@@ -318,3 +360,70 @@ def test_text_and_pdf_parsers(tmp_path, monkeypatch):
 	assert pdf.supports("x.pdf")
 	monkeypatch.setitem(__import__("sys").modules, "fitz", None)
 	assert pdf.parse("x.pdf") is None
+
+
+def test_shared_bm25_ranking_filters_before_limit_and_rebuilds_cleanly():
+	from axc_agent_engine.plugins.builtin.memory.support.retrieval import BM25Index as MemoryIndex
+	from axc_agent_engine.plugins.builtin.memory.support.retrieval import MemoryDocument
+
+	knowledge = BM25Index(
+		[
+			KnowledgeDocument("a", "中文 API_42", source="private"),
+			KnowledgeDocument("b", "中文 API_42", source="public"),
+			KnowledgeDocument("c", ""),
+		]
+	)
+	memory = MemoryIndex([MemoryDocument(doc.id, doc.text) for doc in knowledge.documents])
+	for index in [knowledge, memory]:
+		assert [hit.id for hit in index.search("中文 api_42")] == ["a", "b"]
+	assert [hit.id for hit in knowledge.search("中文", top_k=1, filters=KnowledgeFilter(source="public"))] == ["b"]
+	assert [hit.score for hit in knowledge.search("文")] == [hit.score for hit in memory.search("文")]
+	for index in [knowledge, memory]:
+		index.build([])
+		assert index.search("中文") == []
+
+
+@pytest.mark.parametrize("bad", ["admin,user", "", ["valid", 1], {"admin": True}])
+def test_filters_require_explicit_acl_list(bad):
+	with pytest.raises(TypeError, match="allowed_acl_tags must be an array of strings"):
+		_tool_filters({"allowed_acl_tags": bad})
+
+
+async def test_index_filters_and_host_supplied_embeddings():
+	store = InMemoryKnowledgeIndexStore()
+	doc = KnowledgeDocument("1", "alpha", source="docs/a", metadata={"category": ["public"], "acl_tags": ["reader"]})
+	embedding = (await HashEmbeddingClient(dimensions=8).embed(["alpha"]))[0]
+	store.set_documents([doc], [embedding])
+	assert [r.id for r in await store.vector_search("alpha")] == ["1"]
+	store.set_document_embedding("1", embedding)
+	await store.add_documents([KnowledgeDocument("2", "beta")], embeddings=[embedding])
+	assert [r.id for r in await store.bm25_search("beta")] == ["2"]
+	assert await store.bm25_search("alpha", filters={"source_prefix": "private/"}) == []
+	assert await store.vector_search("alpha", filters={"category": ["secret"]}) == []
+	assert not KnowledgeFilter(allowed_acl_tags=["writer"]).matches(doc)
+	with pytest.raises(TypeError, match="document acl_tags"):
+		KnowledgeFilter(allowed_acl_tags=["reader"]).matches(
+			KnowledgeDocument("3", "bad", metadata={"acl_tags": "reader"})
+		)
+	with pytest.raises(TypeError, match="metadata"):
+		normalize_filter({"metadata": []})
+	store.set_documents([doc])
+	assert await store.vector_search("alpha") == []
+
+
+async def test_retrieval_empty_results_and_reranking_policy():
+	from axc_agent_engine.plugins.builtin.knowledge.support import KnowledgeSearchResponse, RetrievalTrace
+
+	assert KnowledgeSearchResponse([]).to_dict() == {"results": []}
+	trace = RetrievalTrace(query="absent")
+	assert KnowledgeSearchResponse([], trace).to_dict()["trace"]["returned_count"] == 0
+	doc = RetrievalResult("id", "alpha", 1, "bm25")
+	empty_reranker = LLMReranker(FakeLLM(""))
+	assert await empty_reranker.rerank("alpha", [], 1) == []
+	assert await CascadeReranker([empty_reranker]).rerank("alpha", [doc], 1) == [doc]
+	ranked = await CascadeReranker([empty_reranker, ScoreReranker()]).rerank("alpha", [doc], 1)
+	assert ranked[0].retrieval.endswith("+rerank")
+	rewriter = LLMQueryRewriter(FakeLLM(""))
+	assert await rewriter.rewrite("") == []
+	assert await rewriter.rewrite("original") == ["original"]
+	assert await HybridRetriever([]).search("absent") == []

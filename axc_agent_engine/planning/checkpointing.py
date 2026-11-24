@@ -1,17 +1,16 @@
-"""POR checkpoint serialization helpers.
-中文：此文档说明相关引擎组件的行为。"""
+"""POR checkpoint serialization helpers. POR 计划与检查点之间的转换。"""
+
 from __future__ import annotations
 
 from typing import Any
 
-from axc_agent_engine.runtime.checkpoint import Checkpoint, CheckpointStatus
-from axc_agent_engine.planning.planner import Plan, PlanStep
 from axc_agent_engine.core.schema import StepStatus
+from axc_agent_engine.planning.planner import Plan, create_plan, validate_plan
+from axc_agent_engine.runtime.checkpoint import Checkpoint, CheckpointStatus
 
 
 def plan_to_state(plan: Plan, current_step_id: int | None = None, phase: str = "por") -> dict[str, Any]:
-	"""Serialize a Plan into checkpoint state.
-中文：此文档说明相关引擎组件的行为。"""
+	"""Serialize a Plan into checkpoint state. 将计划序列化为检查点状态。"""
 	plan_payload = {
 		"goal": plan.goal,
 		"replan_count": plan.replan_count,
@@ -38,31 +37,19 @@ def plan_to_state(plan: Plan, current_step_id: int | None = None, phase: str = "
 
 
 def plan_from_state(state: dict[str, Any]) -> Plan | None:
-	"""Deserialize a Plan from checkpoint state.
-中文：此文档说明相关引擎组件的行为。"""
-	payload = state.get("payload") if isinstance(state.get("payload"), dict) else {}
-	raw = payload.get("plan") if isinstance(payload, dict) else None
-	if not isinstance(raw, dict):
+	"""Deserialize a Plan from checkpoint state. 从检查点还原计划。"""
+	raw = state.get("payload", {}).get("plan")
+	if raw is None:
 		return None
-	steps = []
-	for item in raw.get("steps", []):
-		if not isinstance(item, dict):
-			continue
-		status_value = item.get("status", StepStatus.PENDING)
-		try:
-			status = StepStatus(status_value)
-		except ValueError:
-			status = StepStatus.PENDING
-		steps.append(PlanStep(
-			step_id=int(item.get("step_id", 0)),
-			description=str(item.get("description", "")),
-			depends_on=list(item.get("depends_on") or []),
-			tools_needed=list(item.get("tools_needed") or []),
-			status=status,
-			result=str(item.get("result", "")),
-			error=str(item.get("error", "")),
-		))
-	return Plan(goal=str(raw.get("goal", "")), steps=steps, replan_count=int(raw.get("replan_count", 0)))
+	items = raw["steps"]
+	plan = create_plan(raw["goal"], items)
+	validate_plan(plan)
+	plan.replan_count = raw.get("replan_count", 0)
+	for step, item in zip(plan.steps, items, strict=True):
+		step.status = StepStatus(item.get("status", StepStatus.PENDING))
+		step.result = item.get("result", "")
+		step.error = item.get("error", "")
+	return plan
 
 
 async def save_plan_checkpoint(
@@ -74,18 +61,19 @@ async def save_plan_checkpoint(
 	current_step_id: int | None = None,
 	metadata: dict[str, Any] | None = None,
 ) -> None:
-	"""Persist a POR checkpoint through the generic CheckpointStore protocol.
-中文：此文档说明相关引擎组件的行为。"""
+	"""Persist a POR checkpoint through the generic CheckpointStore protocol. 通过宿主提供的检查点存储持久化 POR 进度。"""
 	if not store or not run_id:
 		return
 	checkpoint_metadata = metadata or {}
 	state = plan_to_state(plan, current_step_id=current_step_id, phase=str(checkpoint_metadata.get("phase") or "por"))
 	state["metadata"] = dict(checkpoint_metadata)
-	await store.save(Checkpoint(
-		run_id=run_id,
-		sequence=sequence,
-		status=status,
-		kind="por",
-		state=state,
-		metadata=checkpoint_metadata,
-	))
+	await store.save(
+		Checkpoint(
+			run_id=run_id,
+			sequence=sequence,
+			status=status,
+			kind="por",
+			state=state,
+			metadata=checkpoint_metadata,
+		)
+	)

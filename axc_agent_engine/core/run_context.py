@@ -1,11 +1,12 @@
 """Run context normalization helpers.
 中文：运行上下文归一化辅助函数。"""
+
 from __future__ import annotations
 
 import uuid
-from typing import Any, Callable
+from collections.abc import Callable
 from copy import deepcopy
-
+from typing import Any
 
 ContextFactory = Callable[..., dict[str, Any]]
 RUNTIME_RUN_OPTION_KEYS = frozenset({"approval_queue", "response_queue"})
@@ -21,16 +22,21 @@ def dict_or_empty(value: dict | None, name: str) -> dict[str, Any]:
 
 def copy_run_options(value: dict | None, name: str = "run_options") -> dict[str, Any]:
 	options = dict_or_empty(value, name)
-	return {
-		key: option if key in RUNTIME_RUN_OPTION_KEYS else deepcopy(option)
-		for key, option in options.items()
-	}
+	return {key: option if key in RUNTIME_RUN_OPTION_KEYS else deepcopy(option) for key, option in options.items()}
+
+
+def checkpoint_owner(metadata: dict) -> dict:
+	"""Identity fields that stay bound to a checkpoint. 随检查点绑定的归属字段。"""
+	return {key: metadata[key] for key in ("tenant_id", "user_id") if key in metadata}
 
 
 def context_run_id(context: dict[str, Any]) -> str:
-	if "run_id" not in context or context["run_id"] in (None, ""):
+	run_id = context.get("run_id")
+	if run_id is None:
 		return ""
-	return str(context["run_id"])
+	if not isinstance(run_id, str) and type(run_id) is not int:
+		raise TypeError("run_id must be a string or integer")
+	return str(run_id)
 
 
 def call_context_factory(factory: ContextFactory | None, name: str, *args: Any) -> dict[str, Any]:

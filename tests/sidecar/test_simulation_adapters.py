@@ -1,4 +1,5 @@
 """Tests for simulation parser and multi-agent adapters."""
+
 from __future__ import annotations
 
 from axc_agent_engine.sidecar.multi_agent.simulation_session import SimulationSession
@@ -98,9 +99,12 @@ def test_action_parser_defaults_unknown_type_and_clamps_confidence():
 
 
 async def test_simulation_session_uses_agent_chat_policy():
-	agent = FakeAgent("blue", [
-		'{"type":"defend","intent":"isolate endpoint","parameters":{"variables_changed":{"isolated":true}},"confidence":0.7}'
-	])
+	agent = FakeAgent(
+		"blue",
+		[
+			'{"type":"defend","intent":"isolate endpoint","parameters":{"variables_changed":{"isolated":true}},"confidence":0.7}'
+		],
+	)
 	scenario = Scenario(
 		id="sim-agent",
 		title="Agent backed simulation",

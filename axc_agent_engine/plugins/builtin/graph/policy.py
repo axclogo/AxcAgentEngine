@@ -1,5 +1,4 @@
-"""Graph entity/relation type policy.
-中文：此文档说明相关引擎组件的行为。"""
+"""Graph entity/relation type policy. 图实体和关系的类型策略。"""
 
 
 class GraphPolicy:

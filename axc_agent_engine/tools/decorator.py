@@ -2,9 +2,11 @@
 
 所有被装饰的工具都必须返回 ToolOutput。返回其他类型的函数会在注册时被拒绝。
 """
+
 import functools
 import inspect
-from typing import Any, Callable, Coroutine, get_type_hints
+from collections.abc import Callable, Coroutine
+from typing import Any, get_type_hints
 
 from axc_agent_engine.core.schema import ToolDefinition
 from axc_agent_engine.tools.tool_output import ToolOutput
@@ -26,29 +28,25 @@ def tool(
 	timeout: int = 120,
 	deferred: bool = False,
 ) -> Callable:
-	"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-从带类型标注的 async 函数创建 ToolDefinition。
+	"""Build a tool definition from an annotated async function.
+	从带类型标注的 async 函数创建 ToolDefinition。
 
-	用法：
-		@tool(name="my_tool", description="执行某个操作")
-		async def my_tool(path: str, content: str = "") -> ToolOutput:
-			return ToolOutput.text("结果")
+	        用法：
+	                @tool(name="my_tool", description="执行某个操作")
+	                async def my_tool(path: str, content: str = "") -> ToolOutput:
+	                        return ToolOutput.text("结果")
 
-	被装饰函数必须返回 ToolOutput；其他返回类型会在装饰阶段抛 TypeError。
-	"""
+	        被装饰函数必须返回 ToolOutput；其他返回类型会在装饰阶段抛 TypeError。"""
+
 	def decorator(fn: Callable[..., Coroutine]) -> Callable:
 		tool_name = name or fn.__name__
 		tool_desc = description or (fn.__doc__ or "").strip().split("\n")[0]
 		parameters = _build_parameters_schema(fn)
-		#English: Source note. 中文：校验返回类型标注
+		# Validate the return annotation. 校验返回类型标注
 		hints = get_type_hints(fn)
 		return_type = hints.get("return")
 		if return_type is not None and return_type is not ToolOutput:
-			raise TypeError(
-				f"工具 '{tool_name}' 必须返回 ToolOutput，"
-				f"实际返回标注为：{return_type}"
-			)
+			raise TypeError(f"工具 '{tool_name}' 必须返回 ToolOutput，实际返回标注为：{return_type}")
 
 		async def execute(args: dict, context: dict) -> ToolOutput:
 			sig = inspect.signature(fn)
@@ -83,9 +81,8 @@ def tool(
 
 
 def _build_parameters_schema(fn: Callable) -> dict[str, Any]:
-	"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-根据函数类型标注构建 JSON Schema。"""
+	"""Derive parameter types from function annotations.
+	根据函数类型标注构建 JSON Schema。"""
 	hints = get_type_hints(fn)
 	sig = inspect.signature(fn)
 	properties: dict[str, Any] = {}

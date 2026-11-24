@@ -3,14 +3,15 @@
 把 OpenAI 专有响应格式转换为标准化 LLMResponse/LLMStreamChunk。
 core 层不能看到 OpenAI dict 结构。
 """
+
 import asyncio
 import json
 import logging
-from typing import Any, AsyncIterator
+from collections.abc import AsyncIterator
+from typing import Any
 
 import httpx
 
-from axc_agent_engine.llm.config import LLMConfig
 from axc_agent_engine.core.errors import (
 	LLMTimeoutError,
 	ProviderAuthError,
@@ -19,14 +20,14 @@ from axc_agent_engine.core.errors import (
 	RetryableProviderError,
 )
 from axc_agent_engine.core.schema import LLMMessage, LLMResponse, LLMStreamChunk, LLMUsage
+from axc_agent_engine.llm.config import LLMConfig
 from axc_agent_engine.tools.name_mapping import ToolNameMappingConfig
 
 logger = logging.getLogger(__name__)
 
 
 class OpenAIErrorMapper:
-	"""Maps httpx failures into provider-neutral exceptions.
-中文：此文档说明相关引擎组件的行为。"""
+	"""Maps httpx failures into provider-neutral exceptions. 将 httpx 错误映射成与供应方无关的异常。"""
 
 	def provider_error_from_status(self, error: httpx.HTTPStatusError, prefix: str) -> ProviderError:
 		status = error.response.status_code
@@ -41,8 +42,7 @@ class OpenAIErrorMapper:
 
 
 class OpenAIResponseParser:
-	"""Converts OpenAI-compatible payloads into engine schema objects.
-中文：此文档说明相关引擎组件的行为。"""
+	"""Converts OpenAI-compatible payloads into engine schema objects. 将 OpenAI 兼容响应转成引擎数据结构。"""
 
 	def parse_response(self, raw: dict[str, Any]) -> LLMResponse:
 		choices = raw.get("choices", [])
@@ -122,8 +122,7 @@ class OpenAIClient:
 			)
 			return self._client
 
-	def _build_payload(self, messages: list[dict], tools: list[dict] | None = None,
-					   **kwargs: Any) -> dict[str, Any]:
+	def _build_payload(self, messages: list[dict], tools: list[dict] | None = None, **kwargs: Any) -> dict[str, Any]:
 		payload: dict[str, Any] = {
 			"model": self._config.model,
 			"messages": messages,
@@ -146,11 +145,9 @@ class OpenAIClient:
 					payload[k] = v
 		return payload
 
-	async def chat(self, messages: list[dict], tools: list[dict] | None = None,
-				   **kwargs: Any) -> LLMResponse:
-		"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-非流式调用，返回标准化 LLMResponse。"""
+	async def chat(self, messages: list[dict], tools: list[dict] | None = None, **kwargs: Any) -> LLMResponse:
+		"""Return a normalized buffered response.
+		非流式调用，返回标准化 LLMResponse。"""
 		client = await self._get_client()
 		payload = self._build_payload(messages, tools, **kwargs)
 		try:
@@ -164,11 +161,11 @@ class OpenAIClient:
 		except httpx.HTTPError as e:
 			raise RetryableProviderError(f"LLM request failed: {e}") from e
 
-	async def stream(self, messages: list[dict], tools: list[dict] | None = None,
-					 **kwargs: Any) -> AsyncIterator[LLMStreamChunk]:
-		"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-流式调用，产出标准化 LLMStreamChunk。"""
+	async def stream(
+		self, messages: list[dict], tools: list[dict] | None = None, **kwargs: Any
+	) -> AsyncIterator[LLMStreamChunk]:
+		"""Yield normalized response chunks.
+		流式调用，产出标准化 LLMStreamChunk。"""
 		client = await self._get_client()
 		payload = self._build_payload(messages, tools, **kwargs)
 		payload["stream"] = True
@@ -194,9 +191,8 @@ class OpenAIClient:
 			raise RetryableProviderError(f"LLM request failed: {e}") from e
 
 	async def ask(self, prompt: str, **kwargs: Any) -> str:
-		"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-便捷方法：发送单条 prompt，返回文本回复。"""
+		"""Return text for a single prompt.
+		便捷方法：发送单条 prompt，返回文本回复。"""
 		response = await self.chat([{"role": "user", "content": prompt}], **kwargs)
 		return response.message.content
 

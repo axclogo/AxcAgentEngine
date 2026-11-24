@@ -7,38 +7,43 @@ Verifies:
 - Engine.close stops all consumers
 - ARCHITECTURE.md does not contain "create_plan tool"
 """
+
 import asyncio
 import os
 import tempfile
 from copy import deepcopy
-import pytest
+from pathlib import Path
 from unittest.mock import AsyncMock
 
-from axc_agent_engine.core.schema import LLMMessage, LLMResponse, LLMStreamChunk, LLMUsage
-from axc_agent_engine.engine import AgentModels, Engine
-from axc_agent_engine.tools.name_mapping import ToolNameMappingConfig
-from axc_agent_engine.storage.in_memory import InMemoryMessageBus, InMemoryMessagePersistence
+import pytest
+
 from axc_agent_engine.core.dispatcher import AgentEnvelope
 from axc_agent_engine.core.events import Event, EventType
-from axc_agent_engine.core.schema import ToolDefinition
+from axc_agent_engine.core.schema import LLMMessage, LLMResponse, LLMStreamChunk, LLMUsage, ToolDefinition
+from axc_agent_engine.engine import AgentModels, Engine
 from axc_agent_engine.plugins.base import BasePlugin
 from axc_agent_engine.plugins.builtin.collaboration.plugin import CollaborationPlugin
 from axc_agent_engine.plugins.config_schema import config_schema
 from axc_agent_engine.plugins.registry import PluginRegistry
+from axc_agent_engine.storage.in_memory import InMemoryMessageBus, InMemoryMessagePersistence
+from axc_agent_engine.tools.name_mapping import ToolNameMappingConfig
 from axc_agent_engine.tools.tool_output import ToolOutput
 
 
 def _make_mock_llm():
-	from axc_agent_engine.core.schema import LLMResponse, LLMMessage, LLMUsage
+	from axc_agent_engine.core.schema import LLMMessage, LLMResponse, LLMUsage
+
 	class MockLLMProvider:
 		model = "test"
 		tool_name_mapping = ToolNameMappingConfig()
 
 		def __init__(self):
-			self.chat = AsyncMock(return_value=LLMResponse(
-				message=LLMMessage(content="ok"),
-				usage=LLMUsage(input_tokens=1, output_tokens=1),
-			))
+			self.chat = AsyncMock(
+				return_value=LLMResponse(
+					message=LLMMessage(content="ok"),
+					usage=LLMUsage(input_tokens=1, output_tokens=1),
+				)
+			)
 			self.ask = AsyncMock(return_value="ok")
 			self.close = AsyncMock()
 
@@ -67,6 +72,7 @@ plugins: {{}}
 def _stream_done(content: str):
 	async def stream(*args, **kwargs):
 		yield Event.done(content)
+
 	return stream
 
 
@@ -112,6 +118,7 @@ class ChildToolPlugin(BasePlugin):
 	def get_tools(self):
 		async def child_tool(args, ctx):
 			return ToolOutput.text("child tool result")
+
 		return [ToolDefinition(name="child_tool", description="child tool", execute=child_tool)]
 
 
@@ -171,12 +178,15 @@ class TestEngineDispatcherLifecycle:
 				("beta", "beta only"),
 				("alpha", "alpha follow-up"),
 			):
-				reply = await dispatcher.request(AgentEnvelope(
-					sender="session",
-					recipient=recipient,
-					content=content,
-					conversation_id="shared-conversation",
-				), timeout=5.0)
+				reply = await dispatcher.request(
+					AgentEnvelope(
+						sender="session",
+						recipient=recipient,
+						content=content,
+						conversation_id="shared-conversation",
+					),
+					timeout=5.0,
+				)
 				assert reply.type == "reply"
 		await engine.close()
 
@@ -194,25 +204,37 @@ class TestEngineDispatcherLifecycle:
 		registry.register(CollaborationPlugin)
 		registry.register(ChildToolPlugin)
 		bus = InMemoryMessageBus()
-		engine = Engine(message_bus=bus, plugin_registry=registry)
-		parent_model = SequenceLLMProvider([
-			_response(tool_calls=[{
-				"id": "parent-call",
-				"function": {
-					"name": "agent_call",
-					"arguments": '{"agent_name":"worker","message":"search it","timeout":5}',
-				},
-			}]),
-			_response("parent done"),
-		])
-		child_model = SequenceLLMProvider([
-			_response(tool_calls=[{"id": "child-tool", "function": {"name": "child_tool", "arguments": "{}"}}]),
-			_response("child done"),
-		])
+		from axc_agent_engine import InMemoryCheckpointStore
+
+		store = InMemoryCheckpointStore()
+		engine = Engine(message_bus=bus, plugin_registry=registry, checkpoint_store=store)
+		parent_model = SequenceLLMProvider(
+			[
+				_response(
+					tool_calls=[
+						{
+							"id": "parent-call",
+							"function": {
+								"name": "agent_call",
+								"arguments": '{"agent_name":"worker","message":"search it","timeout":5}',
+							},
+						}
+					]
+				),
+				_response("parent done"),
+			]
+		)
+		child_model = SequenceLLMProvider(
+			[
+				_response(tool_calls=[{"id": "child-tool", "function": {"name": "child_tool", "arguments": "{}"}}]),
+				_response("child done"),
+			]
+		)
 		with tempfile.TemporaryDirectory() as tmp:
 			worker_path = os.path.join(tmp, "worker.yaml")
-			with open(worker_path, "w", encoding="utf-8") as f:
-				f.write("""
+			await asyncio.to_thread(
+				Path(worker_path).write_text,
+				"""
 name: worker
 description: test worker
 system_prompt: worker
@@ -221,10 +243,13 @@ runtime:
 plugins:
   child_tools:
     enabled: true
-""")
+""",
+				encoding="utf-8",
+			)
 			parent_path = os.path.join(tmp, "parent.yaml")
-			with open(parent_path, "w", encoding="utf-8") as f:
-				f.write("""
+			await asyncio.to_thread(
+				Path(parent_path).write_text,
+				"""
 name: parent
 description: test parent
 system_prompt: parent
@@ -237,25 +262,31 @@ plugins:
     enabled: true
     timeout: 5
     allow_self_call: false
-""")
+""",
+				encoding="utf-8",
+			)
 			engine.load_agent_template(worker_path).instantiate(models=AgentModels(default=child_model))
 			parent = engine.load_agent_template(parent_path).instantiate(models=AgentModels(default=parent_model))
 			await asyncio.sleep(0.05)
 			events = [
-				event async for event in parent.stream_with_messages(
+				event
+				async for event in parent.stream_with_messages(
 					[{"role": "user", "content": "delegate"}],
 					session_id="s1",
+					metadata={"run_id": "parent-run"},
 				)
 			]
 		await engine.close()
 		sub_events = [event for event in events if event.type in EventType.__members__.values()]
 		start = next(event for event in events if event.type == EventType.SUB_AGENT_START)
 		tool_call = next(
-			event for event in events
+			event
+			for event in events
 			if event.type == EventType.SUB_AGENT_STEP and event.metadata["step"]["type"] == "tool_call"
 		)
 		tool_result = next(
-			event for event in events
+			event
+			for event in events
 			if event.type == EventType.SUB_AGENT_STEP and event.metadata["step"]["type"] == "tool_result"
 		)
 		complete = next(event for event in events if event.type == EventType.SUB_AGENT_COMPLETE)
@@ -265,6 +296,8 @@ plugins:
 		assert tool_call.metadata["step"]["tool"] == "child_tool"
 		assert tool_result.metadata["step"]["content"] == "child tool result"
 		assert complete.metadata["success"] is True
+		assert (await store.latest(start.metadata["sub_run_id"])).state["metadata"]["agent_name"] == "worker"
+		assert (await store.latest("parent-run")).state["metadata"]["agent_name"] == "parent"
 
 	@pytest.mark.asyncio
 	async def test_unload_agent_stops_consumer(self):
@@ -298,7 +331,7 @@ plugins:
 	@pytest.mark.asyncio
 	async def test_no_dispatcher_without_bus(self):
 		"""Engine without message_bus has no dispatcher."""
-		llm = _make_mock_llm()
+		_make_mock_llm()
 		engine = Engine()
 		assert engine._dispatcher is None
 		await engine.close()
@@ -307,7 +340,7 @@ plugins:
 	async def test_timeout_when_agent_not_loaded(self):
 		"""Request to non-existent agent times out."""
 		bus = InMemoryMessageBus()
-		llm = _make_mock_llm()
+		_make_mock_llm()
 		engine = Engine(message_bus=bus)
 		envelope = AgentEnvelope(sender="x", recipient="ghost", content="hi")
 		result = await engine._dispatcher.request(envelope, timeout=0.2)
@@ -317,30 +350,23 @@ plugins:
 
 
 class TestArchitectureDoc:
+	doc_path = Path(__file__).resolve().parents[2] / "docs" / "ARCHITECTURE.md"
+
 	def test_no_create_plan_tool_in_architecture(self):
 		"""docs/ARCHITECTURE.md must not describe create_plan as a tool."""
-		doc_path = os.path.join(os.path.dirname(__file__), "..", "docs", "ARCHITECTURE.md")
-		if not os.path.exists(doc_path):
-			pytest.skip("ARCHITECTURE.md not found")
-		content = open(doc_path).read()
+		content = self.doc_path.read_text(encoding="utf-8")
 		assert "create_plan tool" not in content
 		assert "Triggered by LLM calling create_plan" not in content
 
 	def test_architecture_describes_transaction_router(self):
 		"""docs/ARCHITECTURE.md must describe TransactionRouter."""
-		doc_path = os.path.join(os.path.dirname(__file__), "..", "docs", "ARCHITECTURE.md")
-		if not os.path.exists(doc_path):
-			pytest.skip("ARCHITECTURE.md not found")
-		content = open(doc_path).read()
+		content = self.doc_path.read_text(encoding="utf-8")
 		assert "TransactionRouter" in content
 		assert "routing policy" in content
 
 	def test_architecture_describes_dispatcher_consumer(self):
 		"""docs/ARCHITECTURE.md must describe dispatcher consumer pattern."""
-		doc_path = os.path.join(os.path.dirname(__file__), "..", "docs", "ARCHITECTURE.md")
-		if not os.path.exists(doc_path):
-			pytest.skip("ARCHITECTURE.md not found")
-		content = open(doc_path).read()
+		content = self.doc_path.read_text(encoding="utf-8")
 		assert "run_agent_consumer" in content or "consumer" in content
 		assert "MessageBus" in content
 		assert "correlation_id" in content

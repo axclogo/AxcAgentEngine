@@ -3,8 +3,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from axc_agent_engine.core.context import ExecutionConfig, ExecutionContext
-from axc_agent_engine.core.errors import ExecutionTimeoutError, ProviderError, SchemaError
+from axc_agent_engine.core.context import ExecutionContext
+from axc_agent_engine.core.errors import ExecutionTimeoutError, SchemaError
 from axc_agent_engine.core.message_store import MessageStore
 from axc_agent_engine.core.plugin_manager import BasePlugin, PluginManager, PreToolCallDecision
 from axc_agent_engine.core.schema import ToolDefinition
@@ -24,7 +24,13 @@ from axc_agent_engine.runtime.resources import (
 )
 from axc_agent_engine.runtime.sandbox_local import LocalSubprocessExecutor
 from axc_agent_engine.runtime.sandbox_models import CommandSpec
-from axc_agent_engine.storage.in_memory import InMemoryKVStore, InMemoryMessageBus, InMemoryMessagePersistence, InMemorySpanStore, InMemoryVectorStore
+from axc_agent_engine.storage.in_memory import (
+	InMemoryKVStore,
+	InMemoryMessageBus,
+	InMemoryMessagePersistence,
+	InMemorySpanStore,
+	InMemoryVectorStore,
+)
 from axc_agent_engine.tools.executor import execute_tool
 from axc_agent_engine.tools.name_mapping import ToolNameMapper, ToolNameMappingConfig, ToolNameMappingError
 from axc_agent_engine.tools.orchestrator import _argument_timeout, _effective_orchestration_timeout
@@ -47,12 +53,12 @@ def test_run_context_factory_and_options_copy_boundaries():
 	assert call_context_factory(None, "factory") == {}
 	assert call_context_factory(lambda a: {"a": a}, "factory", 3) == {"a": 3}
 	with pytest.raises(TypeError, match="factory must return a dict"):
-		call_context_factory(lambda: [], "factory")
+		call_context_factory(list, "factory")
 
 	run_options, metadata = normalize_run_context(default_run_id="run-default")
 	assert "run_id" not in run_options
 	assert metadata["run_id"] == "run-default"
-	assert RunOptions.from_dict({"stream": False, "stream_idle_timeout": "bad"}).stream is False
+	assert RunOptions.from_dict({"stream": False, "stream_idle_timeout": 2}).stream is False
 
 
 def test_resource_registry_rejects_bad_names_duplicates_and_types():
@@ -129,11 +135,8 @@ async def test_in_memory_storage_expiry_capacity_request_and_idle(monkeypatch):
 	await vector.delete(ids)
 	assert [row["text"] for row in await vector.search([0, 1], top_k=2)] == ["new"]
 
-	async def instant_timeout(awaitable, timeout):
-		awaitable.close()
-		raise asyncio.TimeoutError()
-
-	monkeypatch.setattr("axc_agent_engine.storage.in_memory.asyncio.wait_for", instant_timeout)
+	timeout = asyncio.timeout
+	monkeypatch.setattr("axc_agent_engine.storage.in_memory.asyncio.timeout", lambda _: timeout(0))
 	bus = InMemoryMessageBus(max_idle_rounds=1)
 	subscription = bus.subscribe("ch")
 	with pytest.raises(StopAsyncIteration):
@@ -159,7 +162,9 @@ async def test_message_bus_request_reply_and_cleanup():
 
 def test_message_store_prompt_and_plugin_context_edges():
 	store = MessageStore()
-	store.upsert_plugin_context("ignored")
+	store.upsert_plugin_context("standalone")
+	assert store.get_all()[0]["content"].endswith("standalone")
+	store.upsert_plugin_context("")
 	store.init_system_prompt("")
 	assert store.get_all() == []
 	store.init_system_prompt("system")
@@ -227,11 +232,13 @@ async def test_sandbox_local_rejects_missing_command_and_timeout_cleanup(tmp_pat
 		await executor.run(CommandSpec(use_shell=True))
 	with pytest.raises(ValueError, match="argv is required"):
 		await executor.run(CommandSpec())
-	result = await executor.run(CommandSpec(
-		argv=["/bin/sh", "-c", "sleep 1"],
-		cwd=str(tmp_path),
-		timeout=0.01,
-	))
+	result = await executor.run(
+		CommandSpec(
+			argv=["/bin/sh", "-c", "sleep 1"],
+			cwd=str(tmp_path),
+			timeout=0.01,
+		)
+	)
 	assert result.timed_out is True
 	assert result.exit_code == -1
 
@@ -274,7 +281,7 @@ async def test_tool_executor_validation_retry_timeout_and_contract(monkeypatch):
 		await execute_tool(ToolDefinition(name="contract", execute=bad_contract), {}, "tc")
 
 	async def timeout(args, ctx):
-		raise asyncio.TimeoutError()
+		raise TimeoutError()
 
 	timed_out = await execute_tool(ToolDefinition(name="timeout", execute=timeout, timeout=3), {}, "tc")
 	assert "timeout (3s)" in timed_out.error
@@ -313,24 +320,30 @@ def test_planning_validation_and_routing_edges():
 		with pytest.raises(SchemaError):
 			validate_plan(plan)
 
-	assert TransactionRouter("react_only").route({"content": "{\"goal\":\"g\",\"steps\":[]}"}).action == "final_answer"
+	assert TransactionRouter("react_only").route({"content": '{"goal":"g","steps":[]}'}).action == "final_answer"
 	assert TransactionRouter("auto").route({"tool_calls": [{"id": "tc"}], "content": "no plan"}).action == "tool_calls"
 
 
 @pytest.mark.asyncio
 async def test_planning_checkpoint_and_replan_error_edges():
-	assert plan_from_state({"payload": {"plan": {"goal": "g", "steps": [{"step_id": 1, "status": "bad"}]}}}).steps[0].status.value == "pending"
-	assert plan_from_state({"payload": {"plan": {"goal": "g", "steps": ["bad"]}}}).steps == []
+	step = {"step_id": 1, "description": "charge", "status": "bad"}
+	with pytest.raises(ValueError, match="bad"):
+		plan_from_state({"payload": {"plan": {"goal": "g", "steps": [step]}}})
+	with pytest.raises(SchemaError, match="steps must be objects"):
+		plan_from_state({"payload": {"plan": {"goal": "g", "steps": ["bad"]}}})
 
 	class BadLLM:
 		async def ask(self, prompt):
 			raise RuntimeError("down")
 
-	plan = Plan(goal="g", steps=[
-		PlanStep(step_id=1, description="a", status="done"),
-		PlanStep(step_id=2, description="b", depends_on=[1]),
-		PlanStep(step_id=3, description="c", depends_on=[2]),
-	])
+	plan = Plan(
+		goal="g",
+		steps=[
+			PlanStep(step_id=1, description="a", status="done"),
+			PlanStep(step_id=2, description="b", depends_on=[1]),
+			PlanStep(step_id=3, description="c", depends_on=[2]),
+		],
+	)
 	plan.steps[1].status = plan.steps[1].status.FAILED
 	result = await replan(plan, 2, BadLLM())
 	assert result.replan_count == 1
@@ -348,3 +361,51 @@ async def test_por_graph_runtime_surfaces_graph_errors(monkeypatch):
 	runtime._graph = BadGraph()
 	events = [event async for event in runtime.run(Plan(goal="g"), "user")]
 	assert events[0].content == "graph down"
+
+
+@pytest.mark.parametrize("structured", [True, False])
+async def test_text_false_cannot_authorize_a_tool(structured):
+	class Guard(BasePlugin):
+		name = "guard"
+
+		async def pre_tool_call(self, ctx, tool_name, arguments):
+			return PreToolCallDecision("false", arguments) if structured else ("false", arguments)
+
+	with pytest.raises(TypeError, match="allowed must be a boolean"):
+		await PluginManager([Guard()]).apply_pre_tool_call(ExecutionContext(), "write", {})
+
+
+def test_transform_and_stop_reject_invalid_plugin_results():
+	class InvalidPlugin(BasePlugin):
+		name = "invalid"
+
+		def transform_messages(self, messages, ctx, current_message):
+			return None
+
+		def should_stop(self, ctx):
+			return "false", ""
+
+	manager = PluginManager([InvalidPlugin()])
+	ctx = ExecutionContext()
+	with pytest.raises(TypeError, match="transform_messages"):
+		manager.transform_messages([], ctx, "hello")
+	with pytest.raises(TypeError, match="should_stop"):
+		manager.check_should_stop(ctx)
+
+
+@pytest.mark.parametrize(
+	"options",
+	[
+		{"stream": "false"},
+		{"stream": None},
+		{"stream_idle_timeout": "2"},
+		{"stream_idle_timeout": True},
+		{"stream_idle_timeout": 0},
+		{"max_rounds": 3},
+	],
+)
+def test_run_options_reject_mistyped_or_unknown_fields(options):
+	from axc_agent_engine.core.run_request import RunRequest
+
+	with pytest.raises((ValueError, TypeError), match=next(iter(options))):
+		RunRequest.create("hello", run_options=options)

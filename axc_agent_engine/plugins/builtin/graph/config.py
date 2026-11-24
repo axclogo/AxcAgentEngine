@@ -1,5 +1,5 @@
-"""Graph plugin configuration.
-中文：此文档说明相关引擎组件的行为。"""
+"""Graph plugin configuration. 图插件配置。"""
+
 from dataclasses import dataclass
 from typing import Any
 
@@ -8,7 +8,6 @@ from axc_agent_engine.plugins.builtin.common import strict_bounded_int
 
 @dataclass(frozen=True)
 class GraphConfig:
-	enabled: bool = True
 	sources: tuple[str, ...] = ()
 	namespace: str = "default"
 	allow_writes: bool = True
@@ -31,17 +30,18 @@ class GraphConfig:
 	@classmethod
 	def from_dict(cls, config: dict[str, Any]) -> "GraphConfig":
 		return cls(
-			enabled=bool(config.get("enabled", True)),
-			sources=tuple(str(source) for source in config.get("sources", [])),
-			namespace=str(config.get("namespace", "default")),
-			allow_writes=bool(config.get("allow_writes", True)),
-			allow_deletes=bool(config.get("allow_deletes", True)),
-			allowed_entity_types=frozenset(str(t) for t in config.get("allowed_entity_types", [])),
-			denied_entity_types=frozenset(str(t) for t in config.get("denied_entity_types", [])),
-			allowed_relation_types=frozenset(str(t) for t in config.get("allowed_relation_types", [])),
-			denied_relation_types=frozenset(str(t) for t in config.get("denied_relation_types", [])),
+			sources=tuple(config.get("sources", [])),
+			namespace=config.get("namespace", "default"),
+			allow_writes=config.get("allow_writes", True),
+			allow_deletes=config.get("allow_deletes", True),
+			allowed_entity_types=frozenset(config.get("allowed_entity_types", [])),
+			denied_entity_types=frozenset(config.get("denied_entity_types", [])),
+			allowed_relation_types=frozenset(config.get("allowed_relation_types", [])),
+			denied_relation_types=frozenset(config.get("denied_relation_types", [])),
 			max_entities=strict_bounded_int(config.get("max_entities", 100_000), 1, 10_000_000, "graph.max_entities"),
-			max_relations=strict_bounded_int(config.get("max_relations", 500_000), 1, 50_000_000, "graph.max_relations"),
+			max_relations=strict_bounded_int(
+				config.get("max_relations", 500_000), 1, 50_000_000, "graph.max_relations"
+			),
 			max_depth=strict_bounded_int(config.get("max_depth", 3), 0, 20, "graph.max_depth"),
 			default_limit=strict_bounded_int(config.get("default_limit", 20), 1, 1000, "graph.default_limit"),
 			max_limit=strict_bounded_int(config.get("max_limit", 100), 1, 10_000, "graph.max_limit"),
@@ -58,6 +58,6 @@ class GraphConfig:
 				50 * 1024 * 1024,
 				"graph.max_result_bytes",
 			),
-			include_metadata=bool(config.get("include_metadata", True)),
-			audit_enabled=bool(config.get("audit", True)),
+			include_metadata=config.get("include_metadata", True),
+			audit_enabled=config.get("audit", True),
 		)

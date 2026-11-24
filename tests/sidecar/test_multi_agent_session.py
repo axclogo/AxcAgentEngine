@@ -5,7 +5,11 @@ from types import SimpleNamespace
 import pytest
 
 from axc_agent_engine.core.dispatcher import AgentEnvelope
-from axc_agent_engine.sidecar.multi_agent.session import AgentOrchestrationWorker, MultiAgentEventSink, MultiAgentSession
+from axc_agent_engine.sidecar.multi_agent.session import (
+	AgentOrchestrationWorker,
+	MultiAgentEventSink,
+	MultiAgentSession,
+)
 from axc_agent_engine.sidecar.multi_agent.types import MultiAgentEventType, SessionMode
 
 
@@ -105,10 +109,15 @@ async def test_multi_agent_session_run_collects_messages_and_errors():
 
 @pytest.mark.asyncio
 async def test_multi_agent_session_done_when_no_speakers_and_manual_stop():
-	empty = MultiAgentSession([], ReplyDispatcher(), scheduler=SimpleNamespace(
-		select_speakers=lambda ctx, agents, step: [],
-		steps_per_round=lambda agents: 1,
-	), stop_condition=StopAfterRound(99))
+	empty = MultiAgentSession(
+		[],
+		ReplyDispatcher(),
+		scheduler=SimpleNamespace(
+			select_speakers=lambda ctx, agents, step: [],
+			steps_per_round=lambda agents: 1,
+		),
+		stop_condition=StopAfterRound(99),
+	)
 	manual = MultiAgentSession([_agent("a")], ReplyDispatcher(), stop_condition=StopAfterRound(99))
 	manual.stop()
 
@@ -165,6 +174,7 @@ async def test_multi_agent_session_generates_string_persona_with_utility_model()
 	class Utility:
 		async def chat(self, messages):
 			from axc_agent_engine.core.schema import LLMMessage, LLMResponse
+
 			return LLMResponse(message=LLMMessage(content="角色：专家\n立场：中立\n背景：工程\n行为规则：简洁"))
 
 	session = MultiAgentSession(
@@ -198,12 +208,15 @@ async def test_multi_agent_session_passes_run_context_to_dispatcher():
 		stop_condition=StopAfterRound(1),
 	)
 
-	events = [event async for event in session.stream(
-		run_options={"run_id": "batch", "stream": False},
-		metadata={"tenant": "t1"},
-		agent_run_options=lambda agent, index: {"run_id": f"batch:{agent.name}"},
-		agent_metadata=lambda agent, index: {"actor_exec": agent.name},
-	)]
+	events = [
+		event
+		async for event in session.stream(
+			run_options={"run_id": "batch", "stream": False},
+			metadata={"tenant": "t1"},
+			agent_run_options=lambda agent, index: {"run_id": f"batch:{agent.name}"},
+			agent_metadata=lambda agent, index: {"actor_exec": agent.name},
+		)
+	]
 
 	assert events[-1].type == MultiAgentEventType.DONE
 	envelope = dispatcher.envelopes[0]

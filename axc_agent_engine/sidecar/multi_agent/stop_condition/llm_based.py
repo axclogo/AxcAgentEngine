@@ -1,8 +1,11 @@
 """LLMBasedStop — LLM 判断终止条件基类"""
+
 from __future__ import annotations
 
 import logging
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
+
+from axc_agent_engine.core.errors import LLMError
 
 if TYPE_CHECKING:
 	from axc_agent_engine.sidecar.multi_agent.shared_context import SharedContext
@@ -11,22 +14,20 @@ logger = logging.getLogger(__name__)
 
 
 class LLMBasedStop:
-	"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-基于 LLM 判断的终止条件基类，子类只需定义 prompt 和判断逻辑"""
+	"""Base class for model-based stopping criteria.
+	基于 LLM 判断的终止条件基类，子类只需定义 prompt 和判断逻辑"""
 
 	prompt_template: str = ""
 	success_keyword: str = ""
 	success_reason: str = ""
 	recent_limit: int = 6
 
-	def __init__(self, llm_client: Any | None = None, check_interval: int = 3,
-				 max_rounds: int = 20) -> None:
+	def __init__(self, llm_client: Any | None = None, check_interval: int = 3, max_rounds: int = 20) -> None:
 		self._llm_client = llm_client
 		self._check_interval = check_interval
 		self._max_rounds = max_rounds
 
-	async def should_stop(self, ctx: "SharedContext", round_num: int) -> tuple[bool, str]:
+	async def should_stop(self, ctx: SharedContext, round_num: int) -> tuple[bool, str]:
 		if round_num >= self._max_rounds:
 			return True, f"已达到最大轮次 {self._max_rounds}"
 		if round_num == 0 or round_num % self._check_interval != 0:
@@ -38,19 +39,17 @@ class LLMBasedStop:
 			prompt = self.prompt_template.format(content=content)
 			answer = await self._llm_client.ask(prompt)
 			return self._evaluate(answer.strip(), ctx, round_num)
-		except Exception as e:
+		except (LLMError, OSError, RuntimeError, ValueError) as e:
 			logger.warning(f"[{self.__class__.__name__}] LLM call failed: {e}")
 		return False, ""
 
-	def _evaluate(self, answer: str, ctx: "SharedContext", round_num: int) -> tuple[bool, str]:
-		"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-评估 LLM 回复，子类可覆盖"""
+	def _evaluate(self, answer: str, ctx: SharedContext, round_num: int) -> tuple[bool, str]:
+		"""Evaluate the model reply against the stop condition.
+		评估 LLM 回复，子类可覆盖"""
 		first_line = answer.split("\n")[0].strip().upper()
 		if first_line == self.success_keyword:
 			return True, self.success_reason
-		#English: Source note. 中文：未达成时注入引导建议。
-		#English: Inject guidance when the target condition has not been reached. 中文：源码说明。
+		# Inject guidance when the target condition has not been reached. 目标未达成时补充引导。
 		if len(answer.split("\n")) > 1:
 			guidance = "\n".join(answer.split("\n")[1:]).strip()
 			if guidance:

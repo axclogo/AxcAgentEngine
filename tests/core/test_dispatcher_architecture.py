@@ -3,12 +3,14 @@
 These tests verify the dispatcher/bus/consumer architecture is correct,
 not just that keywords are absent.
 """
+
 import asyncio
-import pytest
 from unittest.mock import MagicMock
 
-from axc_agent_engine.core.events import Event, EventType
-from axc_agent_engine.core.dispatcher import AgentMessageDispatcher, AgentEnvelope
+import pytest
+
+from axc_agent_engine.core.dispatcher import AgentEnvelope, AgentMessageDispatcher
+from axc_agent_engine.core.events import Event
 from axc_agent_engine.storage.in_memory import InMemoryMessageBus
 
 
@@ -16,6 +18,7 @@ def _stream_events(events):
 	async def stream(*args, **kwargs):
 		for event in events:
 			yield event
+
 	return stream
 
 
@@ -23,6 +26,7 @@ def _raise_stream(error):
 	async def stream(*args, **kwargs):
 		raise error
 		yield Event.done("")
+
 	return stream
 
 
@@ -247,11 +251,13 @@ class TestDispatcherConsumer:
 		dispatcher = AgentMessageDispatcher(message_bus=bus)
 		agent = MagicMock()
 		agent.name = "worker"
-		agent.stream = _stream_events([
-			Event.tool_call("search", "child-tool", {"q": "x"}),
-			Event.tool_result("search", "child-tool", "ok"),
-			Event.done("done"),
-		])
+		agent.stream = _stream_events(
+			[
+				Event.tool_call("search", "child-tool", {"q": "x"}),
+				Event.tool_result("search", "child-tool", "ok"),
+				Event.done("done"),
+			]
+		)
 		seen = []
 		dispatcher.run_agent_consumer(agent)
 		await asyncio.sleep(0.05)
@@ -335,8 +341,11 @@ class TestDispatcherConsumer:
 class TestEnvelopeFields:
 	def test_all_fields_present(self):
 		env = AgentEnvelope(
-			sender="a", recipient="b", content="hi",
-			conversation_id="conv1", trace_id="tr1",
+			sender="a",
+			recipient="b",
+			content="hi",
+			conversation_id="conv1",
+			trace_id="tr1",
 		)
 		d = env.to_dict()
 		assert d["message_id"]
@@ -424,7 +433,9 @@ class TestNoDirectAgentChat:
 
 	def test_session_no_chat_with_messages(self):
 		import inspect
+
 		from axc_agent_engine.sidecar.multi_agent import session
+
 		source = inspect.getsource(session)
 		assert "chat_with_messages" not in source
 		assert "stream_with_messages" not in source
@@ -433,14 +444,18 @@ class TestNoDirectAgentChat:
 
 	def test_collaboration_no_target_chat(self):
 		import inspect
+
 		from axc_agent_engine.plugins.builtin.collaboration import plugin as collaboration
+
 		source = inspect.getsource(collaboration)
 		assert "target.chat" not in source
 		assert "agent.chat" not in source
 
 	def test_swarm_no_agent_chat(self):
 		import inspect
+
 		from axc_agent_engine.plugins.builtin.swarm import plugin as swarm
+
 		source = inspect.getsource(swarm)
 		assert "agent.chat" not in source
 		assert "target.chat" not in source

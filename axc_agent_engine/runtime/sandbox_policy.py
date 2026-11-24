@@ -1,5 +1,5 @@
-"""Risk policy wrapper for sandbox command execution.
-中文：此文档说明相关引擎组件的行为。"""
+"""Risk policy wrapper for sandbox command execution. 对沙箱命令执行应用风险控制。"""
+
 from __future__ import annotations
 
 from axc_agent_engine.core.schema import RiskLevel
@@ -9,8 +9,7 @@ from axc_agent_engine.runtime.sandbox_models import CommandExecutor, CommandPoli
 
 
 class DefaultCommandPolicy:
-	"""Dynamic shell risk policy for command executors.
-中文：此文档说明相关引擎组件的行为。"""
+	"""Dynamic shell risk policy for command executors. 命令执行器使用的动态 shell 风险策略。"""
 
 	def __init__(self, max_risk: RiskLevel = RiskLevel.MODERATE, allow_shell: bool = True) -> None:
 		self.max_risk = max_risk
@@ -32,8 +31,7 @@ class DefaultCommandPolicy:
 
 
 class PolicyCommandExecutor:
-	"""CommandExecutor wrapper that enforces a CommandPolicy before execution.
-中文：此文档说明相关引擎组件的行为。"""
+	"""CommandExecutor wrapper that enforces a CommandPolicy before execution. 执行前应用命令策略的执行器包装器。"""
 
 	def __init__(self, inner: CommandExecutor | None = None, policy: CommandPolicy | None = None) -> None:
 		self.inner = inner or LocalSubprocessExecutor()

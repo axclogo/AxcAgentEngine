@@ -1,12 +1,11 @@
-"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-工具执行器 — 单个工具调用的重试与校验。
+"""Executes one tool call with argument validation, timeout handling, and
+read-only retry behavior.
+工具执行器 — 单个工具调用的重试与校验。"""
 
-English: Executes one tool call with argument validation, timeout handling, and
-read-only retry behavior."""
 import asyncio
 import logging
 import time
+from collections.abc import Awaitable, Callable
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any
@@ -18,29 +17,49 @@ from axc_agent_engine.tools.tool_output import ToolOutput
 logger = logging.getLogger(__name__)
 
 _RETRYABLE_KEYWORDS = [
-	'timeout', 'timed out', 'connection', 'connect',
-	'network', 'socket', 'reset', 'refused',
-	'unavailable', '502', '503', '504', '429',
-	'too many requests', 'rate limit',
-	'temporary', 'transient', 'retry',
+	"timeout",
+	"timed out",
+	"connection",
+	"connect",
+	"network",
+	"socket",
+	"reset",
+	"refused",
+	"unavailable",
+	"502",
+	"503",
+	"504",
+	"429",
+	"too many requests",
+	"rate limit",
+	"temporary",
+	"transient",
+	"retry",
 ]
 
 _NON_RETRYABLE_KEYWORDS = [
-	'permission', 'forbidden', '403', '401',
-	'unauthorized', 'invalid', 'missing',
-	'not found', '404', 'bad request', '400',
-	'validation', 'parameter', 'argument',
+	"permission",
+	"forbidden",
+	"403",
+	"401",
+	"unauthorized",
+	"invalid",
+	"missing",
+	"not found",
+	"404",
+	"bad request",
+	"400",
+	"validation",
+	"parameter",
+	"argument",
 ]
 
 
 @dataclass
 class ToolResult:
-	"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-工具执行结果。
+	"""Normalized result of one tool execution.
+	工具执行结果。"""
 
-	English: Normalized result of one tool execution.
-	"""
 	tool_call_id: str
 	tool_name: str
 	arguments: dict[str, Any]
@@ -129,23 +148,33 @@ class SingleToolExecutor:
 		arguments: dict[str, Any],
 		tool_call_id: str = "",
 		context: "ToolContext | dict[str, Any] | None" = None,
+		*,
+		before_execute: Callable[[], Awaitable[None]] | None = None,
 	) -> ToolResult:
 		if not tool_def.execute:
 			return ToolResult(
-				tool_call_id=tool_call_id, tool_name=tool_def.name,
-				arguments=deepcopy(arguments), error="Tool has no execute function", success=False,
+				tool_call_id=tool_call_id,
+				tool_name=tool_def.name,
+				arguments=deepcopy(arguments),
+				error="Tool has no execute function",
+				success=False,
 			)
 		validation_error = self.validator.validate(tool_def, arguments)
 		if validation_error:
 			return ToolResult(
-				tool_call_id=tool_call_id, tool_name=tool_def.name,
-				arguments=deepcopy(arguments), error=validation_error, success=False,
+				tool_call_id=tool_call_id,
+				tool_name=tool_def.name,
+				arguments=deepcopy(arguments),
+				error=validation_error,
+				success=False,
 			)
 		max_retries = self.retry_policy.max_retries(tool_def)
 		result: ToolResult | None = None
 		ctx_dict: dict[str, Any] = {}
 		if context is not None:
 			ctx_dict = context.to_dict() if isinstance(context, ToolContext) else context
+		if before_execute:
+			await before_execute()
 		for attempt in range(max_retries + 1):
 			result = await _execute_once(tool_def, arguments, tool_call_id, ctx_dict)
 			if result.success:
@@ -159,12 +188,8 @@ class SingleToolExecutor:
 
 
 def is_retryable_error(error_str: str) -> bool:
-	"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-判断错误是否可重试。
-
-	English: Decide whether an error is retryable.
-	"""
+	"""Decide whether an error is retryable.
+	判断错误是否可重试。"""
 	lower = error_str.lower()
 	for kw in _NON_RETRYABLE_KEYWORDS:
 		if kw in lower:
@@ -176,9 +201,8 @@ def is_retryable_error(error_str: str) -> bool:
 
 
 def _type_matches(value: Any, expected_type: str) -> bool:
-	"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-检查值是否匹配期望的 JSON Schema 类型。"""
+	"""Check a value against its declared schema type.
+	检查值是否匹配期望的 JSON Schema 类型。"""
 	if value is None:
 		return True
 	if expected_type == "boolean":
@@ -198,25 +222,24 @@ def _type_matches(value: Any, expected_type: str) -> bool:
 
 
 async def execute_tool(
-	tool_def: ToolDefinition, arguments: dict[str, Any],
-	tool_call_id: str = "", context: "ToolContext | dict[str, Any] | None" = None,
+	tool_def: ToolDefinition,
+	arguments: dict[str, Any],
+	tool_call_id: str = "",
+	context: "ToolContext | dict[str, Any] | None" = None,
 ) -> ToolResult:
-	"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-执行单个工具调用，包含参数校验和自动重试。
-
-	English: Execute one tool call with validation and automatic retry for read-only tools.
-	"""
+	"""Execute one tool call with validation and automatic retry for read-only tools.
+	执行单个工具调用，包含参数校验和自动重试。"""
 	return await SingleToolExecutor().execute(tool_def, arguments, tool_call_id, context)
 
 
 async def _execute_once(
-	tool_def: ToolDefinition, arguments: dict[str, Any],
-	tool_call_id: str = "", context: dict[str, Any] | None = None,
+	tool_def: ToolDefinition,
+	arguments: dict[str, Any],
+	tool_call_id: str = "",
+	context: dict[str, Any] | None = None,
 ) -> ToolResult:
-	"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-执行一次工具调用尝试，并强制返回 ToolOutput。"""
+	"""Execute one attempt and require a structured tool output.
+	执行一次工具调用尝试，并强制返回 ToolOutput。"""
 	start = time.time()
 	result_arguments = deepcopy(arguments)
 	try:
@@ -224,17 +247,23 @@ async def _execute_once(
 		duration_ms = int((time.time() - start) * 1000)
 	except asyncio.CancelledError:
 		raise
-	except asyncio.TimeoutError:
+	except TimeoutError:
 		return ToolResult(
-			tool_call_id=tool_call_id, tool_name=tool_def.name,
-			arguments=result_arguments, error=f"Tool execution timeout ({tool_def.timeout}s)", success=False,
+			tool_call_id=tool_call_id,
+			tool_name=tool_def.name,
+			arguments=result_arguments,
+			error=f"Tool execution timeout ({tool_def.timeout}s)",
+			success=False,
 			duration_ms=int((time.time() - start) * 1000),
 		)
 	except Exception as e:
-		logger.error(f"Tool execution failed: {tool_def.name}: {e}")
+		logger.exception(f"Tool execution failed: {tool_def.name}")
 		return ToolResult(
-			tool_call_id=tool_call_id, tool_name=tool_def.name,
-			arguments=result_arguments, error=str(e), success=False,
+			tool_call_id=tool_call_id,
+			tool_name=tool_def.name,
+			arguments=result_arguments,
+			error=str(e),
+			success=False,
 			duration_ms=int((time.time() - start) * 1000),
 		)
 	# English: ToolOutput is a hard plugin contract. 中文：ToolOutput 是插件必须遵守的硬边界。
@@ -242,14 +271,20 @@ async def _execute_once(
 		raise TypeError(f"工具必须返回 ToolOutput，实际得到 {type(raw_result).__name__}")
 	if raw_result.is_error:
 		return ToolResult(
-			tool_call_id=tool_call_id, tool_name=tool_def.name,
-			arguments=result_arguments, output=raw_result,
-			error=raw_result._content_as_str(), success=False,
+			tool_call_id=tool_call_id,
+			tool_name=tool_def.name,
+			arguments=result_arguments,
+			output=raw_result,
+			error=raw_result._content_as_str(),
+			success=False,
 			duration_ms=duration_ms,
 		)
 	return ToolResult(
-		tool_call_id=tool_call_id, tool_name=tool_def.name,
-		arguments=result_arguments, output=raw_result, success=True,
+		tool_call_id=tool_call_id,
+		tool_name=tool_def.name,
+		arguments=result_arguments,
+		output=raw_result,
+		success=True,
 		duration_ms=duration_ms,
 	)
 

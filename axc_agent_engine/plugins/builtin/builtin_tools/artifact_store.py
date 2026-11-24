@@ -1,5 +1,5 @@
-"""ArtifactStore adapter used by builtin tools.
-中文：此文档说明相关引擎组件的行为。"""
+"""ArtifactStore adapter used by builtin tools. 内置工具使用的产物存储适配器。"""
+
 from typing import Any
 
 

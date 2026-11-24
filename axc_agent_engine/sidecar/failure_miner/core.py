@@ -1,7 +1,6 @@
-"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-从轨迹和事件中挖掘重复出现的 Agent 失败模式。
-Mine recurring Agent failure patterns from traces and events."""
+"""Mine recurring Agent failure patterns from traces and events.
+从轨迹和事件中挖掘重复出现的 Agent 失败模式。"""
+
 from __future__ import annotations
 
 from collections import Counter, defaultdict
@@ -11,11 +10,9 @@ from typing import Any
 
 @dataclass(frozen=True)
 class FailureRecord:
-	"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-一条来自日志、事件、轨迹或评测结果的失败观测。
-	One failure observation from logs, events, traces, or eval results.
-	"""
+	"""One failure observation from logs, events, traces, or eval results.
+	一条来自日志、事件、轨迹或评测结果的失败观测。"""
+
 	record_id: str
 	agent_name: str = ""
 	category: str = ""
@@ -28,11 +25,9 @@ class FailureRecord:
 
 @dataclass(frozen=True)
 class FailureCluster:
-	"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-聚类后的失败模式。
-	Clustered failure pattern.
-	"""
+	"""Clustered failure pattern.
+	聚类后的失败模式。"""
+
 	key: str
 	category: str
 	count: int
@@ -44,22 +39,17 @@ class FailureCluster:
 
 @dataclass(frozen=True)
 class FailureMiningReport:
-	"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-挖掘出的失败聚类摘要。
-	Summary of mined failure clusters.
-	"""
+	"""Summary of mined failure clusters.
+	挖掘出的失败聚类摘要。"""
+
 	clusters: list[FailureCluster] = field(default_factory=list)
 	category_counts: dict[str, int] = field(default_factory=dict)
 	metadata: dict[str, Any] = field(default_factory=dict)
 
 
 class FailureReportBuilder:
-	"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-把失败记录分组成确定性聚类和报告元数据。
-	Groups failure records into deterministic clusters and report metadata.
-	"""
+	"""Groups failure records into deterministic clusters and report metadata.
+	把失败记录分组成确定性聚类和报告元数据。"""
 
 	def build(self, records: list[FailureRecord], min_count: int = 1) -> FailureMiningReport:
 		grouped: dict[tuple[str, str, str], list[FailureRecord]] = defaultdict(list)
@@ -87,15 +77,17 @@ class FailureReportBuilder:
 				continue
 			avg_severity = sum(item.severity for item in items) / len(items)
 			label = "|".join(part for part in (category, tool_name, signature) if part)
-			clusters.append(FailureCluster(
-				key=label,
-				category=category,
-				count=len(items),
-				severity=round(avg_severity, 3),
-				examples=items[:5],
-				affected_agents={item.agent_name for item in items if item.agent_name},
-				suggested_action=suggest_action(category, tool_name),
-			))
+			clusters.append(
+				FailureCluster(
+					key=label,
+					category=category,
+					count=len(items),
+					severity=round(avg_severity, 3),
+					examples=items[:5],
+					affected_agents={item.agent_name for item in items if item.agent_name},
+					suggested_action=suggest_action(category, tool_name),
+				)
+			)
 		clusters.sort(key=lambda item: (item.count, item.severity), reverse=True)
 		return clusters
 
@@ -125,7 +117,11 @@ def suggest_action(category: str, tool_name: str = "") -> str:
 	if category == "format":
 		return "Add output_format validation or stricter schema repair around this path."
 	if category == "tool":
-		return f"Add contract tests and better error mapping for tool '{tool_name}'." if tool_name else "Add tool contract tests and structured error mapping."
+		return (
+			f"Add contract tests and better error mapping for tool '{tool_name}'."
+			if tool_name
+			else "Add tool contract tests and structured error mapping."
+		)
 	if category == "provider_limit":
 		return "Tune provider routing, fallback, rate limits, or retry backoff."
 	if category == "context_budget":

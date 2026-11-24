@@ -1,10 +1,11 @@
 """Tests for policy evaluation."""
+
 from __future__ import annotations
 
-from axc_agent_engine.observability.audit import InMemoryAuditSink
 from axc_agent_engine.core.context import ExecutionConfig, ExecutionContext, ExecutionServices
-from axc_agent_engine.runtime.policy import CapabilityPolicyEvaluator, PolicyDecision, PolicyEvaluator, PolicyRequest
 from axc_agent_engine.core.schema import Capability, ToolDefinition
+from axc_agent_engine.observability.audit import InMemoryAuditSink
+from axc_agent_engine.runtime.policy import CapabilityPolicyEvaluator, PolicyDecision, PolicyEvaluator, PolicyRequest
 from axc_agent_engine.tools.orchestrator import execute_tool_calls
 from axc_agent_engine.tools.registry import ToolRegistry
 from axc_agent_engine.tools.tool_output import ToolOutput
@@ -32,13 +33,15 @@ def test_policy_request_and_decision_copy_mutable_fields():
 
 
 def test_capability_policy_denies_missing_capability():
-	decision = CapabilityPolicyEvaluator({Capability.FILE_READ}).evaluate(PolicyRequest(
-		tool_name="shell",
-		capability=Capability.SHELL,
-		risk_level="dangerous",
-		agent_name="agent",
-		session_id="session",
-	))
+	decision = CapabilityPolicyEvaluator({Capability.FILE_READ}).evaluate(
+		PolicyRequest(
+			tool_name="shell",
+			capability=Capability.SHELL,
+			risk_level="dangerous",
+			agent_name="agent",
+			session_id="session",
+		)
+	)
 	assert decision.allowed is False
 	assert decision.code == "policy.capability_not_allowed"
 	error = decision.to_error()
@@ -47,11 +50,13 @@ def test_capability_policy_denies_missing_capability():
 
 
 def test_capability_policy_denies_when_allowed_set_empty():
-	decision = CapabilityPolicyEvaluator().evaluate(PolicyRequest(
-		tool_name="shell",
-		capability=Capability.SHELL,
-		risk_level="dangerous",
-	))
+	decision = CapabilityPolicyEvaluator().evaluate(
+		PolicyRequest(
+			tool_name="shell",
+			capability=Capability.SHELL,
+			risk_level="dangerous",
+		)
+	)
 	assert decision.allowed is False
 	assert decision.code == "policy.capability_not_allowed"
 

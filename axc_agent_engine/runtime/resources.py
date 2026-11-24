@@ -1,33 +1,28 @@
-"""Shared resource registry for engine plugins.
-中文：此文档说明相关引擎组件的行为。"""
+"""Shared resource registry for engine plugins. 引擎插件使用的共享资源注册表。"""
+
 from __future__ import annotations
 
 from typing import Any
 
 
 class ResourceError(Exception):
-	"""Base error for resource registry failures.
-中文：此文档说明相关引擎组件的行为。"""
+	"""Base error for resource registry failures. 资源注册错误基类。"""
 
 
 class ResourceNotFoundError(ResourceError):
-	"""Raised when a required resource is missing.
-中文：此文档说明相关引擎组件的行为。"""
+	"""Raised when a required resource is missing. 缺少必要资源。"""
 
 
 class ResourceTypeError(ResourceError):
-	"""Raised when a resource does not match the requested type.
-中文：此文档说明相关引擎组件的行为。"""
+	"""Raised when a resource does not match the requested type. 资源与请求的类型不匹配。"""
 
 
 class DuplicateResourceError(ResourceError):
-	"""Raised when registering a duplicate resource without replace=True.
-中文：此文档说明相关引擎组件的行为。"""
+	"""Raised when registering a duplicate resource without replace=True. 重复注册资源且未显式允许替换。"""
 
 
 class ResourceRegistry:
-	"""Small typed-name container for host-owned shared resources.
-中文：此文档说明相关引擎组件的行为。"""
+	"""Small typed-name container for host-owned shared resources. 按名称和类型查找宿主持有的共享资源。"""
 
 	def __init__(self, initial: dict[str, object] | None = None) -> None:
 		self._resources: dict[str, object] = {}
@@ -68,8 +63,7 @@ class ResourceRegistry:
 
 
 def ensure_resource_registry(resources: dict[str, object] | ResourceRegistry | None) -> ResourceRegistry:
-	"""Normalize public resource input into a ResourceRegistry.
-中文：此文档说明相关引擎组件的行为。"""
+	"""Normalize public resource input into a ResourceRegistry. 将公共入口的资源转换为资源注册表。"""
 	if resources is None:
 		return ResourceRegistry()
 	if isinstance(resources, ResourceRegistry):

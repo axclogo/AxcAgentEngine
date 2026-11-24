@@ -3,9 +3,11 @@
 所有 provider 都返回标准化 LLMResponse / LLMStreamChunk。
 core 层不能看到 OpenAI/Anthropic 等原始响应格式。
 """
+
 from __future__ import annotations
 
-from typing import Any, AsyncIterator, Protocol, runtime_checkable, TYPE_CHECKING
+from collections.abc import AsyncIterator
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
 	from axc_agent_engine.core.schema import LLMResponse, LLMStreamChunk
@@ -20,13 +22,13 @@ class LLMProvider(Protocol):
 	def model(self) -> str: ...
 
 	@property
-	def tool_name_mapping(self) -> "ToolNameMappingConfig | None": ...
+	def tool_name_mapping(self) -> ToolNameMappingConfig | None: ...
 
-	async def chat(self, messages: list[dict], tools: list[dict] | None = None,
-				   **kwargs: Any) -> "LLMResponse": ...
+	async def chat(self, messages: list[dict], tools: list[dict] | None = None, **kwargs: Any) -> LLMResponse: ...
 
-	async def stream(self, messages: list[dict], tools: list[dict] | None = None,
-					 **kwargs: Any) -> "AsyncIterator[LLMStreamChunk]": ...
+	async def stream(
+		self, messages: list[dict], tools: list[dict] | None = None, **kwargs: Any
+	) -> AsyncIterator[LLMStreamChunk]: ...
 
 	async def ask(self, prompt: str, **kwargs: Any) -> str: ...
 
@@ -35,9 +37,8 @@ class LLMProvider(Protocol):
 
 @runtime_checkable
 class EmbeddingProvider(Protocol):
-	"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-向量操作使用的 Embedding provider 协议。"""
+	"""Provider protocol for vector embeddings.
+	向量操作使用的 Embedding provider 协议。"""
 
 	async def embed(self, texts: list[str]) -> list[list[float]]: ...
 	async def close(self) -> None: ...

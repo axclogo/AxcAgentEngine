@@ -1,88 +1,140 @@
-"""Connection owner for a single MCP server.
-中文：此文档说明相关引擎组件的行为。"""
+"""Manage one official MCP client session. 管理一个官方 MCP 客户端会话。"""
+
 from __future__ import annotations
 
 import asyncio
-import logging
+from contextlib import AsyncExitStack
 from typing import Any
 
-from .models import DEFAULT_PROTOCOL_VERSION, MCPApplicationError, MCPTool, MCPTransport, MCPTransportError
-from .normalization import normalize_call_result, tool_from_payload
-from axc_agent_engine.plugins.builtin.mcp.support.transports.base import timeout
-from axc_agent_engine.plugins.builtin.mcp.support.transports.factory import build_transport
-
-logger = logging.getLogger(__name__)
+from .models import MCPApplicationError, MCPTool, MCPTransportError
+from .normalization import normalize_call_result
 
 
 class MCPConnection:
-	"""Connection owner for a single MCP server.
-中文：此文档说明相关引擎组件的行为。"""
-
 	def __init__(self, config: dict[str, Any]) -> None:
 		self.config = dict(config)
-		self.name = self.config.get("name", "unnamed")
-		self._transport: MCPTransport = build_transport(self.config)
-		self._connected = False
-		self._request_lock = asyncio.Lock()
-		self._connect_timeout = timeout(self.config, "connect_timeout", 30.0)
-		self._list_timeout = timeout(self.config, "list_timeout", timeout(self.config, "timeout", 30.0))
-		self._call_timeout = timeout(self.config, "call_timeout", timeout(self.config, "timeout", 60.0))
+		self.name = config.get("name", "unnamed")
+		if config.get("use_sdk") is False:
+			raise ValueError("use_sdk: false is no longer supported; configure a standard MCP server")
+		self._timeout = float(config.get("timeout", 60))
+		self._lock = asyncio.Lock()
+		self._owner: asyncio.Task | None = None
+		self._session: Any = None
+		self._stop = asyncio.Event()
+
+	async def _own_session(self, ready: asyncio.Future) -> None:
+		try:
+			from httpx import AsyncClient
+			from mcp import ClientSession, StdioServerParameters
+			from mcp.client.sse import sse_client
+			from mcp.client.stdio import stdio_client
+			from mcp.client.streamable_http import streamable_http_client
+		except ImportError:
+			ready.set_exception(RuntimeError("Install axc-agent-engine[mcp] to use MCP"))
+			return
+		try:
+			async with AsyncExitStack() as stack:
+				config = self.config
+				transport = config.get("transport") or ("stdio" if "command" in config else "http")
+				if transport in {"stdio", "command"}:
+					params = StdioServerParameters(
+						command=config["command"],
+						args=config.get("args", []),
+						cwd=config.get("cwd"),
+						env=config.get("env"),
+					)
+					streams = await stack.enter_async_context(stdio_client(params))
+				elif transport == "sse":
+					streams = await stack.enter_async_context(sse_client(config["url"], headers=config.get("headers")))
+				elif transport in {"http", "streamable_http", "streamable-http"}:
+					client = await stack.enter_async_context(
+						AsyncClient(headers=config.get("headers"), timeout=self._timeout, follow_redirects=True)
+					)
+					streams = await stack.enter_async_context(streamable_http_client(config["url"], http_client=client))
+				else:
+					raise ValueError(f"Unsupported MCP transport {transport}")
+				session = await stack.enter_async_context(ClientSession(streams[0], streams[1]))
+				await session.initialize()
+				ready.set_result(session)
+				await self._stop.wait()
+		except Exception as exc:
+			if not ready.done():
+				ready.set_exception(exc)
+			else:
+				raise
+
+	async def _open(self) -> None:
+		if self._session is not None and self._owner and not self._owner.done():
+			return
+		await self._close()
+		ready = asyncio.get_running_loop().create_future()
+		self._stop.clear()
+		self._owner = asyncio.create_task(self._own_session(ready))
+		try:
+			async with asyncio.timeout(float(self.config.get("connect_timeout", 30))):
+				self._session = await ready
+		except BaseException:
+			self._owner.cancel()
+			await asyncio.gather(self._owner, return_exceptions=True)
+			self._owner = None
+			raise
 
 	async def connect(self) -> None:
-		if self._connected:
-			return
-		async with self._request_lock:
-			if self._connected:
-				return
-			await asyncio.wait_for(self._transport.connect(), timeout=self._connect_timeout)
-			await asyncio.wait_for(self._transport.request("initialize", {
-				"protocolVersion": self.config.get("protocol_version", DEFAULT_PROTOCOL_VERSION),
-				"capabilities": {},
-				"clientInfo": {"name": "axc_agent_engine", "version": "3.0.0"},
-			}), timeout=self._connect_timeout)
-			try:
-				await asyncio.wait_for(self._transport.request("notifications/initialized", {}), timeout=self._connect_timeout)
-			except Exception:
-				logger.debug("[mcp] initialized notification not accepted by %s", self.name, exc_info=True)
-			self._connected = True
+		async with self._lock:
+			await self._open()
+
+	async def _request(self, operation, timeout: float, retryable: bool):
+		async with self._lock:
+			for attempt in range(2 if retryable else 1):
+				await self._open()
+				from anyio import BrokenResourceError, ClosedResourceError, EndOfStream
+				from mcp.shared.exceptions import McpError
+
+				try:
+					async with asyncio.timeout(timeout):
+						return await operation(self._session)
+				except McpError as exc:
+					raise MCPApplicationError(str(exc)) from exc
+				except (OSError, TimeoutError, BrokenResourceError, ClosedResourceError, EndOfStream) as exc:
+					await self._close()
+					if attempt or not retryable:
+						raise MCPTransportError(str(exc)) from exc
 
 	async def list_tools(self) -> list[MCPTool]:
-		result = await self._request_with_reconnect("tools/list", {}, timeout=self._list_timeout, retryable=True)
-		return [tool_from_payload(tool) for tool in result.get("tools", [])]
+		async def collect(session):
+			result = []
+			cursor = None
+			while True:
+				page = await session.list_tools(cursor=cursor)
+				for tool in page.tools:
+					annotations = tool.annotations.model_dump(exclude_none=True) if tool.annotations else {}
+					result.append(MCPTool(tool.name, tool.description or "", tool.inputSchema, annotations))
+				cursor = page.nextCursor
+				if not cursor:
+					return result
+
+		return await self._request(collect, float(self.config.get("list_timeout", self._timeout)), True)
 
 	async def call_tool(self, tool_name: str, arguments: dict[str, Any], *, retryable: bool = False) -> Any:
-		result = await self._request_with_reconnect(
-			"tools/call",
-			{"name": tool_name, "arguments": arguments},
-			timeout=self._call_timeout,
-			retryable=retryable,
+		result = await self._request(
+			lambda s: s.call_tool(tool_name, arguments),
+			float(self.config.get("call_timeout", self._timeout)),
+			retryable,
 		)
-		return normalize_call_result(result)
+		content = normalize_call_result(result.model_dump(by_alias=True, exclude_none=True))
+		if result.isError:
+			raise MCPApplicationError(str(content))
+		return content
+
+	async def _close(self) -> None:
+		if self._owner:
+			self._stop.set()
+			try:
+				await self._owner
+			finally:
+				self._owner = None
+				self._session = None
 
 	async def close(self) -> None:
-		await self._transport.close()
-		self._connected = False
-
-	async def _request_with_reconnect(
-		self,
-		method: str,
-		params: dict[str, Any],
-		*,
-		timeout: float,
-		retryable: bool,
-	) -> dict[str, Any]:
-		if not self._connected and method != "initialize":
-			await self.connect()
-		try:
-			async with self._request_lock:
-				return await asyncio.wait_for(self._transport.request(method, params), timeout=timeout)
-		except MCPApplicationError:
-			raise
-		except (BrokenPipeError, ConnectionResetError, MCPTransportError, asyncio.TimeoutError):
-			await self.close()
-			if not retryable:
-				raise
-			logger.warning("[mcp] request %s failed, reconnecting server %s", method, self.name)
-			await self.connect()
-			async with self._request_lock:
-				return await asyncio.wait_for(self._transport.request(method, params), timeout=timeout)
+		async with self._lock:
+			await self._close()

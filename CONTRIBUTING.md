@@ -24,8 +24,8 @@ Recommended local validation:
 ```bash
 python -m pytest
 python -m compileall -q axc_agent_engine
-ruff check axc_agent_engine tests
-ruff format --check axc_agent_engine tests
+ruff check axc_agent_engine tests examples
+ruff format --check axc_agent_engine tests examples
 python -m mypy axc_agent_engine
 python -m build
 twine check dist/*
@@ -36,15 +36,16 @@ twine check dist/*
 1. Fork the repo and create a branch from `main`
 2. Add tests for any new functionality
 3. Ensure all tests pass: `python -m pytest tests/ -v`
-4. Ensure lint passes: `ruff check axc_agent_engine tests`
+4. Ensure lint passes: `ruff check axc_agent_engine tests examples`
 5. Update docs for public behavior changes
 6. Submit a PR with a clear description
 
 ## Plugin Development
 
-See `docs/PLUGIN_DEVELOPMENT.md` and `examples/05_custom_plugin/`.
+See `docs/PLUGIN_DEVELOPMENT.md` and `examples/05_custom_plugin/` and `examples/08_custom_loop/`.
 
-All plugins implement the same `Plugin` Protocol defined in `axc_agent_engine/plugins/__init__.py`.
+Plugins inherit `BasePlugin`. Execution drivers subclass `ExecutionStrategyPlugin` from
+`axc_agent_engine.plugins.strategy` and implement its per-run loop factory. Exercise concurrent sessions, cancellation, early stream close, denied tools, and persisted state across plugin versions with the helpers in `axc_agent_engine.plugins.testing`. The [strategy contract](docs/PLUGIN_DEVELOPMENT.md#testing-a-host-strategy) includes fixture requirements and an offline test command.
 
 ## API Compatibility
 

@@ -1,6 +1,7 @@
 """Tests for events module — Event, EventType, factory methods."""
-from axc_agent_engine.core.events import Event, EventType
+
 from axc_agent_engine.core.errors import ErrorCategory, ErrorEnvelope
+from axc_agent_engine.core.events import Event, EventType
 
 
 class TestEventType:
@@ -92,7 +93,10 @@ class TestEvent:
 
 		assert [event.metadata["run_id"] for event in events] == ["r1", "r1", "r1", "r1"]
 		assert [event.metadata["nested"]["value"] for event in events] == [
-			"original", "original", "original", "original",
+			"original",
+			"original",
+			"original",
+			"original",
 		]
 
 	def test_factory_payloads_are_copied(self):
@@ -130,7 +134,11 @@ class TestEvent:
 		metadata["trace"]["id"] = "mutated"
 
 		assert [event.metadata["trace"]["id"] for event in events] == [
-			"original", "original", "original", "original", "original",
+			"original",
+			"original",
+			"original",
+			"original",
+			"original",
 		]
 
 	def test_factory_step_start(self):

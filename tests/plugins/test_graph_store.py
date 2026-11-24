@@ -1,17 +1,17 @@
 import pytest
 
-from axc_agent_engine.observability.audit import InMemoryAuditSink
 from axc_agent_engine.core.context import ExecutionContext, ExecutionServices
+from axc_agent_engine.observability.audit import InMemoryAuditSink
+from axc_agent_engine.plugins import PluginContext
 from axc_agent_engine.plugins.builtin.graph.audit import GraphAuditRecorder
 from axc_agent_engine.plugins.builtin.graph.config import GraphConfig
-from axc_agent_engine.plugins.builtin.graph.presenter import GraphPresenter
+from axc_agent_engine.plugins.builtin.graph.plugin import GraphPlugin
 from axc_agent_engine.plugins.builtin.graph.policy import GraphPolicy
+from axc_agent_engine.plugins.builtin.graph.presenter import GraphPresenter
 from axc_agent_engine.plugins.builtin.graph.service import GraphService
 from axc_agent_engine.plugins.builtin.graph.source_loader import GraphSourceLoader
 from axc_agent_engine.plugins.builtin.graph.support import InMemoryGraphStore
 from axc_agent_engine.plugins.builtin.graph.tool_handlers import GraphToolHandlers
-from axc_agent_engine.plugins import PluginContext
-from axc_agent_engine.plugins.builtin.graph.plugin import GraphPlugin
 from axc_agent_engine.storage.artifact_store import InMemoryArtifactStore
 
 
@@ -80,7 +80,9 @@ def test_graph_plugin_uses_mounted_store_resource():
 @pytest.mark.asyncio
 async def test_graph_plugin_can_disable_writes_and_deletes():
 	plugin = GraphPlugin()
-	plugin.initialize({"allow_writes": False, "allow_deletes": False}, PluginContext(resources={"graph.store": InMemoryGraphStore()}))
+	plugin.initialize(
+		{"allow_writes": False, "allow_deletes": False}, PluginContext(resources={"graph.store": InMemoryGraphStore()})
+	)
 
 	write_result = await plugin._tool_upsert_entity({"name": "Alice"}, {})
 	delete_result = await plugin._tool_delete_entity({"entity_id": "entity:1"}, {})
@@ -94,10 +96,15 @@ async def test_graph_plugin_can_disable_writes_and_deletes():
 @pytest.mark.asyncio
 async def test_graph_plugin_enforces_type_allowlists():
 	plugin = GraphPlugin()
-	plugin.initialize({"allowed_entity_types": ["person"], "allowed_relation_types": ["WORKS_AT"]}, PluginContext(resources={"graph.store": InMemoryGraphStore()}))
+	plugin.initialize(
+		{"allowed_entity_types": ["person"], "allowed_relation_types": ["WORKS_AT"]},
+		PluginContext(resources={"graph.store": InMemoryGraphStore()}),
+	)
 
 	entity_result = await plugin._tool_upsert_entity({"name": "Acme", "entity_type": "company"}, {})
-	relation_result = await plugin._tool_upsert_relation({"source": "Alice", "target": "Acme", "relation_type": "FOUNDED"}, {})
+	relation_result = await plugin._tool_upsert_relation(
+		{"source": "Alice", "target": "Acme", "relation_type": "FOUNDED"}, {}
+	)
 
 	assert entity_result.is_error
 	assert "not allowed" in entity_result.content
@@ -112,12 +119,14 @@ async def test_graph_plugin_source_errors_raise_on_initialize(tmp_path):
 	source.write_text(
 		'{"id":"alice","name":"Alice","type":"person","description":"Engineer"}\n'
 		'{"source_id":"alice","target_id":"acme","relation_type":"WORKS_AT"}\n'
-		'not-json\n',
+		"not-json\n",
 		encoding="utf-8",
 	)
 	plugin = GraphPlugin()
 	with pytest.raises(ValueError, match="source not found"):
-		plugin.initialize({"sources": [str(missing), str(source)]}, PluginContext(resources={"graph.store": InMemoryGraphStore()}))
+		plugin.initialize(
+			{"sources": [str(missing), str(source)]}, PluginContext(resources={"graph.store": InMemoryGraphStore()})
+		)
 	with pytest.raises(ValueError, match="Expecting value"):
 		plugin.initialize({"sources": [str(source)]}, PluginContext(resources={"graph.store": InMemoryGraphStore()}))
 
@@ -190,7 +199,7 @@ def test_graph_service_read_source_and_payload_branches(tmp_path):
 		'{"id":"alice","name":"Alice","type":"person","metadata":{"secret":1}}\n'
 		'{"source":"Alice","target":"Bob","relation_type":"KNOWS"}\n'
 		'{"bad": true}\n'
-		'{bad-json}\n',
+		"{bad-json}\n",
 		encoding="utf-8",
 	)
 	config = GraphConfig.from_dict({"sources": [], "include_metadata": False, "namespace": "ns", "max_limit": 2})
@@ -215,10 +224,14 @@ def test_graph_service_read_source_and_payload_branches(tmp_path):
 	relation = service.upsert_relation({"source": "Alice", "target": "Bob", "relation_type": "KNOWS"})
 	assert service.get_relation(relation["relation"]["id"])
 	assert service.inject_context("Alice").startswith("[相关实体与关系]")
-	search_payload, search_limit = service.search("Alice", "bad", 99)
+	with pytest.raises(ValueError, match="integer"):
+		service.search("Alice", "bad", 99)
+	search_payload, search_limit = service.search("Alice", 0, 99)
 	assert search_limit == 2
 	assert search_payload["depth"] == 0
-	assert service.page({"limit": 99, "offset": "bad"}) == (2, 0)
+	with pytest.raises(ValueError, match="integer"):
+		service.page({"limit": 99, "offset": "bad"})
+	assert service.page({"limit": 99}) == (2, 0)
 	exported = service.export_payload()
 	assert exported["namespace"] == "ns"
 	assert service.status_payload()["config"]["max_limit"] == 2
@@ -230,13 +243,16 @@ def test_graph_service_read_source_and_payload_branches(tmp_path):
 def test_graph_source_loader_limits_validation_and_store_errors(tmp_path):
 	source = tmp_path / "graph.jsonl"
 	source.write_text("{}", encoding="utf-8")
-	config = GraphConfig.from_dict({
-		"sources": [str(source)],
-		"max_entities": 1,
-		"max_relations": 1,
-		"allowed_entity_types": ["person"],
-		"allowed_relation_types": ["KNOWS"],
-	})
+	config = GraphConfig.from_dict(
+		{
+			"sources": [str(source)],
+			"max_entities": 1,
+			"max_relations": 1,
+			"allowed_entity_types": ["person"],
+			"allowed_relation_types": ["KNOWS"],
+		}
+	)
+
 	class Store:
 		def __init__(self):
 			self.entities = []
@@ -321,7 +337,9 @@ async def test_graph_tool_handlers_error_and_crud_paths():
 	assert (await handlers.upsert_entity({"name": "Bob"}, context)).is_error
 	assert ctx.state.metadata["graph"]["last_action"] == "upsert_entity"
 	assert (await handlers.get_entity({"entity_id": "missing"}, context)).is_error
-	assert (await handlers.get_entity({"entity_id": entity.content["entity"]["id"]}, context)).content["entity"]["name"] == "Alice"
+	assert (await handlers.get_entity({"entity_id": entity.content["entity"]["id"]}, context)).content["entity"][
+		"name"
+	] == "Alice"
 
 	relation = await handlers.upsert_relation({"source": "Alice", "target": "Bob", "relation_type": "KNOWS"}, context)
 	assert not relation.is_error
@@ -335,18 +353,22 @@ async def test_graph_tool_handlers_error_and_crud_paths():
 	assert (await handlers.status({}, context)).content["entities"] >= 1
 	assert (await handlers.export({}, context)).content["entities"]
 	assert (await handlers.delete_relation({"relation_id": relation_id}, context)).content["deleted"] is True
-	assert (await handlers.delete_entity({"entity_id": entity.content["entity"]["id"]}, context)).content["deleted"] is True
+	assert (await handlers.delete_entity({"entity_id": entity.content["entity"]["id"]}, context)).content[
+		"deleted"
+	] is True
 	assert (await handlers.delete_entity({"entity_id": "missing"}, context)).content["deleted"] is False
 
 
 @pytest.mark.asyncio
 async def test_graph_tool_handlers_policy_rejections_and_reload():
-	config = GraphConfig.from_dict({
-		"allow_writes": False,
-		"allow_deletes": False,
-		"denied_entity_types": ["secret"],
-		"denied_relation_types": ["BLOCKED"],
-	})
+	config = GraphConfig.from_dict(
+		{
+			"allow_writes": False,
+			"allow_deletes": False,
+			"denied_entity_types": ["secret"],
+			"denied_relation_types": ["BLOCKED"],
+		}
+	)
 	service = GraphService(config, InMemoryGraphStore())
 	handlers = GraphToolHandlers(service, GraphPresenter(config, PluginContext()), GraphAuditRecorder(config))
 	context = {"exec_ctx": ExecutionContext()}
@@ -358,7 +380,29 @@ async def test_graph_tool_handlers_policy_rejections_and_reload():
 
 	write_config = GraphConfig.from_dict({"denied_entity_types": ["secret"], "denied_relation_types": ["BLOCKED"]})
 	write_service = GraphService(write_config, InMemoryGraphStore())
-	write_handlers = GraphToolHandlers(write_service, GraphPresenter(write_config, PluginContext()), GraphAuditRecorder(write_config))
+	write_handlers = GraphToolHandlers(
+		write_service, GraphPresenter(write_config, PluginContext()), GraphAuditRecorder(write_config)
+	)
 	assert (await write_handlers.upsert_entity({"name": "Alice", "entity_type": "secret"}, context)).is_error
-	assert (await write_handlers.upsert_relation({"source": "Alice", "target": "Bob", "relation_type": "BLOCKED"}, context)).is_error
+	assert (
+		await write_handlers.upsert_relation({"source": "Alice", "target": "Bob", "relation_type": "BLOCKED"}, context)
+	).is_error
 	assert (await write_handlers.reload_sources({"clear_existing": True}, context)).is_error
+
+
+def test_graph_source_relation_is_persisted_and_bad_aliases_are_rejected(tmp_path):
+	path = tmp_path / "graph.jsonl"
+	path.write_text(
+		'\n{"id":"1","name":"Alice"}\n{"id":"2","name":"Bob"}\n'
+		'{"source_id":"1","target_id":"2","relation_type":"KNOWS"}\n'
+	)
+	store = InMemoryGraphStore()
+	service = GraphService(GraphConfig.from_dict({"sources": [str(path)]}), store)
+	(row,) = store.list_relations()
+	assert row["relation_type"] == "KNOWS" and service.source_stats["relations"] == 1
+	assert service.inject_context("nonexistent") == service.inject_context("") == ""
+	with pytest.raises(TypeError, match="aliases"):
+		service.upsert_entity({"name": "Carol", "aliases": "C,Carol"})
+	path.write_text('{"id":"3","name":"Carol","aliases":"C,Carol"}')
+	with pytest.raises(TypeError, match="aliases"):
+		GraphService(GraphConfig.from_dict({"sources": [str(path)]}), InMemoryGraphStore())

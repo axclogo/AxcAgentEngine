@@ -3,6 +3,7 @@
 计划只从 content 里的结构化 JSON（goal + steps）识别。
 这里不做 tool_call 识别；POR 是运行时路由模式，不是工具。
 """
+
 import logging
 from dataclasses import replace
 from typing import Any
@@ -13,20 +14,18 @@ from axc_agent_engine.utils.json_utils import extract_json_object
 
 logger = logging.getLogger(__name__)
 
+
 class PlanningService:
-	"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-为 POR 路由创建并提取执行计划。"""
+	"""Create and extract execution plans.
+	为 POR 路由创建并提取执行计划。"""
 
 	@staticmethod
 	async def generate_plan(llm_caller: Any, ctx: Any, goal: str) -> Plan:
-		"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-调用当前配置的 LLM 生成 Plan 对象。
+		"""Ask the configured model for a plan.
+		调用当前配置的 LLM 生成 Plan 对象。
 
-		服务通过 LLMCaller 消费标准化 LLMResponse；OpenAI 响应结构不能离开
-		provider 实现层。
-		"""
+		                服务通过 LLMCaller 消费标准化 LLMResponse；OpenAI 响应结构不能离开
+		                provider 实现层。"""
 		prompt = (
 			"请为用户任务创建一个简洁的执行计划。只返回 JSON，结构如下：\n"
 			'{"goal":"...","steps":[{"step_id":1,"description":"...","depends_on":[],"tools_needed":[]}]}\n'
@@ -46,12 +45,10 @@ class PlanningService:
 
 	@staticmethod
 	def detect_plan(message: dict[str, Any]) -> Plan | None:
-		"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-从 LLM 响应内容中识别结构化计划。
+		"""Detect a structured plan in a model response.
+		从 LLM 响应内容中识别结构化计划。
 
-		只识别包含 goal + steps 的 JSON 块；找到返回 Plan，否则返回 None。
-		"""
+		                只识别包含 goal + steps 的 JSON 块；找到返回 Plan，否则返回 None。"""
 		content = message.get("content", "") or ""
 		if not content or "goal" not in content or "steps" not in content:
 			return None
@@ -59,8 +56,8 @@ class PlanningService:
 		goal = data.get("goal", "")
 		steps = data.get("steps", [])
 		if goal and isinstance(steps, list) and steps:
-			plan = create_plan(goal, steps)
 			try:
+				plan = create_plan(goal, steps)
 				validate_plan(plan)
 			except SchemaError as e:
 				logger.warning("[planning] Invalid plan ignored: %s", e)

@@ -2,8 +2,12 @@ name: "con-side"
 description: "反方辩手"
 
 runtime:
+  strategy: por
   max_rounds: 5
 
 system_prompt: |
   你是辩论赛的反方辩手。
   用逻辑和事实反驳对方的论点，坚持你的立场。
+
+plugins:
+  por: {enabled: true, mode: auto}

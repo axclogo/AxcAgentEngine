@@ -1,5 +1,5 @@
-"""Explicit streaming event sinks.
-中文：此文档说明相关引擎组件的行为。"""
+"""Explicit streaming event sinks. 流式事件的接收端接口。"""
+
 from __future__ import annotations
 
 import asyncio
@@ -13,7 +13,7 @@ class StreamSink(Protocol):
 
 
 class QueueStreamSink:
-	def __init__(self, queue: "asyncio.Queue[Event | None]") -> None:
+	def __init__(self, queue: asyncio.Queue[Event | None]) -> None:
 		self._queue = queue
 
 	async def emit(self, event: Event) -> None:

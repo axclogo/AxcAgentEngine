@@ -1,10 +1,10 @@
-"""English: This documentation describes the related engine component behavior.
-中文：标准化工具执行上下文。"""
+"""Normalize tool execution context. 标准化工具执行上下文。"""
+
 from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
 	from axc_agent_engine.core.context import ExecutionContext
@@ -13,11 +13,11 @@ if TYPE_CHECKING:
 
 @dataclass
 class ToolContext:
-	"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-传给所有工具 execute 函数的类型化上下文。"""
+	"""Typed context passed to a tool invocation.
+	传给所有工具 execute 函数的类型化上下文。"""
+
 	workspace: str = ""
-	exec_ctx: "ExecutionContext | None" = None
+	exec_ctx: ExecutionContext | None = None
 	session_id: str = ""
 	agent_name: str = ""
 	tool_name: str = ""
@@ -26,18 +26,16 @@ class ToolContext:
 	response_queue: asyncio.Queue | None = None
 
 	@property
-	def artifact_store(self) -> "ArtifactStore | None":
-		"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-从 ExecutionContext.services 获取 artifact_store。"""
+	def artifact_store(self) -> ArtifactStore | None:
+		"""Get the host artifact store from execution services.
+		从 ExecutionContext.services 获取 artifact_store。"""
 		if self.exec_ctx and self.exec_ctx.services:
 			return self.exec_ctx.services.artifact_store
 		return None
 
 	def to_dict(self) -> dict[str, Any]:
-		"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-转换成工具 execute 函数使用的 dict。"""
+		"""Convert to the dictionary passed to a tool.
+		转换成工具 execute 函数使用的 dict。"""
 		return {
 			"workspace": self.workspace,
 			"exec_ctx": self.exec_ctx,
@@ -48,5 +46,7 @@ class ToolContext:
 			"request_queue": self.request_queue,
 			"response_queue": self.response_queue,
 			"artifact_store": self.artifact_store,
-			"command_executor": self.exec_ctx.services.command_executor if self.exec_ctx and self.exec_ctx.services else None,
+			"command_executor": self.exec_ctx.services.command_executor
+			if self.exec_ctx and self.exec_ctx.services
+			else None,
 		}

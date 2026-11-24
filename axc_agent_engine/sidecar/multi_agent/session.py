@@ -7,15 +7,17 @@ All cross-Agent communication goes through AgentMessageDispatcher.
 Scheduler 只选择接收者，dispatcher.request 负责驱动执行。
 Schedulers only choose recipients; dispatcher.request drives execution.
 """
+
 from __future__ import annotations
 
 import json
 import logging
 import uuid
+from collections.abc import AsyncIterator, Callable
 from copy import deepcopy
-from typing import Any, AsyncIterator, Callable, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
-from axc_agent_engine.sidecar.multi_agent.shared_context import SharedContext
+from axc_agent_engine.core.run_context import call_context_factory, dict_or_empty, sync_run_id
 from axc_agent_engine.sidecar.multi_agent.events import MultiAgentEvent
 from axc_agent_engine.sidecar.multi_agent.modes import (
 	ModeRuntime,
@@ -24,8 +26,8 @@ from axc_agent_engine.sidecar.multi_agent.modes import (
 	mode_prompt_guidance,
 )
 from axc_agent_engine.sidecar.multi_agent.persona import build_persona_prompt
+from axc_agent_engine.sidecar.multi_agent.shared_context import SharedContext
 from axc_agent_engine.sidecar.multi_agent.types import MultiAgentEventType, SessionMode
-from axc_agent_engine.core.run_context import call_context_factory, dict_or_empty, sync_run_id
 
 if TYPE_CHECKING:
 	from axc_agent_engine.agent import Agent
@@ -39,11 +41,8 @@ AgentContextFactory = Callable[[Any, int], dict]
 
 
 class MultiAgentEventSink:
-	"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-构建公开多 Agent 事件和非流式结果文本。
-	Builds public multi-agent events and non-stream result text.
-	"""
+	"""Builds public multi-agent events and non-stream result text.
+	构建公开多 Agent 事件和非流式结果文本。"""
 
 	def round_start(self, round_num: int) -> MultiAgentEvent:
 		return MultiAgentEvent(type=E.ROUND_START, round_num=round_num)
@@ -69,19 +68,17 @@ class MultiAgentEventSink:
 
 
 class AgentOrchestrationWorker:
-	"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-通过 dispatcher 边界发送一个会话轮次请求。
-	Sends one session turn through the dispatcher boundary.
-	"""
+	"""Sends one session turn through the dispatcher boundary.
+	通过 dispatcher 边界发送一个会话轮次请求。"""
 
-	def __init__(self, dispatcher: "AgentMessageDispatcher", conversation_id: str, session_id: str) -> None:
+	def __init__(self, dispatcher: AgentMessageDispatcher, conversation_id: str, session_id: str) -> None:
 		self._dispatcher = dispatcher
 		self._conversation_id = conversation_id
 		self._session_id = session_id
 
 	async def request(self, agent: Any, prompt: str, run_options: dict[str, Any], metadata: dict[str, Any]) -> str:
 		from axc_agent_engine.core.dispatcher import AgentEnvelope
+
 		envelope = AgentEnvelope(
 			sender="session",
 			recipient=agent.name,
@@ -98,11 +95,8 @@ class AgentOrchestrationWorker:
 
 
 class SocialFeedBuilder:
-	"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-根据轮次消息维护 social 模式 feed artifact。
-	Maintains the social-mode feed artifact from round messages.
-	"""
+	"""Maintains the social-mode feed artifact from round messages.
+	根据轮次消息维护 social 模式 feed artifact。"""
 
 	def update(self, shared: SharedContext, round_num: int) -> None:
 		if "feed" not in shared.artifacts:
@@ -122,23 +116,20 @@ class SocialFeedBuilder:
 
 
 class MultiAgentSession:
-	"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-通过 dispatcher/bus 编排多 Agent。
-	Orchestrates multiple Agents through dispatcher/bus.
-	"""
+	"""Orchestrates multiple Agents through dispatcher/bus.
+	通过 dispatcher/bus 编排多 Agent。"""
 
 	def __init__(
 		self,
-		agents: list["Agent"],
-		dispatcher: "AgentMessageDispatcher",
+		agents: list[Agent],
+		dispatcher: AgentMessageDispatcher,
 		mode: SessionMode = SessionMode.GROUP_CHAT,
 		topic: str = "",
 		max_rounds: int = 10,
-		supervisor: "Agent | None" = None,
+		supervisor: Agent | None = None,
 		persona: dict[str, dict] | None = None,
-		scheduler: "Scheduler | None" = None,
-		stop_condition: "StopCondition | None" = None,
+		scheduler: Scheduler | None = None,
+		stop_condition: StopCondition | None = None,
 		utility_model: Any = None,
 	) -> None:
 		self._agents = agents
@@ -168,6 +159,7 @@ class MultiAgentSession:
 		if not self._persona or not self._utility_model:
 			return
 		from axc_agent_engine.sidecar.multi_agent.persona import generate_persona
+
 		for agent_name, persona_data in list(self._persona.items()):
 			if isinstance(persona_data, str):
 				self._persona[agent_name] = await generate_persona(self._topic, persona_data, self._utility_model)
@@ -179,11 +171,8 @@ class MultiAgentSession:
 		agent_run_options: AgentContextFactory | None = None,
 		agent_metadata: AgentContextFactory | None = None,
 	) -> str:
-		"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-非流式执行。
-		Run without streaming.
-		"""
+		"""Run without streaming.
+		非流式执行。"""
 		result_parts: list[str] = []
 		async for event in self._execute(run_options, metadata, agent_run_options, agent_metadata):
 			if line := self._events.result_line(event):
@@ -197,11 +186,8 @@ class MultiAgentSession:
 		agent_run_options: AgentContextFactory | None = None,
 		agent_metadata: AgentContextFactory | None = None,
 	) -> AsyncIterator[MultiAgentEvent]:
-		"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-事件流执行。
-		Run and yield events as a stream.
-		"""
+		"""Run and yield events as a stream.
+		事件流执行。"""
 		async for event in self._execute(run_options, metadata, agent_run_options, agent_metadata):
 			yield event
 
@@ -260,9 +246,8 @@ class MultiAgentSession:
 		agent_run_options: AgentContextFactory | None,
 		agent_metadata: AgentContextFactory | None,
 	) -> AsyncIterator[MultiAgentEvent]:
-		"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-通过 dispatcher.request 执行发言者。"""
+		"""Dispatch speaker requests.
+		通过 dispatcher.request 执行发言者。"""
 		for index, agent in enumerate(speakers):
 			self._record_speak(agent.name)
 			prompt = self._build_prompt(agent)
@@ -280,12 +265,12 @@ class MultiAgentSession:
 				self._shared.add_message(agent.name, content, round_num)
 				yield self._events.message(agent.name, content, round_num)
 			except Exception as e:
+				logging.getLogger(__name__).exception("Agent execution failed")
 				yield self._events.error(agent.name, str(e), round_num)
 
 	def _build_prompt(self, agent: Any) -> str:
-		"""English: Bilingual documentation follows.
-中文：以下为双语文档说明。
-基于共享上下文和角色设定构建 Agent prompt。"""
+		"""Build a speaker prompt from shared context and persona.
+		基于共享上下文和角色设定构建 Agent prompt。"""
 		parts: list[str] = [f"讨论主题：{self._shared.topic}"]
 		if agent.name in self._persona:
 			persona_text = build_persona_prompt(agent.name, self._persona[agent.name])
