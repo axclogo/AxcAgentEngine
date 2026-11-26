@@ -5,10 +5,11 @@ English: User-facing chat entry point that wraps execution, sessions, tools, and
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import AsyncGenerator, AsyncIterator, Callable
 from contextlib import aclosing, asynccontextmanager
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from typing import Any
 from uuid import uuid4
 
@@ -20,17 +21,23 @@ from axc_agent_engine.core.input_messages import extract_last_user_message, norm
 from axc_agent_engine.core.llm_caller import LLMCaller
 from axc_agent_engine.core.message_store import MessageStore
 from axc_agent_engine.core.plugin_manager import PluginManager
-from axc_agent_engine.core.run_context import checkpoint_owner, context_run_id, dict_or_empty
+from axc_agent_engine.core.run_context import checkpoint_owner_conflict, context_run_id, dict_or_empty
 from axc_agent_engine.core.run_request import RunRequest
 from axc_agent_engine.core.schema import RuntimeConfig
-from axc_agent_engine.core.session import Session
+from axc_agent_engine.core.session import RewindResult, Session
 from axc_agent_engine.core.session_manager import SessionManager
 from axc_agent_engine.llm.provider import LLMProvider
 from axc_agent_engine.plugins.base import BasePlugin
 from axc_agent_engine.plugins.context import agent_info_from_runtime, model_info_from_models
 from axc_agent_engine.plugins.loader import close_plugins
 from axc_agent_engine.plugins.strategy_selection import select_strategy
-from axc_agent_engine.runtime.checkpoint import ForkedRun
+from axc_agent_engine.runtime.checkpoint import (
+	CheckpointStore,
+	ForkCleanupResult,
+	ForkedRun,
+	ForkFailure,
+	attach_fork_failure,
+)
 from axc_agent_engine.runtime.concurrency import ExecutionLimiter, SessionExecutionGate
 from axc_agent_engine.runtime.inbox import receipt
 from axc_agent_engine.runtime.input import InputProvider, InputProviderResult, PassthroughInputProvider
@@ -59,6 +66,37 @@ async def _final_text(events: AsyncIterator[Event]) -> str:
 			if event.type == EventType.CANCELLED:
 				raise CancelledError(event.content)
 	raise RuntimeError("Execution ended without a terminal event")
+
+
+@dataclass(frozen=True)
+class _ForkAttempt:
+	"""Branch and source identities for one fork attempt. 单次分叉的分支与来源标识。"""
+
+	branch: ForkedRun
+	source_run_id: str
+	source_checkpoint_id: str
+
+
+def _fork_failure(
+	attempt: _ForkAttempt,
+	cause: BaseException,
+	rollback_error: str,
+	checkpoint_written: bool | None,
+	session_written: bool | None,
+) -> ForkFailure:
+	"""Build structured cleanup context for a failed fork. 构建失败分叉的结构化清理信息。"""
+	branch = attempt.branch
+	return ForkFailure(
+		branch_run_id=branch.run_id,
+		branch_session_id=branch.session_id,
+		source_run_id=attempt.source_run_id,
+		source_checkpoint_id=attempt.source_checkpoint_id,
+		cause=f"{type(cause).__name__}: {cause}",
+		rollback_error=rollback_error,
+		checkpoint_written=checkpoint_written,
+		session_written=session_written,
+		cleaned=not rollback_error,
+	)
 
 
 class Agent:
@@ -267,14 +305,16 @@ class Agent:
 		state = checkpoint.state
 		meta = state.get("metadata", {})
 		caller = {**self._metadata, **dict_or_empty(metadata, "metadata")}
-		owner = checkpoint_owner(caller)
-		if meta.get("agent_name") != self.registered_name or owner != state.get("owner", {}):
-			raise ValueError("Fork checkpoint belongs to another agent, tenant or user")
+		if meta.get("agent_name") != self.registered_name:
+			raise ValueError("Fork checkpoint belongs to another agent")
+		if conflict := checkpoint_owner_conflict(state.get("owner", {}), caller, exact=True):
+			raise ValueError(conflict)
 		if reason := checkpoint.fork_blocker:
 			raise ValueError(reason)
 		MessageStore.validate_history(state["messages"])
 		continuation = self._strategy.restore_state(state)
 		branch = ForkedRun(uuid4().hex, uuid4().hex)
+		attempt = _ForkAttempt(branch, run_id, checkpoint_id)
 		source = {**caller, **meta}
 		target = {**source, "session_id": branch.session_id, "run_id": branch.run_id}
 		scopes = self._plugin_manager.fork_scopes(state.get("plugin_scopes", {}), source, target, state["fork_state"])
@@ -282,8 +322,69 @@ class Agent:
 		with self._services.run_control.claim(branch.run_id):
 			if await store.latest(branch.run_id) is not None:
 				raise ValueError("Generated branch run ID already exists")
-			await store.save(seed)
+			try:
+				await store.save(seed)
+			except (Exception, asyncio.CancelledError) as exc:
+				rollback_error = await self._rollback_fork(branch, store)
+				attach_fork_failure(exc, _fork_failure(attempt, exc, rollback_error, None, False))
+				raise
+			try:
+				await self._session_manager.replace_history(branch.session_id, state["messages"])
+			except (Exception, asyncio.CancelledError) as exc:
+				rollback_error = await self._rollback_fork(branch, store)
+				attach_fork_failure(exc, _fork_failure(attempt, exc, rollback_error, True, None))
+				raise
 		return branch
+
+	async def _rollback_fork(self, branch: ForkedRun, store: CheckpointStore) -> str:
+		"""Best-effort cleanup of a failed fork. 尽力清理失败的分叉。"""
+		errors: list[str] = []
+		try:
+			await store.delete_run(branch.run_id)
+		except (Exception, asyncio.CancelledError) as exc:  # noqa: BLE001
+			errors.append(f"checkpoint: {type(exc).__name__}: {exc}")
+		try:
+			await self._session_manager.remove(branch.session_id)
+		except (Exception, asyncio.CancelledError) as exc:  # noqa: BLE001
+			errors.append(f"session: {type(exc).__name__}: {exc}")
+		if errors:
+			logger.error(
+				"Fork rollback incomplete: branch_run_id=%s branch_session_id=%s errors=%s",
+				branch.run_id,
+				branch.session_id,
+				"; ".join(errors),
+			)
+		return "; ".join(errors)
+
+	async def discard_fork(self, failure: ForkFailure) -> ForkCleanupResult:
+		"""Clean a failed fork after storage recovers. 存储恢复后清理失败的分叉。"""
+		if not isinstance(failure, ForkFailure):
+			raise TypeError("failure must be a ForkFailure")
+		errors: list[str] = []
+		checkpoint_removed = False
+		session_removed = False
+		store = self._services.checkpoint_store
+		if store is None:
+			errors.append("checkpoint store is not configured")
+		else:
+			try:
+				await store.delete_run(failure.branch_run_id)
+				checkpoint_removed = True
+			except Exception as exc:  # noqa: BLE001
+				errors.append(f"checkpoint: {type(exc).__name__}: {exc}")
+		try:
+			await self._session_manager.remove(failure.branch_session_id)
+			session_removed = True
+		except Exception as exc:  # noqa: BLE001
+			errors.append(f"session: {type(exc).__name__}: {exc}")
+		return ForkCleanupResult(
+			branch_run_id=failure.branch_run_id,
+			branch_session_id=failure.branch_session_id,
+			cleaned=checkpoint_removed and session_removed,
+			checkpoint_removed=checkpoint_removed,
+			session_removed=session_removed,
+			errors=tuple(errors),
+		)
 
 	async def resume(
 		self,
@@ -383,6 +484,52 @@ class Agent:
 			else:
 				await self._session_manager.clear()
 
+	async def rewind_session(self, session_id: str, *, before_run_id: str) -> RewindResult:
+		"""Restore a session to the history loaded before one run. 将会话恢复到某次运行开始前的历史。"""
+		if not isinstance(session_id, str) or not session_id.strip():
+			raise ValueError("session_id must be a nonempty string")
+		if not isinstance(before_run_id, str) or not before_run_id.strip():
+			raise ValueError("before_run_id must be a nonempty string")
+		history = await self._rewind_history(session_id, before_run_id)
+		if history is None:
+			raise ValueError("No rewind record for this run")
+		MessageStore.validate_history(history)
+		async with self._session_gate.reset(session_id):
+			for plugin in self._plugin_manager.plugins:
+				await plugin.on_session_rewind(self.registered_name, session_id, before_run_id)
+			previous = await self._session_manager.replace_history(session_id, history)
+		return RewindResult(max(0, previous - len(history)), len(history))
+
+	async def can_rewind(self, session_id: str, before_run_id: str) -> bool:
+		"""Report whether a run has a usable rewind record. 返回该运行是否有可用的回退记录。"""
+		if not session_id or not before_run_id or self._services.checkpoint_store is None:
+			return False
+		history = await self._rewind_history(session_id, before_run_id)
+		if history is None:
+			return False
+		try:
+			MessageStore.validate_history(history)
+		except ValueError:
+			return False
+		return True
+
+	async def _rewind_history(self, session_id: str, before_run_id: str) -> list[dict] | None:
+		"""Find the session history recorded when one run started. 查找某次运行开始时记录的会话历史。"""
+		store = self._services.checkpoint_store
+		if store is None:
+			return None
+		for checkpoint in await store.list(before_run_id):
+			state = checkpoint.state
+			if state.get("phase") != "start":
+				continue
+			meta = state.get("metadata", {})
+			if meta.get("session_id") != session_id or meta.get("agent_name") != self.registered_name:
+				continue
+			history = state.get("history_start")
+			if isinstance(history, list):
+				return history
+		return None
+
 	@asynccontextmanager
 	async def _slots(self, session_id: str) -> AsyncIterator[None]:
 		async with self._engine_limiter.slot(), self._agent_limiter.slot(), self._session_gate.slot(session_id):
@@ -445,6 +592,7 @@ class Agent:
 			if request.session_id:
 				session = await self._session_manager.get_or_create(request.session_id)
 				self._session_manager.restore_context(session, executor.message_store)
+				executor.mark_history_start(session.messages)
 			if processed.messages:
 				executor.message_store.extend(processed.messages)
 				executor.skip_user_init = True

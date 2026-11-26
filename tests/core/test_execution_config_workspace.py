@@ -28,7 +28,7 @@ class TestExecutionConfigWorkspace:
 	def test_all_config_defaults(self):
 		config = ExecutionConfig()
 		assert config.system_prompt == ""
-		assert config.max_rounds == 50
+		assert config.max_rounds == 500
 		assert config.stream is False
 		assert config.thinking == "auto"
 		assert config.parallel_tool_calls is True

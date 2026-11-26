@@ -116,6 +116,27 @@ The registry automatically adds the shared `enabled` field. Enabled plugins must
 工具必须返回 `ToolOutput`。非 `ToolOutput` 返回会被视为契约错误。
 Tools must return `ToolOutput`. Non-`ToolOutput` returns are treated as contract errors.
 
+For write tools (`is_read_only=False`), a returned `ToolOutput` is a known outcome,
+including `ToolOutput.error(...)`. The engine calls `after_write` when the tool
+returns, before post-tool hooks, and clears the write intent at the next applicable
+round/step or completed-run checkpoint. The result still reports failure to the model;
+a known failure does not block resume or fork through `unsettled_writes`.
+
+写工具（`is_read_only=False`）正常返回 `ToolOutput` 就表示结果已确定，包括
+`ToolOutput.error(...)`。引擎在工具返回后、后置 hook 前调用 `after_write`，并在后续适用的
+轮次、步骤或运行完成检查点清除写入意图。失败结果仍会告知模型，但不会因 `unsettled_writes` 阻止恢复或分叉。
+
+If a write tool rejects a request before making any change (for example, invalid
+arguments or a missing target Agent), it must return `ToolOutput.error(...)`
+rather than raise. An exception, timeout, cancellation, or process interruption
+before a valid result returns leaves the write outcome unknown and requires
+reconciliation before resume or fork. Do not convert an uncertain write into a
+normal failure result merely to bypass reconciliation.
+
+写工具在发生任何修改之前拒绝请求时（例如参数非法、目标 Agent 不存在），必须返回
+`ToolOutput.error(...)`，不要抛异常。执行中抛异常、超时、取消或进程中断，且尚未返回有效结果时，
+写入结果仍未知，必须核对后才能恢复或分叉。不要为绕过核对而将结果未知的写入转成正常失败结果。
+
 每个工具应定义 `name`、`description`、JSON-schema-like `parameters`、`is_read_only`、`capability`、`risk_level` 和 `timeout`。
 Every tool should define `name`, `description`, JSON-schema-like `parameters`, `is_read_only`, `capability`, `risk_level`, and `timeout`.
 

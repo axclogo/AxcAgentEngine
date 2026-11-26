@@ -54,6 +54,8 @@ class Capability(StrEnum):
 	HUMAN_APPROVAL = "human_approval"
 	KNOWLEDGE_SEARCH = "knowledge_search"
 	AGENT_CALL = "agent_call"
+	SESSION_READ = "session_read"
+	SESSION_OPERATE = "session_operate"
 
 
 # Tool definitions ── 工具定义 ──
@@ -172,7 +174,7 @@ class ConcurrencyRuntimeConfig(BaseModel):
 
 class RuntimeConfig(BaseModel):
 	strategy: str = ""
-	max_rounds: int = Field(default=50, ge=1, le=500)
+	max_rounds: int = Field(default=500, ge=1, le=100000)
 	thinking: str = Field(default="auto", pattern=r"^(auto|always|never)$")
 	parallel_tool_calls: bool = True
 	max_parallel_tool_calls: int = Field(default=DEFAULT_MAX_PARALLEL_TOOL_CALLS, ge=1, strict=True)

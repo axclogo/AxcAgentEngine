@@ -18,6 +18,8 @@ of OpenAI-compatible Chat Completions providers through a provider protocol.
 - Tool outputs must return `ToolOutput`.
 - Provider-owned tool-name mapping for model-safe function names.
 - Context compression, memory, knowledge, MCP, hooks, tracing, safety, and HITL plugins.
+- Session operations plugin for reading, messaging, stopping, and creating host-owned sessions.
+- Durable session fork with seeded history, rewind to a run start, and shared completion notices.
 - Sidecar multi-agent orchestration, simulation, evaluation, and AgentOps helpers.
 
 ## Open Source Files
@@ -27,6 +29,7 @@ of OpenAI-compatible Chat Completions providers through a provider protocol.
 - Contributing guide: `CONTRIBUTING.md`
 - API docs: `docs/API.md`
 - Plugin docs: `docs/PLUGIN_DEVELOPMENT.md`
+- Session operations: `docs/SESSIONS.md`
 - Security model: `docs/SECURITY_MODEL.md`
 - Release checklist: `docs/RELEASE_CHECKLIST.md`
 - Examples: `examples/README.md`

@@ -22,7 +22,7 @@ test-core-cov:
 		--cov=axc_agent_engine.plugins.strategy_selection \
 		--cov=axc_agent_engine.plugins.strategies \
 		--cov-report=term-missing:skip-covered \
-		--cov-fail-under=98 -q
+		--cov-fail-under=98 --cov-precision=2 -q
 
 lint:
 	$(PYTHON) -m ruff check axc_agent_engine tests examples

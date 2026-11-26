@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import time
 from collections import OrderedDict
+from copy import deepcopy
 from typing import TYPE_CHECKING, Any
 from uuid import NAMESPACE_URL, uuid5
 
@@ -98,6 +99,37 @@ class SessionManager:
 			entry = self._sessions.get(session_id)
 			if entry:
 				await self._persistence.save(self._scope_id, session_id, entry.session.messages)
+
+	async def replace_history(self, session_id: str, messages: list[dict[str, Any]]) -> int:
+		"""Replace a session history in cache and persistence. 同时替换缓存与持久化中的会话历史。
+
+		Returns the previous message count. The persistence write completes before the
+		cache changes, so a storage failure leaves the old history intact.
+		返回旧消息数；持久化成功后才更新缓存，存储失败时旧历史保持不变。"""
+		if not isinstance(session_id, str) or not session_id.strip():
+			raise ValueError("session_id must be a nonempty string")
+		if not isinstance(messages, list) or not all(isinstance(message, dict) for message in messages):
+			raise ValueError("session history must be a list of dicts")
+		async with self._lock:
+			entry = self._sessions.get(session_id)
+			if entry is not None:
+				previous = entry.session.messages
+			elif self._persistence:
+				previous = await self._persistence.load(self._scope_id, session_id) or []
+			else:
+				previous = []
+			if self._persistence:
+				await self._persistence.save(self._scope_id, session_id, messages)
+			session = entry.session if entry else Session(session_id=session_id)
+			session.messages = deepcopy(messages)
+			if entry is None:
+				self._sessions[session_id] = _SessionEntry(session=session, last_access=time.time())
+				if len(self._sessions) > self._max_sessions:
+					self._sessions.popitem(last=False)
+			else:
+				entry.last_access = time.time()
+				self._sessions.move_to_end(session_id)
+			return len(previous)
 
 	async def remove(self, session_id: str) -> None:
 		"""Remove the named session.

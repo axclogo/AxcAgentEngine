@@ -188,14 +188,15 @@ async def _execute_single_runtime(
 				message=str(e),
 				category=ErrorCategory.CONTRACT,
 			)
-		if result.output:
+		if result.output is not None:
+			# Returned failures are known outcomes too. 正常返回的失败结果也属于已确定结果。
+			if ctx.runtime.after_write and not runtime.tool_def.is_read_only:
+				ctx.runtime.after_write(runtime.tool_call_id)
 			ctx.check_cancelled()
 			result.output = await plugin_manager.apply_post_tool_call(
 				ctx, runtime.name, runtime.arguments, result.output, result.duration_ms
 			)
 		if result.success:
-			if ctx.runtime.after_write and not runtime.tool_def.is_read_only:
-				ctx.runtime.after_write(runtime.tool_call_id)
 			await audit_runtime(ctx, runtime, AuditEventType.TOOL_CALL_COMPLETED, duration_ms=result.duration_ms)
 			return result
 		return await _fail_tool_call(

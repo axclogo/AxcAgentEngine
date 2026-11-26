@@ -28,7 +28,7 @@ class ExecutionConfig:
 	"""Immutable configuration for one run. 单次执行的不可变配置。"""
 
 	system_prompt: str = ""
-	max_rounds: int = 50
+	max_rounds: int = 500
 	stream: bool = False
 	thinking: str = "auto"
 	parallel_tool_calls: bool = True

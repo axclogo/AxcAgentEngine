@@ -81,7 +81,7 @@ reranking; the host owns any external client lifecycle.
 ## POR (Plan-Observe-Replan)
 
 The official POR plugin supports `plugins.por.mode` values `por_first` (default) and `auto`.
-New hosts register a strategy plugin and enable it in YAML. Only templates without a named or enabled strategy use `runtime.routing.mode` to select one of those same official implementations:
+New hosts register a strategy plugin and enable it in YAML. Only templates without a named or enabled strategy use the routing policy `runtime.routing.mode` to select one of those same official implementations:
 - `runtime.routing.mode: auto` — detect structured plan JSON in LLM response content
 - `runtime.routing.mode: por_first` — generate a plan before the first ReAct round
 - `runtime.routing.mode: react_only` — never enter POR, pure ReAct
@@ -198,6 +198,10 @@ Memory and Burr share the transitions used for run, pause, resume and terminal e
 
 A completed execution checkpoint contains the final reply. Resuming it with no pending input returns that reply after ownership and strategy validation. The replay leaves the checkpoint and any newer session history intact. New input starts another loop from the saved conversation. An interrupted snapshot with missing tool results stops before a model request and reports the outstanding call IDs.
 
+`Agent.rewind_session(session_id, before_run_id=...)` restores the history that was loaded when that run started. The start checkpoint records that history, so the record survives restart with a durable store. The call holds the same session reset gate as `reset_session`, calls `on_session_rewind` before rewriting history, and leaves checkpoints in place. `Agent.can_rewind` reports whether the record exists and is valid. Cuts at or after the rewound run become semantically invalid; the host stops offering them.
+
+A checkpoint without an owner record may only be forked or resumed by a caller that supplies no `tenant_id` or `user_id`. Identity-bearing callers receive an explicit missing-owner error; a different owner receives an identity-mismatch error. The engine provides no migration for old ownerless cuts.
+
 ### Run-local control
 
 Each executor owns one FIFO inbox, message history and checkpoint writer. Input admission, consumption, plan revision and tool-write intent share the writer lock. A running POR graph publishes plan and step progress to its consumer. Closing the stream joins the graph and its outstanding step tasks. A dispatched agent has a separate run and checkpoint ID, with cancellation linked to its active parent. This permits independent recovery and keeps child receipts out of the parent inbox.
@@ -209,8 +213,9 @@ The in-memory message bus keeps agent inbox subscriptions open while idle. Hosts
 ## Execution forks
 
 A host selects a retained checkpoint with `cp.forkable` from its own `CheckpointStore.list(run_id)`. A rejected position exposes its reason in `cp.fork_blocker`.
-`await agent.fork_run(run_id, cp.id, metadata=identity)` checks the exact cut and saves a single independent checkpoint.
-The returned `ForkedRun` contains fresh run and session IDs. The source may still be running.
+`await agent.fork_run(run_id, cp.id, metadata=identity)` checks the exact cut, saves a single independent checkpoint, and writes the cut's messages into the new session history. The returned `ForkedRun` contains fresh run and session IDs. The source may still be running.
+
+Fork publication uses compensating cleanup, not a cross-store transaction. If the checkpoint write fails, no session history is written. If the session write fails (including cancellation), the engine removes the new checkpoint and the branch session. The checkpoint store and message persistence have no shared transaction; when cleanup itself fails, the original exception is re-raised with an attached `ForkFailure`. The host then calls `Agent.discard_fork(failure)` after storage recovers; that call is idempotent, removes only the branch IDs, and never touches the source run. A process crash between the two writes can leave one side. The engine cannot return a `ForkFailure` after process loss; the host must discover the orphan from its checkpoint and session stores.
 Resume the child through `agent.resume_stream(child.run_id, message, metadata=identity)`.
 The source can be deleted after creation. Every later child checkpoint records the immediate source run and cut in
 `metadata["forked_from"]`. A child can be forked by the same operation.

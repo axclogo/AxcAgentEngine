@@ -609,7 +609,12 @@ POST_PROCESS_CONFIG_SCHEMA = config_schema(
 	"在最终输出校验前追加本次执行的统计信息。",
 	[
 		config_field(
-			"append_stats", "追加统计", "boolean", "追加轮次与输入、输出 token 数。", label_en="Append stats", default=False
+			"append_stats",
+			"追加统计",
+			"boolean",
+			"追加轮次与输入、输出 token 数。",
+			label_en="Append stats",
+			default=False,
 		),
 	],
 	display_name_en="Post-process",
@@ -1083,4 +1088,86 @@ SKILL_CONFIG_SCHEMA = config_schema(
 		),
 	],
 	display_name_en="Skill",
+)
+
+
+SESSIONS_CONFIG_SCHEMA = config_schema(
+	"sessions",
+	"会话操作",
+	"让 Agent 读取、发送、停止和新建宿主会话。",
+	[
+		config_field(
+			"allow_create",
+			"允许新建会话",
+			"boolean",
+			"是否允许新建会话。",
+			label_en="Allow create",
+			default=True,
+		),
+		config_field(
+			"allow_operate",
+			"允许操作会话",
+			"boolean",
+			"是否允许发消息和停止运行；关闭时只能读取。",
+			label_en="Allow operate",
+			default=True,
+		),
+		config_field(
+			"cross_agent",
+			"允许跨 Agent",
+			"boolean",
+			"是否允许访问其他 Agent 的会话。",
+			label_en="Cross agent",
+			default=True,
+		),
+		config_field(
+			"max_depth",
+			"最大派活层数",
+			"integer",
+			"会话之间派活的最大嵌套层数。",
+			label_en="Max depth",
+			default=3,
+		),
+		config_field(
+			"max_active",
+			"最大同时派活",
+			"integer",
+			"一个会话同时派给多少个会话运行；由宿主原子校验。",
+			label_en="Max active",
+			default=16,
+		),
+		config_field(
+			"wait_timeout",
+			"等待超时",
+			"integer",
+			"session_wait 默认及最长等待秒数。",
+			label_en="Wait timeout",
+			default=30,
+		),
+		config_field(
+			"read_limit",
+			"读取条数上限",
+			"integer",
+			"session_read 单次最多读取的消息条数。",
+			label_en="Read limit",
+			default=50,
+		),
+		config_field(
+			"read_max_chars",
+			"读取字符上限",
+			"integer",
+			"session_read 单次返回的最大字符数。",
+			label_en="Read max chars",
+			default=20_000,
+		),
+		config_field(
+			"max_wakeups",
+			"自动唤醒上限",
+			"integer",
+			"发起方因完成通知自动唤醒的最大次数；0 表示不限制。",
+			label_en="Max wakeups",
+			default=100,
+		),
+	],
+	display_name_en="Session operations",
 )

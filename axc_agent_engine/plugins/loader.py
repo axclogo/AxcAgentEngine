@@ -5,7 +5,7 @@ import logging
 from collections.abc import Iterator
 from contextlib import contextmanager
 
-from axc_agent_engine.core.errors import PluginInitError
+from axc_agent_engine.core.errors import ConfigValueError, PluginInitError
 from axc_agent_engine.plugins.base import BasePlugin
 from axc_agent_engine.plugins.config_schema import normalize_plugin_config_schema, validate_plugin_config
 from axc_agent_engine.plugins.context import PluginContext
@@ -25,6 +25,8 @@ def _prepare(configs: dict[str, dict], registry: PluginRegistry) -> list[BasePlu
 				plugin.config_schema, plugin_name=name, display_name=plugin.display_name
 			)
 			validate_plugin_config(name, config, schema)
+		except ConfigValueError:
+			raise
 		except ValueError as exc:
 			raise PluginInitError(f"Plugin {name} config validation failed: {exc}") from exc
 		if config.get("enabled", False):
@@ -61,6 +63,8 @@ def initialized_plugins(
 			started.append(plugin)
 			try:
 				plugin.initialize(configs[plugin.name], ctx)
+			except ConfigValueError:
+				raise
 			except Exception as exc:
 				raise PluginInitError(f"Plugin {plugin.name} initialization failed: {exc}") from exc
 		yield plugins

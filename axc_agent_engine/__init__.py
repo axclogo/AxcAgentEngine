@@ -5,6 +5,7 @@ from axc_agent_engine.agent import Agent
 from axc_agent_engine.core.errors import ErrorCategory, ErrorEnvelope
 from axc_agent_engine.core.events import Event, EventType
 from axc_agent_engine.core.schema import Capability, LLMMessage, LLMResponse, LLMStreamChunk, LLMUsage, ToolDefinition
+from axc_agent_engine.core.session import RewindResult
 from axc_agent_engine.engine import AgentModels, AgentTemplate, Engine
 from axc_agent_engine.llm.config import LLMConfig
 from axc_agent_engine.observability.audit import AuditEvent, AuditEventType, InMemoryAuditSink
@@ -14,8 +15,11 @@ from axc_agent_engine.runtime.checkpoint import (
 	Checkpoint,
 	CheckpointStatus,
 	CheckpointStore,
+	ForkCleanupResult,
 	ForkedRun,
+	ForkFailure,
 	InMemoryCheckpointStore,
+	fork_failure_of,
 )
 from axc_agent_engine.runtime.concurrency import ConcurrencyConfig, ExecutionLimiter, RateLimiter, SessionExecutionGate
 from axc_agent_engine.runtime.input import InputProvider, InputProviderResult, PassthroughInputProvider
@@ -53,6 +57,8 @@ __all__ = [
 	"Event",
 	"EventType",
 	"ExecutionLimiter",
+	"ForkCleanupResult",
+	"ForkFailure",
 	"ForkedRun",
 	"InMemoryArtifactStore",
 	"InMemoryAuditSink",
@@ -74,9 +80,11 @@ __all__ = [
 	"ResourceNotFoundError",
 	"ResourceRegistry",
 	"ResourceTypeError",
+	"RewindResult",
 	"SessionExecutionGate",
 	"ToolDefinition",
 	"ToolOutput",
 	"__version__",
+	"fork_failure_of",
 	"tool",
 ]

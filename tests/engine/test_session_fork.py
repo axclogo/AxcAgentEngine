@@ -28,7 +28,7 @@ async def test_historical_fork_restarts_without_ancestors_or_replayed_input(tmp_
 		await agent.resume("r", "second", metadata=owner)
 		before = [cp.to_dict() for cp in await store.list("r")]
 		for invalid in ({}, {"tenant_id": "b", "user_id": "user"}):
-			with pytest.raises(ValueError, match="another agent, tenant or user"):
+			with pytest.raises(ValueError, match="another tenant or user"):
 				await agent.fork_run("r", first.id, metadata=invalid)
 		branch = await agent.fork_run("r", first.id, metadata=owner)
 		child = await store.latest(branch.run_id)

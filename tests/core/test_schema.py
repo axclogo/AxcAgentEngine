@@ -134,7 +134,7 @@ class TestLLMStreamChunk:
 class TestRuntimeConfig:
 	def test_defaults(self):
 		rc = RuntimeConfig()
-		assert rc.max_rounds == 50
+		assert rc.max_rounds == 500
 		assert rc.thinking == "auto"
 		assert rc.parallel_tool_calls is True
 		assert rc.human_in_the_loop is False
@@ -143,6 +143,9 @@ class TestRuntimeConfig:
 	def test_validation(self):
 		with pytest.raises(ValidationError):
 			RuntimeConfig(max_rounds=0)  # ge=1
+		assert RuntimeConfig(max_rounds=100000).max_rounds == 100000
+		with pytest.raises(ValidationError):
+			RuntimeConfig(max_rounds=100001)
 		with pytest.raises(ValidationError):
 			RuntimeConfig(thinking="invalid")  # pattern mismatch
 		with pytest.raises(ValidationError):

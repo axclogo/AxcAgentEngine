@@ -80,6 +80,44 @@ class ForkedRun:
 	session_id: str
 
 
+@dataclass(frozen=True)
+class ForkFailure:
+	"""Structured identifiers for a failed fork. 失败分叉的结构化定位信息。"""
+
+	branch_run_id: str
+	branch_session_id: str
+	source_run_id: str
+	source_checkpoint_id: str
+	cause: str
+	rollback_error: str = ""
+	checkpoint_written: bool | None = None
+	session_written: bool | None = None
+	cleaned: bool = False
+
+
+@dataclass(frozen=True)
+class ForkCleanupResult:
+	"""Outcome of cleaning a failed fork. 清理失败分叉的结果。"""
+
+	branch_run_id: str
+	branch_session_id: str
+	cleaned: bool
+	checkpoint_removed: bool
+	session_removed: bool
+	errors: tuple[str, ...] = ()
+
+
+def attach_fork_failure(error: BaseException, failure: ForkFailure) -> None:
+	"""Attach structured fork context to the original exception. 把结构化分叉信息附到原始异常上。"""
+	error.fork_failure = failure  # type: ignore[attr-defined]
+
+
+def fork_failure_of(error: BaseException) -> ForkFailure | None:
+	"""Read structured fork context from an exception. 从异常读取结构化分叉信息。"""
+	value = getattr(error, "fork_failure", None)
+	return value if isinstance(value, ForkFailure) else None
+
+
 @runtime_checkable
 class CheckpointStore(Protocol):
 	"""Stores durable execution checkpoints. 持久化执行检查点的存储接口。"""

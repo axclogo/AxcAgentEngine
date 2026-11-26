@@ -31,3 +31,11 @@ class Session:
 			messages=deepcopy(data.get("messages", [])),
 			metadata=deepcopy(data.get("metadata", {})),
 		)
+
+
+@dataclass(frozen=True)
+class RewindResult:
+	"""Outcome of restoring a session before one run. 回退到某次运行前的结果。"""
+
+	removed_messages: int
+	kept_messages: int

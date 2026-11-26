@@ -1,4 +1,4 @@
-# Release checklist · 3.1.0rc1
+# Release checklist · 3.3.2
 
 本清单用于候选包的本地验收。发布标签、上传包和用户验收单独记录。
 

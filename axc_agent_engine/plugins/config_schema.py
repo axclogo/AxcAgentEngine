@@ -218,10 +218,10 @@ def _validate_value(value: Any, field: PluginConfigField, path: str) -> None:
 		_require_type(value, str, path, "string")
 	elif field.type == "integer":
 		if isinstance(value, bool) or not isinstance(value, int):
-			raise ValueError(f"Config field {path} must be an integer")
+			raise ConfigValueError(f"Config field {path} must be an integer")
 	elif field.type == "number":
 		if isinstance(value, bool) or not isinstance(value, (int, float)):
-			raise ValueError(f"Config field {path} must be a number")
+			raise ConfigValueError(f"Config field {path} must be a number")
 	elif field.type == "boolean":
 		_require_type(value, bool, path, "boolean")
 	elif field.type == "object":
@@ -230,7 +230,7 @@ def _validate_value(value: Any, field: PluginConfigField, path: str) -> None:
 			_validate_object(value, field.children, path)
 	elif field.type == "array":
 		if not isinstance(value, list):
-			raise ValueError(f"Config field {path} must be an array")
+			raise ConfigValueError(f"Config field {path} must be an array")
 		if field.item_schema:
 			for idx, item in enumerate(value):
 				_validate_value(item, field.item_schema, f"{path}[{idx}]")

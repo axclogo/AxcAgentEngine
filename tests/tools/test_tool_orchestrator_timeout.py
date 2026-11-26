@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 
+import pytest
+
 from axc_agent_engine.core.context import ExecutionConfig, ExecutionContext, ExecutionServices
 from axc_agent_engine.core.schema import ToolDefinition
 from axc_agent_engine.observability.audit import AuditEventType, InMemoryAuditSink
@@ -19,6 +21,24 @@ class HangingPostHookPlugin(BasePlugin):
 	async def post_tool_call(self, exec_ctx, tool_name, arguments, result, duration_ms):
 		await asyncio.sleep(10)
 		return result
+
+
+@pytest.mark.parametrize("is_error", [False, True])
+async def test_returned_write_is_settled_before_post_hook_timeout(is_error):
+	async def write(args, ctx):
+		return ToolOutput.error("rejected") if is_error else ToolOutput.text("written")
+
+	registry = ToolRegistry()
+	registry.register(ToolDefinition(name="write", execute=write, is_read_only=False))
+	ctx = ExecutionContext(config=ExecutionConfig(step_timeout=0.02))
+	settled = []
+	ctx.runtime.after_write = settled.append
+	results = await execute_tool_calls(
+		[{"name": "write", "arguments": {}, "id": "write-1"}], registry, [HangingPostHookPlugin()], ctx
+	)
+	assert not results[0].success
+	assert "timeout" in results[0].error.lower()
+	assert settled == ["write-1"]
 
 
 async def test_step_timeout_bounds_entire_tool_orchestration():

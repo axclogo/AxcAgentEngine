@@ -54,12 +54,22 @@ class MessageStore:
 		pending: set[str] = set()
 		for message in messages:
 			if message.get("role") == "tool":
-				pending.discard(message.get("tool_call_id", ""))
+				call_id = message.get("tool_call_id", "")
+				if not isinstance(call_id, str):
+					raise ValueError("Invalid checkpoint tool_call_id")
+				pending.discard(call_id)
 				continue
 			if pending:
 				break
 			if message.get("role") == "assistant":
-				pending = {call["id"] for call in message.get("tool_calls") or []}
+				calls = message.get("tool_calls")
+				if calls is None:
+					calls = []
+				if not isinstance(calls, list) or not all(
+					isinstance(call, dict) and isinstance(call.get("id"), str) and call["id"] for call in calls
+				):
+					raise ValueError("Invalid checkpoint assistant tool_calls")
+				pending = {call["id"] for call in calls}
 		if pending:
 			raise ValueError(f"Missing tool results in checkpoint. Reconcile before resume: {sorted(pending)}")
 

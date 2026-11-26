@@ -17,7 +17,7 @@ from axc_agent_engine.core.input_messages import extract_last_user_message
 from axc_agent_engine.core.llm_caller import LLMCaller
 from axc_agent_engine.core.message_store import MessageStore
 from axc_agent_engine.core.plugin_manager import PluginManager
-from axc_agent_engine.core.run_context import checkpoint_owner
+from axc_agent_engine.core.run_context import checkpoint_owner_conflict
 from axc_agent_engine.plugins.strategy import (
 	ExecutionLoop,
 	ExecutionStrategyPlugin,
@@ -69,6 +69,7 @@ class Executor:
 			ctx.runtime.after_write = self._settled.add
 		self._restored_from_checkpoint = False
 		self.skip_user_init: bool = False
+		self._history_start: list[dict] | None = None
 
 	@cached_property
 	def _loop(self) -> ExecutionLoop:
@@ -77,6 +78,10 @@ class Executor:
 	@property
 	def message_store(self) -> MessageStore:
 		return self._messages
+
+	def mark_history_start(self, messages: list[dict]) -> None:
+		"""Record the session history loaded before this run. 记录本次运行开始前载入的会话历史。"""
+		self._history_start = deepcopy(messages)
 
 	def load_resume_snapshot(
 		self,
@@ -123,10 +128,16 @@ class Executor:
 			raise TypeError("Invalid checkpoint metadata")
 		owner = snapshot.get("owner", {})
 		supplied = {**self._ctx.state.metadata, **resume_metadata}
-		if snapshot.get("forked_from") and owner != checkpoint_owner(supplied):
-			raise ValueError("Branch requires the original tenant and user")
-		if any(key in supplied and supplied[key] != value for key, value in owner.items()):
-			raise ValueError("Checkpoint belongs to another tenant or user. Supply original resume metadata")
+		if snapshot.get("forked_from"):
+			branch_conflict = checkpoint_owner_conflict(owner, supplied, exact=True)
+			if branch_conflict:
+				if branch_conflict.startswith("Checkpoint has no owner"):
+					raise ValueError(branch_conflict)
+				raise ValueError("Branch requires the original tenant and user")
+		if conflict := checkpoint_owner_conflict(owner, supplied):
+			if conflict.startswith("Checkpoint belongs"):
+				conflict = f"{conflict}. Supply original resume metadata"
+			raise ValueError(conflict)
 		scopes = snapshot.get("plugin_scopes", {})
 		if snapshot.get("forked_from"):
 			identity = {**supplied, **metadata}
@@ -283,7 +294,10 @@ class Executor:
 		await self._lifecycle.start()
 		if not restoring:
 			self._messages.upsert_plugin_context(self._pm.collect_context(self._ctx))
-		await self._save_checkpoint("execution", CheckpointStatus.RUNNING, {"phase": "start"})
+		start_fields: dict = {"phase": "start"}
+		if self._history_start is not None:
+			start_fields["history_start"] = deepcopy(self._history_start)
+		await self._save_checkpoint("execution", CheckpointStatus.RUNNING, start_fields)
 
 	async def _save_strategy_checkpoint(self, kind: str, status: CheckpointStatus, fields: dict | None) -> None:
 		fields = fields or {}

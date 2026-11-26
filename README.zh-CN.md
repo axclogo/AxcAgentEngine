@@ -85,6 +85,7 @@ await engine.close()
 - **运行时绑定** —— 模型、挂载资源、请求 metadata、YAML overrides 分通道传入
 - **MCP** —— stdio、JSON-RPC HTTP、官方 SDK transport
 - **人工介入** —— 审批队列、`ask_human` 工具
+- **会话操作** —— 通过 `plugins.sessions` 读取、发消息、停止和新建宿主会话
 - **Sidecar 套件** —— 多 Agent、仿真、评测、成本统计、失败挖掘、轨迹蒸馏
 
 <details>
@@ -117,6 +118,7 @@ await engine.close()
 | [架构](docs/ARCHITECTURE.md) | 引擎与插件边界 |
 | [API](docs/API.md) | HTTP API 子集说明 |
 | [插件开发](docs/PLUGIN_DEVELOPMENT.md) | 写自己的插件 |
+| [会话操作](docs/SESSIONS.md) | 宿主会话工具 |
 | [安全模型](docs/SECURITY_MODEL.md) | 能力、风险、workspace |
 | [示例](examples/README.md) | 7 个端到端 demo |
 | [贡献](CONTRIBUTING.md) · [安全](SECURITY.md) · [LICENSE](LICENSE) | Apache-2.0 |
@@ -129,7 +131,7 @@ description: "Data analysis assistant"
 
 runtime:
   strategy: por
-  max_rounds: 50
+  max_rounds: 500
   thinking: "auto"
   workspace: "/tmp/agent-workspace"
   allowed_capabilities:
@@ -399,6 +401,7 @@ agent = engine.load_agent_template("./agents/my_agent.yaml").instantiate(models=
 | `repetition_guard` | 重复工具调用/回复/结果检测 |
 | `cost_statistics` | 输入、输出 token 统计 |
 | `collaboration` | Agent 间调用和宿主编排薄入口 |
+| `sessions` | 读取、发消息、停止和新建宿主会话 |
 | `swarm` | 轻量并行 fan-out |
 
 ### 工程任务工具

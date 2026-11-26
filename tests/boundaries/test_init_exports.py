@@ -43,6 +43,9 @@ class TestMinimalExports:
 			"Checkpoint",
 			"CheckpointStatus",
 			"CheckpointStore",
+			"ForkCleanupResult",
+			"ForkFailure",
+			"ForkedRun",
 			"InMemoryCheckpointStore",
 			"CapabilityPolicyEvaluator",
 			"PolicyDecision",
@@ -55,9 +58,11 @@ class TestMinimalExports:
 			"ResourceError",
 			"ResourceNotFoundError",
 			"ResourceTypeError",
+			"RewindResult",
 			"DuplicateResourceError",
 			"PluginRegistry",
 			"__version__",
+			"fork_failure_of",
 		}
 		assert set(axc_agent_engine.__all__) == expected
 

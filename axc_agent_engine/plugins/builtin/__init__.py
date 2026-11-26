@@ -22,6 +22,7 @@ from axc_agent_engine.plugins.builtin.registry import AVAILABLE_BUILTIN_PLUGINS
 from axc_agent_engine.plugins.builtin.repetition_guard.plugin import RepetitionGuardPlugin
 from axc_agent_engine.plugins.builtin.risk_guard.plugin import RiskGuardPlugin
 from axc_agent_engine.plugins.builtin.safety.plugin import SafetyPlugin
+from axc_agent_engine.plugins.builtin.sessions.plugin import SessionsPlugin
 from axc_agent_engine.plugins.builtin.skill.plugin import SkillPlugin
 from axc_agent_engine.plugins.builtin.swarm.plugin import SwarmPlugin
 from axc_agent_engine.plugins.builtin.tracing.plugin import TracingPlugin
@@ -48,6 +49,7 @@ __all__ = [
 	"RepetitionGuardPlugin",
 	"RiskGuardPlugin",
 	"SafetyPlugin",
+	"SessionsPlugin",
 	"SkillPlugin",
 	"SwarmPlugin",
 	"TracingPlugin",

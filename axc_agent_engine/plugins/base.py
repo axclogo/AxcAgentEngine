@@ -85,6 +85,9 @@ class BasePlugin:
 	async def on_session_reset(self, agent_name: str, session_id: str) -> None:
 		"""Drop session state. An empty ID covers all sessions of this agent. 清理会话状态，空 ID 表示当前 Agent 的全部会话。"""
 
+	async def on_session_rewind(self, agent_name: str, session_id: str, before_run_id: str) -> None:
+		"""Run before history is rewritten. 在历史改写前调用。"""
+
 	async def on_execution_start(self, exec_ctx: ExecutionContext) -> None:
 		pass
 

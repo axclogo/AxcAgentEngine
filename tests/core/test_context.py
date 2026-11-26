@@ -10,7 +10,7 @@ from axc_agent_engine.core.context import ExecutionConfig, ExecutionContext, Exe
 class TestExecutionConfig:
 	def test_defaults(self):
 		cfg = ExecutionConfig()
-		assert cfg.max_rounds == 50
+		assert cfg.max_rounds == 500
 		assert cfg.stream is False
 		assert cfg.thinking == "auto"
 		assert cfg.parallel_tool_calls is True

@@ -106,3 +106,33 @@ curl http://localhost:8000/v1/capabilities
 ```
 
 Clients should inspect this route before assuming full OpenAI API parity.
+
+## Runtime defaults
+
+`runtime.max_rounds` defaults to **500** and accepts integers from 1 to
+100000. The sessions plugin defaults are `max_depth=3`, `max_active=16`, and
+`max_wakeups=100`; their accepted ranges are 1–20, 1–256, and 0–100000.
+Out-of-range values fail Agent loading with `ConfigValueError`.
+
+## SDK-only session lifecycle
+
+The HTTP subset does not expose session fork or rewind. Python hosts use:
+
+```python
+branch = await agent.fork_run(run_id, checkpoint_id, metadata=identity)
+await agent.rewind_session(session_id, before_run_id=run_id)
+if await agent.can_rewind(session_id, run_id):
+    ...
+```
+
+`fork_run` seeds the new session history from the selected cut. A failed fork
+re-raises the original error with a `ForkFailure` attached; call
+`fork_failure_of(error)` and then `await agent.discard_fork(failure)` after the
+stores recover. Cleanup is idempotent and only removes the branch run/session.
+`rewind_session` holds the session reset gate, calls `on_session_rewind` before
+rewriting history, and does not delete checkpoints. Host metadata such as
+`session_provenance` is not carried by the engine checkpoint; supply it on every
+later `stream`, `resume_stream`, and `fork_run` call. A checkpoint without an
+owner record can only be used by a caller without `tenant_id`/`user_id`; no
+owner migration is provided. See [SESSIONS.md](SESSIONS.md) and
+[ARCHITECTURE.md](ARCHITECTURE.md).

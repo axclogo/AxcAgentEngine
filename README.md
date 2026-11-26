@@ -84,6 +84,7 @@ Examples 01–07 register `PORPlugin`, enable `plugins.por`, and set `runtime.st
 - **Runtime binding** - models, mounted resources, request metadata, and YAML overrides stay in separate channels
 - **MCP** - stdio, JSON-RPC HTTP, official SDK transports
 - **Human-in-the-loop** - approval queue and `ask_human` tool
+- **Session operations** - read, message, stop, and create host-owned sessions through `plugins.sessions`
 - **Sidecar suite** - multi-agent, simulation, eval, cost, failure mining, trace distillation
 
 <details>
@@ -116,6 +117,7 @@ Examples 01–07 register `PORPlugin`, enable `plugins.por`, and set `runtime.st
 | [Architecture](docs/ARCHITECTURE.md) | Engine and plugin boundaries |
 | [API](docs/API.md) | HTTP API subset notes |
 | [Plugin development](docs/PLUGIN_DEVELOPMENT.md) | Build your own plugin |
+| [Session operations](docs/SESSIONS.md) | Host-owned session tools |
 | [Security model](docs/SECURITY_MODEL.md) | Capabilities, risk, workspace |
 | [Examples](examples/README.md) | 7 end-to-end demos |
 | [Contributing](CONTRIBUTING.md) / [Security](SECURITY.md) / [LICENSE](LICENSE) | Apache-2.0 |
@@ -128,7 +130,7 @@ description: "Data analysis assistant"
 
 runtime:
   strategy: por
-  max_rounds: 50
+  max_rounds: 500
   thinking: "auto"
   workspace: "/tmp/agent-workspace"
   allowed_capabilities:
@@ -397,6 +399,7 @@ agent = engine.load_agent_template("./agents/my_agent.yaml").instantiate(models=
 | `repetition_guard` | Repeated tool / response / result detection |
 | `cost_statistics` | Input and output token accounting |
 | `collaboration` | Agent-to-agent calls and host orchestration entry |
+| `sessions` | Read, message, stop, and create host-owned sessions |
 | `swarm` | Lightweight parallel fan-out |
 
 ### Engineering tools

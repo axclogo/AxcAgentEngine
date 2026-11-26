@@ -2,6 +2,69 @@
 
 All notable changes to AxcAgentEngine are documented in this file.
 
+## 3.3.2
+
+### Fixed
+
+- Settle write tools whenever they return a `ToolOutput`, including
+  `ToolOutput.error`, so a known failure no longer blocks later resume or fork.
+  Exceptions, timeouts, cancellation, and interrupted writes without a returned
+  outcome still require reconciliation.
+- Document that write tools must return failure results for rejected arguments
+  or missing targets detected before writing, rather than raising exceptions.
+
+## 3.3.1
+
+### Changed
+
+- Completion notices now count every delivered notice as one wakeup, including
+  `inject` into a running caller. A running caller at `max_wakeups` returns
+  `hold` instead of `inject`; the host writes the notice but does not deliver it
+  or start a turn.
+- Raise long-task defaults and bounds: `runtime.max_rounds` 500 / 1–100000,
+  `sessions.max_wakeups` 100 / 0–100000, `sessions.max_active` 16 / 1–256,
+  and `sessions.max_depth` 3 / 1–20.
+
+## 3.3.0
+
+### Added
+
+- `Agent.fork_run` writes the selected cut's messages into the new session
+  history, including system, `tool_calls`, and `tool` messages.
+- `Agent.rewind_session` and `Agent.can_rewind` restore a session to the history
+  loaded before a run; start checkpoints retain that history across restarts.
+  Add the `on_session_rewind` plugin hook.
+- Add `plugins.builtin.sessions.notices` with `notice_id`, `format_notice`,
+  `decide`, `NOTICE_STATUSES`, and `CALLER_STATES`.
+- Add `max_wakeups` to the sessions plugin and `turn_origin` to `SessionCaller`.
+- Add `SessionInfo.scope` and show it in the session list text.
+
+### Changed
+
+- Session tools now reject any ancestor target for read, watch, send, and stop
+  before authorization, and remove self/ancestors from `session_list`.
+- Fork and resume distinguish a missing checkpoint owner from an owner mismatch.
+  Checkpoints without an owner record require an identity-less caller; no owner
+  migration is provided. Branch resume reports a missing owner record separately
+  from a different owner.
+- Harden fork rollback on cancellation and session-write failure, validate
+  assistant `tool_calls` and tool `tool_call_id` structure before history restore, and propagate
+  `ConfigValueError` from plugin configuration through Agent loading. Failed
+  cleanup exposes `ForkFailure` and `Agent.discard_fork` for idempotent recovery.
+- Require explicit `turn_origin` values to be `user` or `notice`; only an absent
+  field defaults to `user`.
+
+## 3.2.0
+
+### Added
+
+- Add the `sessions` plugin: `session_list`, `session_read`, `session_send`,
+  `session_stop`, `session_create`, `session_watch`, and `session_wait` over a
+  host-mounted `sessions.service`.
+- Add `session_read` and `session_operate` capabilities.
+- Add `docs/SESSIONS.md` with the host service contract, provenance, completion
+  notices, and authorization rules.
+
 ## 3.1.0rc1
 
 - Add opt-in ripgrep workspace search and content-version checks for file changes. Exact edits preserve unmatched bytes.

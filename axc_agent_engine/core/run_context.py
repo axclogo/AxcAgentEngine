@@ -30,6 +30,28 @@ def checkpoint_owner(metadata: dict) -> dict:
 	return {key: metadata[key] for key in ("tenant_id", "user_id") if key in metadata}
 
 
+def checkpoint_owner_conflict(owner: dict, metadata: dict, *, exact: bool = False) -> str:
+	"""Explain an owner mismatch before fork or resume. 在分叉或恢复前说明归属冲突。
+
+	Returns an empty string when the caller may use the checkpoint.
+	调用方可以使用切点时返回空字符串。"""
+	if not isinstance(owner, dict):
+		raise TypeError("Checkpoint owner must be a dict")
+	supplied = {key: value for key, value in checkpoint_owner(metadata).items() if value not in ("", None)}
+	saved = {key: value for key, value in owner.items() if value not in ("", None)}
+	if not saved:
+		if supplied:
+			return "Checkpoint has no owner record; retry without tenant or user identity"
+		return ""
+	if (
+		(saved != supplied)
+		if exact
+		else any(key in supplied and supplied[key] != value for key, value in saved.items())
+	):
+		return "Checkpoint belongs to another tenant or user"
+	return ""
+
+
 def context_run_id(context: dict[str, Any]) -> str:
 	run_id = context.get("run_id")
 	if run_id is None:
